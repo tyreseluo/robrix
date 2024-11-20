@@ -5,7 +5,7 @@ live_design! {
     import makepad_widgets::theme_desktop_dark::*;
     import makepad_draw::shader::std::*;
 
-    import crate::shared::styles::*;    
+    import crate::shared::styles::*;
 
     Splitter = <SplitterBase> {
         draw_splitter: {
@@ -90,7 +90,7 @@ live_design! {
             }
         }
     }
-    
+
     TabCloseButton = <TabCloseButtonBase> {
             // TODO: NEEDS FOCUS STATE
         height: 10.0, width: 10.0,

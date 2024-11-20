@@ -72,10 +72,10 @@ live_design! {
     }
 }
 
-
 #[derive(LiveHook, Live, Widget)]
 pub struct JumpToBottomButton {
-    #[deref] view: View,
+    #[deref]
+    view: View,
 }
 
 impl Widget for JumpToBottomButton {
@@ -149,7 +149,6 @@ impl JumpToBottomButton {
             self.redraw(cx);
         }
     }
-
 }
 
 impl JumpToBottomButtonRef {
@@ -168,12 +167,7 @@ impl JumpToBottomButtonRef {
     }
 
     /// See [`JumpToBottomButton::update_from_actions()`].
-    pub fn update_from_actions(
-        &self,
-        cx: &mut Cx,
-        portal_list: &PortalListRef,
-        actions: &Actions,
-    ) {
+    pub fn update_from_actions(&self, cx: &mut Cx, portal_list: &PortalListRef, actions: &Actions) {
         if let Some(mut inner) = self.borrow_mut() {
             inner.update_from_actions(cx, portal_list, actions);
         }

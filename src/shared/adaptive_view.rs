@@ -9,7 +9,7 @@ live_design! {
 
     AdaptiveView = {{AdaptiveView}} {
         width: Fill, height: Fill
-        
+
         Mobile = <View> {}
         Desktop = <View> {}
     }
@@ -17,8 +17,8 @@ live_design! {
 
 /// A widget that adapts its content based on the current context.
 ///
-/// `AdaptiveView` allows you to define different layouts for various conditions, like display context, 
-/// parent size or platform variations, (e.g., desktop vs. mobile) and automatically switches 
+/// `AdaptiveView` allows you to define different layouts for various conditions, like display context,
+/// parent size or platform variations, (e.g., desktop vs. mobile) and automatically switches
 /// between them based on a selector function.
 ///
 /// Optionally retains unused variants to preserve their state
@@ -54,7 +54,7 @@ live_design! {
 /// In this example, the `AdaptiveView` switches between Desktop and Mobile layouts
 /// based on the screen width. The `set_variant_selector` method allows you to define
 /// custom logic for choosing the appropriate layout variant.
-/// 
+///
 /// `AdaptiveView` implements a default variant selector based on the screen width for different
 /// device layouts (Currently `Desktop` and `Mobile`). You can override this through the `set_variant_selector` method.
 ///
@@ -79,11 +79,11 @@ pub struct AdaptiveView {
     previously_active_widgets: HashMap<LiveId, WidgetVariant>,
 
     /// A map of templates that are used to create the active widget.
-    #[rust] 
+    #[rust]
     templates: ComponentMap<LiveId, LivePtr>,
-    
+
     /// The active widget that is currently being displayed.
-    #[rust] 
+    #[rust]
     active_widget: Option<WidgetVariant>,
 
     /// The current variant selector that determines which template to use.
@@ -116,50 +116,63 @@ impl WidgetNode for AdaptiveView {
         }
     }
 
-    fn area(&self)->Area{
+    fn area(&self) -> Area {
         self.area
     }
-    
+
     fn redraw(&mut self, cx: &mut Cx) {
         self.area.redraw(cx);
     }
 
     fn find_widgets(&self, path: &[LiveId], cached: WidgetCache, results: &mut WidgetSet) {
         if let Some(active_widget) = self.active_widget.as_ref() {
-            // Currently we cannot rely on querying nested elements (e.g. `self.ui.button(id!(my_button))`) within an AdaptiveView, 
+            // Currently we cannot rely on querying nested elements (e.g. `self.ui.button(id!(my_button))`) within an AdaptiveView,
             // from a non-AdaptiveView parent. This is becuase higher up in the UI tree other widgets have cached the search result.
-            // Makepad should support a way to prevent caching for scenarios like this. 
+            // Makepad should support a way to prevent caching for scenarios like this.
             // TODO(Julian): We'll add a mechanism in Makepad to clear the cache upawards on template change (e.g. InvalidateCache action).
             active_widget.widget_ref.find_widgets(path, cached, results);
         }
     }
-    
-    fn uid_to_widget(&self, uid:WidgetUid) -> WidgetRef {
+
+    fn uid_to_widget(&self, uid: WidgetUid) -> WidgetRef {
         if let Some(active_widget) = self.active_widget.as_ref() {
             active_widget.widget_ref.uid_to_widget(uid)
-        }
-        else {
+        } else {
             WidgetRef::empty()
         }
     }
 }
 
 impl LiveHook for AdaptiveView {
-    fn before_apply(&mut self, _cx: &mut Cx, apply: &mut Apply, _index: usize, _nodes: &[LiveNode]) {
-        if let ApplyFrom::UpdateFromDoc {..} = apply.from {
+    fn before_apply(
+        &mut self,
+        _cx: &mut Cx,
+        apply: &mut Apply,
+        _index: usize,
+        _nodes: &[LiveNode],
+    ) {
+        if let ApplyFrom::UpdateFromDoc { .. } = apply.from {
             self.templates.clear();
         }
     }
 
     fn after_apply_from(&mut self, cx: &mut Cx, apply: &mut Apply) {
         // Do not override the current selector if we are updating from the doc
-        if let ApplyFrom::UpdateFromDoc {..} = apply.from { return };
+        if let ApplyFrom::UpdateFromDoc { .. } = apply.from {
+            return;
+        };
         self.set_default_variant_selector(cx);
     }
-    
-    fn apply_value_instance(&mut self, cx: &mut Cx, apply: &mut Apply, index: usize, nodes: &[LiveNode]) -> usize {
+
+    fn apply_value_instance(
+        &mut self,
+        cx: &mut Cx,
+        apply: &mut Apply,
+        index: usize,
+        nodes: &[LiveNode],
+    ) -> usize {
         if nodes[index].is_instance_prop() {
-            if let Some(live_ptr) = apply.from.to_live_ptr(cx, index){
+            if let Some(live_ptr) = apply.from.to_live_ptr(cx, index) {
                 let id = nodes[index].id;
                 self.templates.insert(id, live_ptr);
 
@@ -169,8 +182,7 @@ impl LiveHook for AdaptiveView {
                     }
                 }
             }
-        }
-        else {
+        } else {
             cx.apply_error_no_matching_field(live_error_origin!(), index, nodes);
         }
         nodes.skip_node(index)
@@ -186,15 +198,15 @@ impl Widget for AdaptiveView {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
-            if self.should_reapply_selector {
-                let parent_size = cx.peek_walk_turtle(walk).size;
-                self.apply_selector(cx, &parent_size);
-            }
-    
-            if let Some(active_widget) = self.active_widget.as_mut() {
-                active_widget.widget_ref.draw_walk(cx, scope, walk)?;
-            }
-    
+        if self.should_reapply_selector {
+            let parent_size = cx.peek_walk_turtle(walk).size;
+            self.apply_selector(cx, &parent_size);
+        }
+
+        if let Some(active_widget) = self.active_widget.as_mut() {
+            active_widget.widget_ref.draw_walk(cx, scope, walk)?;
+        }
+
         DrawStep::done()
     }
 }
@@ -209,12 +221,12 @@ impl WidgetMatchEvent for AdaptiveView {
                 if cx.has_global::<DisplayContext>() {
                     let current_context = cx.get_global::<DisplayContext>();
                     // TODO(Julian): Optimize this by skipping the update on the same event id for different instances
-                    // We should add an accesor in Makepad for cx.event_id  
+                    // We should add an accesor in Makepad for cx.event_id
                     // if current_context.updated_on_event_id == event_id { return }
                     if current_context.screen_size != ce.new_geom.inner_size {
                         current_context.updated_on_event_id = redraw_id;
                         current_context.screen_size = ce.new_geom.inner_size;
-    
+
                         self.should_reapply_selector = true;
                     }
                 } else {
@@ -236,7 +248,9 @@ impl WidgetMatchEvent for AdaptiveView {
 impl AdaptiveView {
     /// Apply the variant selector to determine which template to use.
     fn apply_selector(&mut self, cx: &mut Cx, parent_size: &DVec2) {
-        let Some(variant_selector) = self.variant_selector.as_mut() else {return};
+        let Some(variant_selector) = self.variant_selector.as_mut() else {
+            return;
+        };
 
         // If there is no global display context, create a default one
         // This will be replaced by having context directly in Cx in Makepad.
@@ -257,7 +271,8 @@ impl AdaptiveView {
         }
 
         // If the selector resulted in a widget that was previously active, restore it
-        if self.retain_unused_variants && self.previously_active_widgets.contains_key(&template_id) {
+        if self.retain_unused_variants && self.previously_active_widgets.contains_key(&template_id)
+        {
             let widget_variant = self.previously_active_widgets.remove(&template_id).unwrap();
 
             self.walk = widget_variant.widget_ref.walk(cx);
@@ -268,27 +283,35 @@ impl AdaptiveView {
         // Create a new widget from the template
         let template = self.templates.get(&template_id).unwrap();
         let widget_ref = WidgetRef::new_from_ptr(cx, Some(*template));
-        
+
         // Update this widget's walk to match the walk of the active widget,
         // this ensures that the new widget is not affected by `Fill` or `Fit` constraints from this parent.
         self.walk = widget_ref.walk(cx);
 
         if let Some(active_widget) = self.active_widget.take() {
             if self.retain_unused_variants {
-                self.previously_active_widgets.insert(active_widget.template_id, active_widget);
+                self.previously_active_widgets
+                    .insert(active_widget.template_id, active_widget);
             }
         }
 
-        self.active_widget = Some(WidgetVariant { template_id, widget_ref });
+        self.active_widget = Some(WidgetVariant {
+            template_id,
+            widget_ref,
+        });
     }
 
-    /// Set a variant selector for this widget. 
+    /// Set a variant selector for this widget.
     /// The selector is a closure that takes a `DisplayContext` and returns a `LiveId`, corresponding to the template to use.
-    pub fn set_variant_selector(&mut self, cx: &mut Cx, selector: impl FnMut(&mut Cx, &DVec2) -> LiveId + 'static) {
+    pub fn set_variant_selector(
+        &mut self,
+        cx: &mut Cx,
+        selector: impl FnMut(&mut Cx, &DVec2) -> LiveId + 'static,
+    ) {
         self.variant_selector = Some(Box::new(selector));
-        
+
         // If we have a global display context, re-apply the variant selector
-        // This should be always done after updating selectors. This is useful for AdaptiveViews 
+        // This should be always done after updating selectors. This is useful for AdaptiveViews
         // spawned after the initial resize event (e.g. PortalList items)
         // In Robrix we know there are parent AdaptiveViews that have already set the global display context,
         // but we'll have to make sure that's the case in Makepad when porting this Widget.
@@ -310,10 +333,16 @@ impl AdaptiveView {
 }
 
 impl AdaptiveViewRef {
-    /// Set a variant selector for this widget. 
+    /// Set a variant selector for this widget.
     /// The selector is a closure that takes a `DisplayContext` and returns a `LiveId`, corresponding to the template to use.
-    pub fn set_variant_selector(&mut self, cx: &mut Cx, selector: impl FnMut(&mut Cx, &DVec2) -> LiveId + 'static) {
-        let Some(mut inner) = self.borrow_mut() else { return };
+    pub fn set_variant_selector(
+        &mut self,
+        cx: &mut Cx,
+        selector: impl FnMut(&mut Cx, &DVec2) -> LiveId + 'static,
+    ) {
+        let Some(mut inner) = self.borrow_mut() else {
+            return;
+        };
         inner.set_variant_selector(cx, selector);
     }
 }

@@ -24,7 +24,7 @@ live_design! {
 
         flow: Down,
         align: {x: 0.0, y: 0.5},
-        
+
         content = <View> {
             width: Fit,
             height: Fit,
@@ -82,12 +82,17 @@ live_design! {
 
 #[derive(Live, LiveHook, Widget)]
 pub struct TypingAnimation {
-    #[deref] view: View,
-    #[animator] animator: Animator,
+    #[deref]
+    view: View,
+    #[animator]
+    animator: Animator,
 
-    #[live(0.65)] animation_duration: f64,
-    #[rust] timer: Timer,
-    #[rust] current_animated_dot: CurrentAnimatedDot,
+    #[live(0.65)]
+    animation_duration: f64,
+    #[rust]
+    timer: Timer,
+    #[rust]
+    current_animated_dot: CurrentAnimatedDot,
 }
 
 #[derive(Copy, Clone, Default)]

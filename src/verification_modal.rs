@@ -1,7 +1,9 @@
 use makepad_widgets::*;
 use matrix_sdk::encryption::verification::Verification;
 
-use crate::verification::{VerificationAction, VerificationRequestActionState, VerificationUserResponse};
+use crate::verification::{
+    VerificationAction, VerificationRequestActionState, VerificationUserResponse,
+};
 
 live_design! {
     import makepad_widgets::base::*;
@@ -75,7 +77,7 @@ live_design! {
                             color: (COLOR_DANGER_RED),
                         }
                         icon_walk: {width: 16, height: 16, margin: {left: -2, right: -1} }
-        
+
                         draw_bg: {
                             border_color: (COLOR_DANGER_RED),
                             color: #fff0f0 // light red
@@ -93,7 +95,7 @@ live_design! {
                             color: (COLOR_ACCEPT_GREEN),
                         }
                         icon_walk: {width: 16, height: 16, margin: {left: -2, right: -1} }
-        
+
                         draw_bg: {
                             border_color: (COLOR_ACCEPT_GREEN),
                             color: #f0fff0 // light green
@@ -111,12 +113,15 @@ live_design! {
 
 #[derive(Live, LiveHook, Widget)]
 pub struct VerificationModal {
-    #[deref] view: View,
-    #[rust] state: Option<VerificationRequestActionState>,
+    #[deref]
+    view: View,
+    #[rust]
+    state: Option<VerificationRequestActionState>,
     /// Whether the modal is in a "final" state,
     /// meaning that the verification process has ended
     /// and that any further interaction with it should close the modal.
-    #[rust(false)] is_final: bool,
+    #[rust(false)]
+    is_final: bool,
 }
 
 #[derive(Clone, Debug, DefaultNone)]
@@ -132,7 +137,8 @@ impl Widget for VerificationModal {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
-        self.view.draw_walk(cx, scope, walk.with_abs_pos(DVec2 { x: 0., y: 0. }))
+        self.view
+            .draw_walk(cx, scope, walk.with_abs_pos(DVec2 { x: 0., y: 0. }))
     }
 }
 
@@ -180,9 +186,10 @@ impl WidgetMatchEvent for VerificationModal {
             if let Some(verification_action) = action.downcast_ref::<VerificationAction>() {
                 match verification_action {
                     VerificationAction::RequestCancelled(cancel_info) => {
-                        self.label(id!(prompt)).set_text(
-                            &format!("Verification request was cancelled: {}", cancel_info.reason())
-                        );
+                        self.label(id!(prompt)).set_text(&format!(
+                            "Verification request was cancelled: {}",
+                            cancel_info.reason()
+                        ));
                         accept_button.set_enabled(true);
                         accept_button.set_text("Ok");
                         cancel_button.set_visible(false);
@@ -192,7 +199,7 @@ impl WidgetMatchEvent for VerificationModal {
                     VerificationAction::RequestAccepted => {
                         self.label(id!(prompt)).set_text(
                             "You successfully accepted the verification request.\n\n\
-                            Waiting for the other device to agree on verification methods..."
+                            Waiting for the other device to agree on verification methods...",
                         );
                         accept_button.set_enabled(false);
                         accept_button.set_text("Waiting...");
@@ -214,9 +221,10 @@ impl WidgetMatchEvent for VerificationModal {
                     }
 
                     VerificationAction::RequestCancelError(error) => {
-                        self.label(id!(prompt)).set_text(
-                            &format!("Error cancelling verification request: {}.", error)
-                        );
+                        self.label(id!(prompt)).set_text(&format!(
+                            "Error cancelling verification request: {}.",
+                            error
+                        ));
                         accept_button.set_enabled(true);
                         accept_button.set_text("Ok");
                         cancel_button.set_visible(false);
@@ -258,7 +266,12 @@ impl WidgetMatchEvent for VerificationModal {
                                 "Keys have been exchanged. Please verify the following emoji:\
                                 \n   {}\n\n\
                                 Do these emoji keys match?",
-                                emoji_list.emojis.iter().map(|em| em.description).collect::<Vec<_>>().join("\n   ")
+                                emoji_list
+                                    .emojis
+                                    .iter()
+                                    .map(|em| em.description)
+                                    .collect::<Vec<_>>()
+                                    .join("\n   ")
                             )
                         } else {
                             format!(
@@ -279,7 +292,7 @@ impl WidgetMatchEvent for VerificationModal {
                     VerificationAction::SasConfirmed => {
                         self.label(id!(prompt)).set_text(
                             "You successfully confirmed the Short Auth String keys.\n\n\
-                            Waiting for the other device to confirm..."
+                            Waiting for the other device to confirm...",
                         );
                         accept_button.set_enabled(false);
                         accept_button.set_text("Waiting...");
@@ -289,9 +302,10 @@ impl WidgetMatchEvent for VerificationModal {
                     }
 
                     VerificationAction::SasConfirmationError(error) => {
-                        self.label(id!(prompt)).set_text(
-                            &format!("Error confirming keys: {}\n\nPlease retry the verification process.", error)
-                        );
+                        self.label(id!(prompt)).set_text(&format!(
+                            "Error confirming keys: {}\n\nPlease retry the verification process.",
+                            error
+                        ));
                         accept_button.set_text("Ok");
                         accept_button.set_enabled(true);
                         cancel_button.set_visible(false);
@@ -299,13 +313,14 @@ impl WidgetMatchEvent for VerificationModal {
                     }
 
                     VerificationAction::RequestCompleted => {
-                        self.label(id!(prompt)).set_text("Verification completed successfully!");
+                        self.label(id!(prompt))
+                            .set_text("Verification completed successfully!");
                         accept_button.set_text("Ok");
                         accept_button.set_enabled(true);
                         cancel_button.set_visible(false);
                         self.is_final = true;
                     }
-                    _ => { }
+                    _ => {}
                 }
                 // If we received a `VerificationAction`, we need to redraw the modal content.
                 needs_redraw = true;
@@ -331,14 +346,13 @@ impl VerificationModal {
             format!("Do you wish to verify your own device?")
         } else {
             if let Some(room_id) = request.room_id() {
-                format!("Do you wish to verify user {} in room {}?",
+                format!(
+                    "Do you wish to verify user {} in room {}?",
                     request.other_user_id(),
                     room_id,
                 )
             } else {
-                format!("Do you wish to verify user {}?",
-                    request.other_user_id()
-                )
+                format!("Do you wish to verify user {}?", request.other_user_id())
             }
         };
         self.label(id!(prompt)).set_text(&prompt_text);

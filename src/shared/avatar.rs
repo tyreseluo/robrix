@@ -1,7 +1,7 @@
 //! An avatar holds either an image thumbnail or a single-character text label.
 //!
 //! The Avatar view (either text or image) is masked by a circle.
-//! 
+//!
 //! By default, an avatar displays the one-character text label.
 //! You can use [AvatarRef::set_text] to set the content of that text label,
 //! or [AvatarRef::show_image] to display an image instead of the text.
@@ -12,7 +12,9 @@ use makepad_widgets::*;
 use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId};
 
 use crate::{
-    profile::user_profile::{AvatarState, ShowUserProfileAction, UserProfile, UserProfileAndRoomId},
+    profile::user_profile::{
+        AvatarState, ShowUserProfileAction, UserProfile, UserProfileAndRoomId,
+    },
     utils,
 };
 
@@ -45,7 +47,7 @@ live_design! {
             show_bg: true,
             draw_bg: {
                 instance background_color: (COLOR_AVATAR_BG)
-                
+
                 fn pixel(self) -> vec4 {
                     let sdf = Sdf2d::viewport(self.pos * self.rect_size);
                     let c = self.rect_size * 0.5;
@@ -54,7 +56,7 @@ live_design! {
                     return sdf.result
                 }
             }
-            
+
             text = <Label> {
                 width: Fit, height: Fit,
                 padding: { top: 0.5 } // for better vertical alignment
@@ -88,12 +90,13 @@ live_design! {
     }
 }
 
-
 #[derive(LiveHook, Live, Widget)]
 pub struct Avatar {
-    #[deref] view: View,
+    #[deref]
+    view: View,
 
-    #[rust] info: Option<UserProfileAndRoomId>,
+    #[rust]
+    info: Option<UserProfileAndRoomId>,
 }
 
 impl Widget for Avatar {
@@ -109,14 +112,16 @@ impl Widget for Avatar {
             Hit::FingerDown(_fde) => {
                 cx.set_key_focus(area);
             }
-            Hit::FingerUp(fue) => if fue.was_tap() {
-                cx.widget_action(
-                    widget_uid,
-                    &scope.path,
-                    ShowUserProfileAction::ShowUserProfile(info),
-                );
+            Hit::FingerUp(fue) => {
+                if fue.was_tap() {
+                    cx.widget_action(
+                        widget_uid,
+                        &scope.path,
+                        ShowUserProfileAction::ShowUserProfile(info),
+                    );
+                }
             }
-            _ =>()
+            _ => (),
         }
     }
 
@@ -126,7 +131,8 @@ impl Widget for Avatar {
 
     fn set_text(&mut self, v: &str) {
         let f = utils::user_name_first_letter(v)
-            .unwrap_or("?").to_uppercase();
+            .unwrap_or("?")
+            .to_uppercase();
         self.label(id!(text_view.text)).set_text(&f);
         self.view(id!(img_view)).set_visible(false);
         self.view(id!(text_view)).set_visible(true);
@@ -149,16 +155,14 @@ impl Avatar {
         info: Option<(OwnedUserId, Option<String>, OwnedRoomId)>,
         username: T,
     ) {
-        self.info = info.map(|(user_id, username, room_id)|
-            UserProfileAndRoomId {
-                user_profile: UserProfile {
-                    user_id,
-                    username,
-                    avatar_state: AvatarState::Unknown,
-                },
-                room_id,
-            }
-        );
+        self.info = info.map(|(user_id, username, room_id)| UserProfileAndRoomId {
+            user_profile: UserProfile {
+                user_id,
+                username,
+                avatar_state: AvatarState::Unknown,
+            },
+            room_id,
+        });
         self.set_text(username.as_ref());
     }
 
@@ -179,7 +183,8 @@ impl Avatar {
         info: Option<(OwnedUserId, Option<String>, OwnedRoomId, Arc<[u8]>)>,
         image_set_function: F,
     ) -> Result<(), E>
-        where F: FnOnce(ImageRef) -> Result<(), E>
+    where
+        F: FnOnce(ImageRef) -> Result<(), E>,
     {
         let img_ref = self.image(id!(img_view.img));
         let res = image_set_function(img_ref);
@@ -187,15 +192,15 @@ impl Avatar {
             self.view(id!(img_view)).set_visible(true);
             self.view(id!(text_view)).set_visible(false);
 
-            self.info = info.map(|(user_id, username, room_id, img_data)|
-                UserProfileAndRoomId {
+            self.info = info.map(
+                |(user_id, username, room_id, img_data)| UserProfileAndRoomId {
                     user_profile: UserProfile {
                         user_id,
                         username,
                         avatar_state: AvatarState::Loaded(img_data),
                     },
                     room_id,
-                }
+                },
             );
         }
         res
@@ -229,7 +234,8 @@ impl AvatarRef {
         info: Option<(OwnedUserId, Option<String>, OwnedRoomId, Arc<[u8]>)>,
         image_set_function: F,
     ) -> Result<(), E>
-        where F: FnOnce(ImageRef) -> Result<(), E>
+    where
+        F: FnOnce(ImageRef) -> Result<(), E>,
     {
         if let Some(mut inner) = self.borrow_mut() {
             inner.show_image(info, image_set_function)
@@ -245,7 +251,7 @@ impl AvatarRef {
         } else {
             AvatarDisplayStatus::Text
         }
-    }    
+    }
 }
 
 /// What an Avatar instance is currently displaying.

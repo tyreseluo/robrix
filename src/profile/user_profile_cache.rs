@@ -1,7 +1,13 @@
 use crossbeam_queue::SegQueue;
 use makepad_widgets::{log, warning, Cx, SignalToUI};
-use matrix_sdk::{room::RoomMember, ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId}};
-use std::{cell::RefCell, collections::{btree_map::Entry, BTreeMap}};
+use matrix_sdk::{
+    room::RoomMember,
+    ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId},
+};
+use std::{
+    cell::RefCell,
+    collections::{btree_map::Entry, BTreeMap},
+};
 
 use crate::profile::user_profile::AvatarState;
 
@@ -62,7 +68,11 @@ impl UserProfileUpdate {
     #[allow(unused)]
     fn apply_to_current_pane(&self, info: &mut UserProfilePaneInfo) -> bool {
         match self {
-            UserProfileUpdate::Full { new_profile, room_id, room_member } => {
+            UserProfileUpdate::Full {
+                new_profile,
+                room_id,
+                room_member,
+            } => {
                 if info.user_id == new_profile.user_id {
                     info.profile_and_room_id.user_profile = new_profile.clone();
                     if &info.room_id == room_id {
@@ -71,7 +81,10 @@ impl UserProfileUpdate {
                     return true;
                 }
             }
-            UserProfileUpdate::RoomMemberOnly { room_id, room_member } => {
+            UserProfileUpdate::RoomMemberOnly {
+                room_id,
+                room_member,
+            } => {
                 log!("Applying RoomMemberOnly update to user profile pane info: user_id={}, room_id={}, ignored={}",
                     room_member.user_id(), room_id, room_member.is_ignored(),
                 );
@@ -94,26 +107,31 @@ impl UserProfileUpdate {
     /// Applies this update to the given user profile info cache.
     fn apply_to_cache(self, cache: &mut BTreeMap<OwnedUserId, UserProfileCacheEntry>) {
         match self {
-            UserProfileUpdate::Full { new_profile, room_id, room_member } => {
-                match cache.entry(new_profile.user_id.to_owned()) {
-                    Entry::Occupied(mut entry) => {
-                        let entry_mut = entry.get_mut();
-                        entry_mut.user_profile = new_profile;
-                        entry_mut.room_members.insert(room_id, room_member);
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(UserProfileCacheEntry {
-                            user_profile: new_profile,
-                            room_members: {
-                                let mut room_members_map = BTreeMap::new();
-                                room_members_map.insert(room_id, room_member);
-                                room_members_map
-                            },
-                        });
-                    }
+            UserProfileUpdate::Full {
+                new_profile,
+                room_id,
+                room_member,
+            } => match cache.entry(new_profile.user_id.to_owned()) {
+                Entry::Occupied(mut entry) => {
+                    let entry_mut = entry.get_mut();
+                    entry_mut.user_profile = new_profile;
+                    entry_mut.room_members.insert(room_id, room_member);
                 }
-            }
-            UserProfileUpdate::RoomMemberOnly { room_id, room_member } => {
+                Entry::Vacant(entry) => {
+                    entry.insert(UserProfileCacheEntry {
+                        user_profile: new_profile,
+                        room_members: {
+                            let mut room_members_map = BTreeMap::new();
+                            room_members_map.insert(room_id, room_member);
+                            room_members_map
+                        },
+                    });
+                }
+            },
+            UserProfileUpdate::RoomMemberOnly {
+                room_id,
+                room_member,
+            } => {
                 match cache.entry(room_member.user_id().to_owned()) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().room_members.insert(room_id, room_member);
@@ -125,7 +143,9 @@ impl UserProfileUpdate {
                             user_profile: UserProfile {
                                 user_id: room_member.user_id().to_owned(),
                                 username: None,
-                                avatar_state: AvatarState::Known(room_member.avatar_url().map(|url| url.to_owned())),
+                                avatar_state: AvatarState::Known(
+                                    room_member.avatar_url().map(|url| url.to_owned()),
+                                ),
                             },
                             room_members: {
                                 let mut room_members_map = BTreeMap::new();
@@ -192,9 +212,8 @@ where
 /// must only be called by the main UI thread.
 #[allow(unused)]
 pub fn get_user_profile(_cx: &mut Cx, user_id: &UserId) -> Option<UserProfile> {
-    USER_PROFILE_CACHE.with_borrow(|cache| {
-        cache.get(user_id).map(|entry| entry.user_profile.clone())
-    })
+    USER_PROFILE_CACHE
+        .with_borrow(|cache| cache.get(user_id).map(|entry| entry.user_profile.clone()))
 }
 
 /// Returns a clone of the cached user profile for the given user ID
@@ -208,7 +227,7 @@ pub fn get_user_profile_and_room_member(
     user_id: &UserId,
     room_id: &RoomId,
 ) -> (Option<UserProfile>, Option<RoomMember>) {
-    USER_PROFILE_CACHE.with_borrow(|cache|
+    USER_PROFILE_CACHE.with_borrow(|cache| {
         if let Some(entry) = cache.get(user_id) {
             (
                 Some(entry.user_profile.clone()),
@@ -217,7 +236,7 @@ pub fn get_user_profile_and_room_member(
         } else {
             (None, None)
         }
-    )
+    })
 }
 
 /// Returns a clone of the cached room member info for the given user ID and room ID,
@@ -231,8 +250,9 @@ pub fn get_user_room_member_info(
     user_id: &UserId,
     room_id: &RoomId,
 ) -> Option<RoomMember> {
-    USER_PROFILE_CACHE.with_borrow(|cache|
-        cache.get(user_id)
+    USER_PROFILE_CACHE.with_borrow(|cache| {
+        cache
+            .get(user_id)
             .and_then(|entry| entry.room_members.get(room_id).cloned())
-    )
+    })
 }

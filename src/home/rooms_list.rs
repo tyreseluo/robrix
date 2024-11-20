@@ -1,9 +1,12 @@
-use std::{collections::HashMap, ops::Deref};
 use crossbeam_queue::SegQueue;
 use makepad_widgets::*;
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedRoomId};
+use std::{collections::HashMap, ops::Deref};
 
-use crate::{app::AppState, sliding_sync::{submit_async_request, MatrixRequest, PaginationDirection}};
+use crate::{
+    app::AppState,
+    sliding_sync::{submit_async_request, MatrixRequest, PaginationDirection},
+};
 
 use super::room_preview::RoomPreviewAction;
 
@@ -23,7 +26,7 @@ live_design! {
     import crate::shared::helpers::*;
     import crate::shared::avatar::Avatar;
     import crate::shared::html_or_plaintext::HtmlOrPlaintext;
-    
+
     import crate::home::room_preview::*;
 
     // An empty view that takes up no space in the portal list.
@@ -67,7 +70,6 @@ live_design! {
     }
 }
 
-
 /// The possible updates that should be displayed by the single list of all rooms.
 ///
 /// These updates are enqueued by the `enqueue_rooms_list_update` function
@@ -78,7 +80,7 @@ pub enum RoomsListUpdate {
     NotLoaded,
     /// Some rooms were loaded, and the server optionally told us
     /// the max number of rooms that will ever be loaded.
-    LoadedRooms{ max_rooms: Option<u32> },
+    LoadedRooms { max_rooms: Option<u32> },
     /// Add a new room to the list of all rooms.
     AddRoom(RoomPreviewEntry),
     /// Clear all rooms in the list of all rooms.
@@ -103,9 +105,7 @@ pub enum RoomsListUpdate {
     /// Remove the given room from the list of all rooms.
     RemoveRoom(OwnedRoomId),
     /// Update the status label at the bottom of the list of all rooms.
-    Status {
-        status: String,
-    },
+    Status { status: String },
 }
 
 static PENDING_ROOM_UPDATES: SegQueue<RoomsListUpdate> = SegQueue::new();
@@ -118,7 +118,6 @@ pub fn enqueue_rooms_list_update(update: RoomsListUpdate) {
 }
 
 pub type RoomIndex = usize;
-
 
 #[derive(Debug, Clone, DefaultNone)]
 pub enum RoomListAction {
@@ -194,40 +193,52 @@ impl Deref for RoomDisplayFilter {
 
 #[derive(Live, LiveHook, Widget)]
 pub struct RoomsList {
-    #[deref] view: View,
+    #[deref]
+    view: View,
 
     /// The single set of all known rooms and their cached preview info.
-    #[rust] all_rooms: HashMap<OwnedRoomId, RoomPreviewEntry>,
+    #[rust]
+    all_rooms: HashMap<OwnedRoomId, RoomPreviewEntry>,
 
     /// The currently-active filter function for the list of rooms.
     ///
     /// Note: for performance reasons, this does not get automatically applied
     /// when its value changes. Instead, you must manually invoke it on the set of `all_rooms`
     /// in order to update the set of `displayed_rooms` accordingly.
-    #[rust] display_filter: RoomDisplayFilter,
-    
+    #[rust]
+    display_filter: RoomDisplayFilter,
+
     /// The list of rooms currently displayed in the UI, in order from top to bottom.
     /// This must be a strict subset of the rooms present in `all_rooms`, and should be determined
     /// by applying the `display_filter` to the set of `all_rooms``.
-    #[rust] displayed_rooms: Vec<OwnedRoomId>,
+    #[rust]
+    displayed_rooms: Vec<OwnedRoomId>,
 
     /// Maps the WidgetUid of a `RoomPreview` to that room's index in the `displayed_rooms` vector.
     ///
     /// NOTE: this should only be modified by the draw routine, not anything else.
-    #[rust] displayed_rooms_map: HashMap<WidgetUid, usize>,
+    #[rust]
+    displayed_rooms_map: HashMap<WidgetUid, usize>,
 
     /// The latest status message that should be displayed in the bottom status label.
-    #[rust] status: String,
+    #[rust]
+    status: String,
     /// The index of the currently-selected room.
-    #[rust] current_active_room_index: Option<usize>,
+    #[rust]
+    current_active_room_index: Option<usize>,
     /// The maximum number of rooms that will ever be loaded.
-    #[rust] max_known_rooms: Option<u32>,
+    #[rust]
+    max_known_rooms: Option<u32>,
 }
 
 impl RoomsList {
     fn update_status_rooms_count(&mut self) {
         self.status = if let Some(max_rooms) = self.max_known_rooms {
-            format!("Loaded {} of {} total rooms.", self.all_rooms.len(), max_rooms)
+            format!(
+                "Loaded {} of {} total rooms.",
+                self.all_rooms.len(),
+                max_rooms
+            )
         } else {
             format!("Loaded {} rooms.", self.all_rooms.len())
         };
@@ -261,14 +272,21 @@ impl Widget for RoomsList {
                             error!("Error: couldn't find room {room_id} to update avatar");
                         }
                     }
-                    RoomsListUpdate::UpdateLatestEvent { room_id, timestamp, latest_message_text } => {
+                    RoomsListUpdate::UpdateLatestEvent {
+                        room_id,
+                        timestamp,
+                        latest_message_text,
+                    } => {
                         if let Some(room) = self.all_rooms.get_mut(&room_id) {
                             room.latest = Some((timestamp, latest_message_text));
                         } else {
                             error!("Error: couldn't find room {room_id} to update latest event");
                         }
                     }
-                    RoomsListUpdate::UpdateRoomName { room_id, new_room_name } => {
+                    RoomsListUpdate::UpdateRoomName {
+                        room_id,
+                        new_room_name,
+                    } => {
                         if let Some(room) = self.all_rooms.get_mut(&room_id) {
                             let was_displayed = (self.display_filter)(&room);
                             room.room_name = Some(new_room_name);
@@ -293,9 +311,9 @@ impl Widget for RoomsList {
                     RoomsListUpdate::RemoveRoom(room_id) => {
                         self.all_rooms
                             .remove(&room_id)
-                            .and_then(|_removed|
+                            .and_then(|_removed| {
                                 self.displayed_rooms.iter().position(|r| r == &room_id)
-                            )
+                            })
                             .map(|index_to_remove| {
                                 // Remove the room from the list of displayed rooms.
                                 self.displayed_rooms.remove(index_to_remove);
@@ -329,7 +347,10 @@ impl Widget for RoomsList {
                 }
             }
             if num_updates > 0 {
-                log!("RoomsList: processed {} updates to the list of all rooms", num_updates);
+                log!(
+                    "RoomsList: processed {} updates to the list of all rooms",
+                    num_updates
+                );
                 self.redraw(cx);
             }
         }
@@ -340,15 +361,19 @@ impl Widget for RoomsList {
             if let RoomPreviewAction::Click = list_action.as_widget_action().cast() {
                 let widget_action = list_action.as_widget_action();
 
-                let Some(displayed_room_index) = self.displayed_rooms_map
+                let Some(displayed_room_index) = self
+                    .displayed_rooms_map
                     .iter()
-                    .find(|&(&room_widget_uid, _)| widget_action.widget_uid_eq(room_widget_uid).is_some())
+                    .find(|&(&room_widget_uid, _)| {
+                        widget_action.widget_uid_eq(room_widget_uid).is_some()
+                    })
                     .map(|(_, &room_index)| room_index)
                 else {
                     error!("BUG: couldn't find displayed index of clicked room for widget action {widget_action:?}");
                     continue;
                 };
-                let Some(room_details) = self.displayed_rooms
+                let Some(room_details) = self
+                    .displayed_rooms
                     .get(displayed_room_index)
                     .and_then(|room_id| self.all_rooms.get(room_id))
                 else {
@@ -364,13 +389,12 @@ impl Widget for RoomsList {
                         room_index: displayed_room_index,
                         room_id: room_details.room_id.to_owned(),
                         room_name: room_details.room_name.clone(),
-                    }
+                    },
                 );
                 self.redraw(cx);
             }
         }
     }
-
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
         let app_state = scope.data.get_mut::<AppState>().unwrap();
@@ -390,7 +414,9 @@ impl Widget for RoomsList {
         while let Some(list_item) = self.view.draw_walk(cx, scope, walk).step() {
             // We only care about drawing the portal list.
             let portal_list_ref = list_item.as_portal_list();
-            let Some(mut list) = portal_list_ref.borrow_mut() else { continue };
+            let Some(mut list) = portal_list_ref.borrow_mut() else {
+                continue;
+            };
 
             // Add 1 for the status label at the bottom.
             list.set_item_range(cx, 0, count + 1);
@@ -399,7 +425,8 @@ impl Widget for RoomsList {
                 let mut scope = Scope::empty();
 
                 // Draw the room preview for each room in the `displayed_rooms` list.
-                let room_to_draw = self.displayed_rooms
+                let room_to_draw = self
+                    .displayed_rooms
                     .get(item_id)
                     .and_then(|room_id| self.all_rooms.get_mut(room_id));
                 let item = if let Some(room_info) = room_to_draw {
@@ -424,10 +451,13 @@ impl Widget for RoomsList {
                 // Draw the status label as the bottom entry.
                 else if item_id == status_label_id {
                     let item = list.item(cx, item_id, live_id!(status_label));
-                    item.as_view().apply_over(cx, live!{
-                        height: Fit,
-                        label = { text: (&self.status) }
-                    });
+                    item.as_view().apply_over(
+                        cx,
+                        live! {
+                            height: Fit,
+                            label = { text: (&self.status) }
+                        },
+                    );
                     item
                 }
                 // Draw a filler entry to take up space at the bottom of the portal list.
@@ -441,5 +471,4 @@ impl Widget for RoomsList {
 
         DrawStep::done()
     }
-
 }

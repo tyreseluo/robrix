@@ -2,7 +2,10 @@ use std::{borrow::Cow, time::SystemTime};
 
 use chrono::{DateTime, Duration, Local, TimeZone};
 use makepad_widgets::{error, image_cache::ImageError, Cx, ImageRef};
-use matrix_sdk::{media::{MediaFormat, MediaThumbnailSettings, MediaThumbnailSize}, ruma::{api::client::media::get_content_thumbnail::v3::Method, MilliSecondsSinceUnixEpoch}};
+use matrix_sdk::{
+    media::{MediaFormat, MediaThumbnailSettings, MediaThumbnailSize},
+    ruma::{api::client::media::get_content_thumbnail::v3::Method, MilliSecondsSinceUnixEpoch},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImageFormat {
@@ -24,7 +27,6 @@ impl ImageFormat {
 ///
 /// Returns an error if either load fails or if the image format is unknown.
 pub fn load_png_or_jpg(img: &ImageRef, cx: &mut Cx, data: &[u8]) -> Result<(), ImageError> {
-
     fn attempt_both(img: &ImageRef, cx: &mut Cx, data: &[u8]) -> Result<(), ImageError> {
         img.load_png_from_data(cx, data)
             .or_else(|_| img.load_jpg_from_data(cx, data))
@@ -51,20 +53,27 @@ pub fn load_png_or_jpg(img: &ImageRef, cx: &mut Cx, data: &[u8]) -> Result<(), I
     if let Err(err) = res.as_ref() {
         // debugging: dump out the avatar image to disk
         let mut path = crate::temp_storage::get_temp_dir_path().clone();
-        let filename = format!("img_{}",
-            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(),
+        let filename = format!(
+            "img_{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
         );
         path.push(filename);
         path.set_extension("unknown");
-        error!("Failed to load PNG/JPG: {err}. Dumping bad image: {:?}", path);
-        std::fs::write(path, &data)
-            .expect("Failed to write user avatar image to disk");
+        error!(
+            "Failed to load PNG/JPG: {err}. Dumping bad image: {:?}",
+            path
+        );
+        std::fs::write(path, &data).expect("Failed to write user avatar image to disk");
     }
     res
 }
 
-
-pub fn unix_time_millis_to_datetime(millis: &MilliSecondsSinceUnixEpoch) -> Option<DateTime<Local>> {
+pub fn unix_time_millis_to_datetime(
+    millis: &MilliSecondsSinceUnixEpoch,
+) -> Option<DateTime<Local>> {
     let millis: i64 = millis.get().into();
     Local.timestamp_millis_opt(millis).single()
 }
@@ -95,7 +104,11 @@ pub fn relative_format(millis: &MilliSecondsSinceUnixEpoch) -> Option<String> {
     if duration < Duration::seconds(60) {
         Some("Now".to_string())
     } else if duration < Duration::minutes(60) {
-        let minutes_text = if duration.num_minutes() == 1 { "min" } else { "mins" };
+        let minutes_text = if duration.num_minutes() == 1 {
+            "min"
+        } else {
+            "mins"
+        };
         Some(format!("{} {} ago", duration.num_minutes(), minutes_text))
     } else if duration < Duration::hours(24) && now.date_naive() == datetime.date_naive() {
         Some(format!("{}", datetime.format("%H:%M"))) // "HH:MM" format for today
@@ -117,12 +130,8 @@ pub fn relative_format(millis: &MilliSecondsSinceUnixEpoch) -> Option<String> {
 /// skipping any leading "@" characters.
 pub fn user_name_first_letter(user_name: &str) -> Option<&str> {
     use unicode_segmentation::UnicodeSegmentation;
-    user_name
-        .graphemes(true)
-        .filter(|&g| g != "@")
-        .next()
+    user_name.graphemes(true).filter(|&g| g != "@").next()
 }
-
 
 /// A const-compatible version of [`MediaFormat`].
 #[derive(Clone, Debug)]
@@ -179,24 +188,20 @@ impl From<MediaThumbnailSizeConst> for MediaThumbnailSize {
 }
 
 /// The default media format to use for thumbnail requests.
-pub const MEDIA_THUMBNAIL_FORMAT: MediaFormatConst = MediaFormatConst::Thumbnail(
-    MediaThumbnailSettingsConst {
+pub const MEDIA_THUMBNAIL_FORMAT: MediaFormatConst =
+    MediaFormatConst::Thumbnail(MediaThumbnailSettingsConst {
         size: MediaThumbnailSizeConst {
             method: Method::Scale,
             width: 40,
             height: 40,
         },
         animated: false,
-    }
-);
-
+    });
 
 /// Looks for bare links in the given `text` and converts them into proper HTML links.
 pub fn linkify<'s>(text: &'s str) -> Cow<'s, str> {
     use linkify::{LinkFinder, LinkKind};
-    let mut links = LinkFinder::new()
-        .links(text)
-        .peekable();
+    let mut links = LinkFinder::new().links(text).peekable();
     if links.peek().is_none() {
         return Cow::Borrowed(text);
     }
@@ -206,9 +211,9 @@ pub fn linkify<'s>(text: &'s str) -> Cow<'s, str> {
     for link in links {
         let link_txt = link.as_str();
         // Only linkify the URL if it's not already part of an HTML href attribute.
-        let is_link_within_href_attr = text.get(..link.start())
-            .map_or(false, ends_with_href);
-        let is_link_within_html_tag = text.get(link.end() ..)
+        let is_link_within_href_attr = text.get(..link.start()).map_or(false, ends_with_href);
+        let is_link_within_html_tag = text
+            .get(link.end()..)
             .map_or(false, |after| after.trim_end().starts_with("</a>"));
 
         if is_link_within_href_attr || is_link_within_html_tag {
@@ -241,7 +246,6 @@ pub fn linkify<'s>(text: &'s str) -> Cow<'s, str> {
     Cow::Owned(linkified_text)
 }
 
-
 /// Returns true if the given `text` string ends with a valid href attribute opener.
 ///
 /// An href attribute looks like this: `href="http://example.com"`,.
@@ -257,7 +261,7 @@ pub fn ends_with_href(text: &str) -> bool {
     match substr.as_bytes().last() {
         Some(b'\'') | Some(b'"') => {
             if substr
-                .get(.. substr.len().saturating_sub(1))
+                .get(..substr.len().saturating_sub(1))
                 .map(|s| {
                     substr = s.trim_end();
                     substr.as_bytes().last() == Some(&b'=')
@@ -279,8 +283,6 @@ pub fn ends_with_href(text: &str) -> bool {
     substr.trim_end().ends_with("href")
 }
 
-
-
 #[cfg(test)]
 mod tests_linkify {
     use super::*;
@@ -294,7 +296,8 @@ mod tests_linkify {
     #[test]
     fn test_linkify1() {
         let text = "Check out this website: https://example.com";
-        let expected = "Check out this website: <a href=\"https://example.com\">https://example.com</a>";
+        let expected =
+            "Check out this website: <a href=\"https://example.com\">https://example.com</a>";
         let actual = linkify(text);
         println!("{:?}", actual.as_ref());
         assert_eq!(actual.as_ref(), expected);
@@ -323,7 +326,6 @@ mod tests_linkify {
         println!("{:?}", actual.as_ref());
         assert_eq!(actual.as_ref(), expected);
     }
-
 
     #[test]
     fn test_linkify5() {
@@ -369,7 +371,6 @@ mod tests_linkify {
         assert_eq!(linkify(text).as_ref(), expected);
     }
 
-
     #[test]
     fn test_linkify11() {
         let text = "And then https://google.com call <a href=\"https://doc.rust-lang.org/std/io/trait.BufRead.html#method.read_until\"><code>read_until</code></a> or other <code>BufRead</code> methods.";
@@ -386,8 +387,10 @@ mod tests_linkify {
 
     #[test]
     fn test_linkify13() {
-        let text = "Check out this website: <a href=\"https://example.com\">https://example.com</a>";
-        let expected = "Check out this website: <a href=\"https://example.com\">https://example.com</a>";
+        let text =
+            "Check out this website: <a href=\"https://example.com\">https://example.com</a>";
+        let expected =
+            "Check out this website: <a href=\"https://example.com\">https://example.com</a>";
         assert_eq!(linkify(text).as_ref(), expected);
     }
 }

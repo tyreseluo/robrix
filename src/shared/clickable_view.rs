@@ -24,14 +24,16 @@ impl Widget for ClickableView {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         let uid = self.widget_uid().clone();
 
-        match event.hits(cx, self.view.area()){
+        match event.hits(cx, self.view.area()) {
             Hit::FingerDown(_fe) => {
                 cx.set_key_focus(self.view.area());
             }
-            Hit::FingerUp(fe) => if fe.was_tap() {
-                cx.widget_action(uid, &scope.path, ClickableViewAction::Click);
+            Hit::FingerUp(fe) => {
+                if fe.was_tap() {
+                    cx.widget_action(uid, &scope.path, ClickableViewAction::Click);
+                }
             }
-            _ =>()
+            _ => (),
         }
     }
 

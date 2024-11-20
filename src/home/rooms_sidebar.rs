@@ -163,7 +163,7 @@ live_design! {
             padding: {top: 17., left: 17., right: 17.}
             flow: Down, spacing: 7
             width: Fill, height: Fill
-        }        
+        }
     }
 }
 
@@ -177,7 +177,7 @@ impl Widget for RoomsView {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         self.view.handle_event(cx, event, scope);
     }
-    
+
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
         self.view.draw_walk(cx, scope, walk)
     }

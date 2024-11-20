@@ -13,7 +13,7 @@ live_design! {
     import crate::shared::styles::*;
 
     TextOrImage = {{TextOrImage}} {
-        width: Fill, height: Fit, 
+        width: Fill, height: Fit,
         text_view: <View> {
             width: Fill, height: Fit,
             label = <Label> {
@@ -36,7 +36,6 @@ live_design! {
     }
 }
 
-
 /// A view that holds an image or text content, and can switch between the two.
 ///
 /// This is useful for displaying alternate text when an image is not (yet) available
@@ -44,13 +43,21 @@ live_design! {
 /// is being fetched.
 #[derive(Live, Widget, LiveHook)]
 pub struct TextOrImage {
-    #[redraw] #[live] text_view: View,
-    #[redraw] #[live] image_view: View,
-    #[walk] walk: Walk,
-    #[layout] layout: Layout,
-    #[rust] status: TextOrImageStatus,
+    #[redraw]
+    #[live]
+    text_view: View,
+    #[redraw]
+    #[live]
+    image_view: View,
+    #[walk]
+    walk: Walk,
+    #[layout]
+    layout: Layout,
+    #[rust]
+    status: TextOrImageStatus,
     // #[rust(TextOrImageStatus::Text)] status: TextOrImageStatus,
-    #[rust] size_in_pixels: (usize, usize),
+    #[rust]
+    size_in_pixels: (usize, usize),
 }
 
 impl Widget for TextOrImage {
@@ -63,9 +70,9 @@ impl Widget for TextOrImage {
         walk.width = Size::Fixed(self.size_in_pixels.0 as f64 / cx.current_dpi_factor());
         walk.height = Size::Fixed(self.size_in_pixels.1 as f64 / cx.current_dpi_factor());
         cx.begin_turtle(walk, self.layout);
-        match self.status{
+        match self.status {
             TextOrImageStatus::Image => self.image_view.draw_all(cx, scope),
-            TextOrImageStatus::Text  => self.text_view.draw_all(cx, scope),
+            TextOrImageStatus::Text => self.text_view.draw_all(cx, scope),
         }
         cx.end_turtle();
         DrawStep::done()
@@ -92,7 +99,8 @@ impl TextOrImage {
     ///      in pixels as a tuple, `(width, height)`.
     ///    * If `image_set_function` returns an error, no change is made to this `TextOrImage`.
     pub fn show_image<F, E>(&mut self, image_set_function: F) -> Result<(), E>
-        where F: FnOnce(ImageRef) -> Result<(usize, usize), E>
+    where
+        F: FnOnce(ImageRef) -> Result<(usize, usize), E>,
     {
         let img_ref = self.image_view.image(id!(image));
         match image_set_function(img_ref) {
@@ -121,7 +129,8 @@ impl TextOrImageRef {
 
     /// See [TextOrImage::show_image()].
     pub fn show_image<F, E>(&self, image_set_function: F) -> Result<(), E>
-        where F: FnOnce(ImageRef) -> Result<(usize, usize), E>
+    where
+        F: FnOnce(ImageRef) -> Result<(usize, usize), E>,
     {
         if let Some(mut inner) = self.borrow_mut() {
             inner.show_image(image_set_function)

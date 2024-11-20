@@ -3,9 +3,9 @@ use matrix_sdk::ruma::OwnedRoomId;
 
 use crate::{
     home::{main_desktop_ui::RoomsPanelAction, rooms_list::RoomListAction},
+    login::login_screen::LoginAction,
     verification::VerificationAction,
     verification_modal::{VerificationModalAction, VerificationModalWidgetRefExt},
-    login::login_screen::LoginAction,
 };
 
 live_design! {
@@ -160,7 +160,7 @@ impl LiveRegister for App {
 }
 
 impl LiveHook for App {
-    fn after_update_from_doc(&mut self, _cx:&mut Cx) {
+    fn after_update_from_doc(&mut self, _cx: &mut Cx) {
         self.update_login_visibility();
     }
 }
@@ -203,36 +203,37 @@ impl MatchEvent for App {
                     cx.widget_action(
                         widget_uid,
                         &Scope::default().path,
-                        StackNavigationAction::NavigateTo(live_id!(main_content_view))
+                        StackNavigationAction::NavigateTo(live_id!(main_content_view)),
                     );
                     self.ui.redraw(cx);
                 }
-                RoomListAction::None => { }
+                RoomListAction::None => {}
             }
 
             match action.as_widget_action().cast() {
                 RoomsPanelAction::RoomFocused(room_id) => {
                     self.app_state.rooms_panel.selected_room = Some(SelectedRoom {
                         id: room_id.clone(),
-                        name: None
+                        name: None,
                     });
                 }
                 RoomsPanelAction::FocusNone => {
                     self.app_state.rooms_panel.selected_room = None;
                 }
-                _ => { }
+                _ => {}
             }
 
             // `VerificationAction`s come from a background thread, so they are NOT widget actions.
             // Therefore, we cannot use `as_widget_action().cast()` to match them.
             match action.downcast_ref() {
                 Some(VerificationAction::RequestReceived(state)) => {
-                    self.ui.verification_modal(id!(verification_modal_inner))
+                    self.ui
+                        .verification_modal(id!(verification_modal_inner))
                         .initialize_with_data(state.clone());
                     self.ui.modal(id!(verification_modal)).open(cx);
                 }
                 // other verification actions are handled by the verification modal itself.
-                _ => { }
+                _ => {}
             }
 
             if let VerificationModalAction::Close = action.as_widget_action().cast() {
@@ -278,8 +279,12 @@ impl AppMain for App {
 impl App {
     fn update_login_visibility(&self) {
         let login_visible = !self.app_state.logged_in;
-        self.ui.view(id!(login_screen_view)).set_visible(login_visible);
-        self.ui.view(id!(home_screen_view)).set_visible(!login_visible);
+        self.ui
+            .view(id!(login_screen_view))
+            .set_visible(login_visible);
+        self.ui
+            .view(id!(home_screen_view))
+            .set_visible(!login_visible);
     }
 }
 
@@ -299,4 +304,3 @@ pub struct SelectedRoom {
     pub id: OwnedRoomId,
     pub name: Option<String>,
 }
-

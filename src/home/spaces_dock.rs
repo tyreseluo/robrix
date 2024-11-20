@@ -118,7 +118,7 @@ live_design! {
             <Separator> {}
 
             <Home> {}
-            
+
             <Filler> {}
 
             <Settings> {}
@@ -137,15 +137,15 @@ live_design! {
             <Filler> {}
 
             <Profile> {}
-    
+
             <Filler> {}
-    
+
             <Home> {}
-            
+
             <Filler> {}
-    
+
             <Settings> {}
-    
+
             <Filler> {}
         }
     }

@@ -68,7 +68,7 @@ pub struct MainDesktopUI {
     #[rust]
     room_order: Vec<OwnedRoomId>,
 
-    /// The most recently selected room, used to prevent re-selecting the same room in Dock 
+    /// The most recently selected room, used to prevent re-selecting the same room in Dock
     /// which would trigger redraw of whole Widget.
     #[rust]
     most_recently_selected_room: Option<OwnedRoomId>,
@@ -90,9 +90,8 @@ impl Widget for MainDesktopUI {
 
         if let Some(tab_id) = self.tab_to_close {
             if let Some(room_id) = self.open_rooms.get(&tab_id) {
-                self.room_order.remove(
-                    self.room_order.iter().position(|id| id == room_id).unwrap()
-                );
+                self.room_order
+                    .remove(self.room_order.iter().position(|id| id == room_id).unwrap());
 
                 if self.open_rooms.len() > 1 {
                     // if the closing tab is the active one, then focus the next room
@@ -102,7 +101,7 @@ impl Widget for MainDesktopUI {
                             if let Some(new_focused_room_id) = self.room_order.last() {
                                 // notify the app state about the new focused room
                                 cx.widget_action(
-                                    self.widget_uid(),  
+                                    self.widget_uid(),
                                     &scope.path,
                                     RoomsPanelAction::RoomFocused(new_focused_room_id.clone()),
                                 );
@@ -110,7 +109,7 @@ impl Widget for MainDesktopUI {
                                 // set the new selected room to be used in the current draw
                                 new_selected_room = Some(SelectedRoom {
                                     id: new_focused_room_id.clone(),
-                                    name: None
+                                    name: None,
                                 });
                             }
                         }
@@ -118,16 +117,12 @@ impl Widget for MainDesktopUI {
                 } else {
                     // if there is no room to focus, reset the selected room in the app state
                     // app_state.rooms_panel.selected_room = None;
-                    cx.widget_action(
-                        self.widget_uid(),
-                        &scope.path,
-                        RoomsPanelAction::FocusNone,
-                    );
+                    cx.widget_action(self.widget_uid(), &scope.path, RoomsPanelAction::FocusNone);
 
                     focus_reset = true;
                     dock.select_tab(cx, live_id!(home_tab));
-                } 
-            } 
+                }
+            }
             dock.close_tab(cx, tab_id);
             self.tab_to_close = None;
             self.open_rooms.remove(&tab_id);
@@ -154,7 +149,9 @@ impl MainDesktopUI {
 
         // Early return if the room to select is already created and focused.
         if let Some(room_id) = &self.most_recently_selected_room {
-            if *room_id == room.id { return; }
+            if *room_id == room.id {
+                return;
+            }
         }
 
         // if the room is already open, select its tab
@@ -190,13 +187,11 @@ impl MainDesktopUI {
         // if the tab was created, set the room screen and add the room to the room order
         if let Some(widget) = result {
             self.room_order.push(room.id.clone());
-            widget.as_room_screen().set_displayed_room(
-                cx,
-                displayed_room_name,
-                room.id.clone(),
-            );
+            widget
+                .as_room_screen()
+                .set_displayed_room(cx, displayed_room_name, room.id.clone());
         }
-        
+
         self.most_recently_selected_room = Some(room.id.clone());
     }
 }
@@ -221,7 +216,7 @@ impl MatchEvent for MainDesktopUI {
                             &HeapLiveIdPath::default(),
                             RoomsPanelAction::RoomFocused(room_id.clone()),
                         );
-                    }   
+                    }
                 }
                 // Whenever a tab is closed, defer the close to the next event loop to prevent closing the tab while the app state
                 // still has the room as selected

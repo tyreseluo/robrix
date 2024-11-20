@@ -106,22 +106,25 @@ live_design! {
     }
 }
 
-
 /// A custom HTML subwidget used to handle `<font>` and `<span>` tags,
 /// specifically: foreground text color, background text color, and spoilers.
 #[derive(Live, Widget)]
 pub struct MatrixHtmlSpan {
     /// The URL of the image to display.
-    #[deref] ll: Label,
+    #[deref]
+    ll: Label,
     /// Background color: the `data-mx-bg-color` attribute.
-    #[rust] bg_color: Option<Vec4>,
+    #[rust]
+    bg_color: Option<Vec4>,
     /// Foreground (text) color: the `data-mx-color` or `color` attributes.
-    #[rust] fg_color: Option<Vec4>,
+    #[rust]
+    fg_color: Option<Vec4>,
     /// There are three possible spoiler variants:
     /// 1. `None`: no spoiler attribute was present at all.
     /// 2. `Some(empty)`: there was a spoiler but no reason was given.
     /// 3. `Some(reason)`: there was a spoiler with a reason given for it being hidden.
-    #[rust] spoiler: Option<String>,
+    #[rust]
+    spoiler: Option<String>,
 }
 
 impl Widget for MatrixHtmlSpan {
@@ -145,24 +148,28 @@ impl LiveHook for MatrixHtmlSpan {
         // The attributes we care about in `<font>` and `<span>` tags are:
         // * data-mx-bg-color, data-mx-color, data-mx-spoiler, color.
 
-        if let ApplyFrom::NewFromDoc {..} = apply.from {
+        if let ApplyFrom::NewFromDoc { .. } = apply.from {
             if let Some(scope) = apply.scope.as_ref() {
                 if let Some(doc) = scope.props.get::<HtmlDoc>() {
                     let mut walker = doc.new_walker_with_index(scope.index + 1);
-                    while let Some((lc, attr)) = walker.while_attr_lc(){
+                    while let Some((lc, attr)) = walker.while_attr_lc() {
                         let attr = attr.trim_matches(&['"', '\'']);
                         match lc {
-                            live_id!(color)
-                            | live_id!(data-mx-color) => self.fg_color = Vec4::from_hex_str(attr).ok(),
-                            live_id!(data-mx-bg-color) => self.bg_color = Vec4::from_hex_str(attr).ok(),
-                            live_id!(data-mx-spoiler) => self.spoiler = Some(attr.into()),
-                            _ => ()
+                            live_id!(color) | live_id!(data - mx - color) => {
+                                self.fg_color = Vec4::from_hex_str(attr).ok()
+                            }
+                            live_id!(data - mx - bg - color) => {
+                                self.bg_color = Vec4::from_hex_str(attr).ok()
+                            }
+                            live_id!(data - mx - spoiler) => self.spoiler = Some(attr.into()),
+                            _ => (),
                         }
                     }
 
                     // Set the Label's foreground text color and background color
                     if let Some(fg_color) = self.fg_color {
-                        self.ll.apply_over(cx, live!{ draw_text: { color: (fg_color) } });
+                        self.ll
+                            .apply_over(cx, live! { draw_text: { color: (fg_color) } });
                     }
                     if let Some(_bg_color) = self.bg_color {
                         log!("TODO: Html span/font background color is not yet implemented.")
@@ -177,11 +184,10 @@ impl LiveHook for MatrixHtmlSpan {
     }
 }
 
-
-
 #[derive(LiveHook, Live, Widget)]
 pub struct HtmlOrPlaintext {
-    #[deref] view: View,
+    #[deref]
+    view: View,
 }
 
 impl Widget for HtmlOrPlaintext {
@@ -199,7 +205,8 @@ impl HtmlOrPlaintext {
     pub fn show_plaintext<T: AsRef<str>>(&mut self, text: T) {
         self.view(id!(html_view)).set_visible(false);
         self.view(id!(plaintext_view)).set_visible(true);
-        self.label(id!(plaintext_view.pt_label)).set_text(text.as_ref());
+        self.label(id!(plaintext_view.pt_label))
+            .set_text(text.as_ref());
     }
 
     /// Sets the HTML content, making the HTML visible and the plaintext invisible.
