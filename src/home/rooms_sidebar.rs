@@ -15,7 +15,7 @@ live_design! {
     ICON_COLLAPSE = dep("crate://self/resources/icons/collapse.svg")
     ICON_ADD = dep("crate://self/resources/icons/add.svg")
 
-    CollapsableTitle = <View> {
+    CollapsibleTitle = <View> {
         width: Fill, height: Fit
         flow: Right, spacing: 10.
         align: {x: 0.0, y: 0.5}
@@ -117,7 +117,7 @@ live_design! {
             flow: Down, spacing: 20
             padding: {top: 20}
             width: Fill, height: Fit
-            <CollapsableTitle> {
+            <CollapsibleTitle> {
                 title = {
                     text: "People"
                     draw_text: {
@@ -125,7 +125,7 @@ live_design! {
                     }
                 }
             }
-            <CollapsableTitle> {
+            <CollapsibleTitle> {
                 title = {
                     text: "Channels"
                     draw_text: {
@@ -133,7 +133,7 @@ live_design! {
                     }
                 }
             }
-            <CollapsableTitle> {
+            <CollapsibleTitle> {
                 title = {
                     text: "Rooms"
                     draw_text: {
