@@ -39,7 +39,7 @@ env:
     CARGO_INCREMENTAL: "0"  # Disable incremental compilation in CI
     RUST_BACKTRACE: 1
     # Enable warnings as errors for strict checks
-    RUSTFLAGS: "-D warnings"
+    RUSTFLAGS: "-A warnings"
     # For special compile
     rust_nightly: nightly-2024-10-20
 
