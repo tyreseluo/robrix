@@ -2,9 +2,9 @@ name: Robrix Cross-Platform Build Matrix
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ ** ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ ** ]
   workflow_dispatch:  # 允许手动触发
 
 env:
