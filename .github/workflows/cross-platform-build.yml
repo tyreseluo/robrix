@@ -2,11 +2,11 @@ name: Cross-Platform Build
 
 on:
   push:
-    branches: main
+    branches: [ "**" ]
   pull_request:
-    branches: main
-  schedule:
-    - cron:  '0 0 * * 0' # Weekly on Sundays
+    branches: [ "**" ]
+#   schedule:
+#     - cron:  '0 0 * * 0' # Weekly on Sundays
 
 env:
   CARGO_TERM_COLOR: always
