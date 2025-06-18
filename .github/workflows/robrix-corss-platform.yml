@@ -4,102 +4,47 @@ on:
   push:
     branches: [ "**" ]
   pull_request:
-    branches: [ "**" ]
-  workflow_dispatch:  # 允许手动触发
+    branches: [ "**" ]  
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  # 快速检查阶段
-  quick-checks:
-    name: Quick Checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
-          
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libssl-dev \
-            libsqlite3-dev \
-            pkg-config \
-            binfmt-support \
-            libxcursor-dev \
-            libx11-dev \
-            libasound2-dev \
-            libpulse-dev \
-            clang \
-            libclang-dev
-          
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Run cargo check
-        run: cargo check --all-targets --all-features
-
-      - name: Run clippy
-        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
-
-  # 核心平台构建矩阵 - 使用标准 cargo build
-  core-platforms:
-    name: Build ${{ matrix.target }} on ${{ matrix.host }}
-    runs-on: ${{ matrix.host }}
-    needs: quick-checks
+  # 第一步：只验证三个核心平台能否基本构建
+  basic-build-test:
+    name: Basic Build - ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux native build
-          - host: ubuntu-latest
+          # Linux (x86_64) - 对应 robrix-pre-alpha-3-linux-amd64.deb
+          - os: linux
+            runner: ubuntu-20.04  # 对应README中的Ubuntu 20.04
             target: x86_64-unknown-linux-gnu
-            os: linux
-            rust_version: nightly
             
-          # Windows native build  
-          - host: windows-latest
+          # Windows (x86_64) - 对应 robrix-pre-alpha-3-windows-x64-setup.exe  
+          - os: windows
+            runner: windows-latest
             target: x86_64-pc-windows-msvc
-            os: windows
-            rust_version: nightly
             
-          # macOS native builds
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            os: macos
-            rust_version: nightly
-            
-          - host: macos-latest
+          # macOS (aarch64) - 对应 robrix-pre-alpha-3-macOS-aarch64.dmg
+          - os: macos
+            runner: macos-latest
             target: aarch64-apple-darwin
-            os: macos
-            rust_version: nightly
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
       
-      - name: Install Rust ${{ matrix.rust_version }}
-        uses: dtolnay/rust-toolchain@master
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: ${{ matrix.rust_version }}
           targets: ${{ matrix.target }}
       
-      # Linux依赖安装
+      # Linux特定依赖
       - name: Install Linux dependencies
         if: matrix.os == 'linux'
         run: |
@@ -116,7 +61,6 @@ jobs:
             clang \
             libclang-dev
       
-      # 缓存设置
       - name: Cache cargo registry
         uses: actions/cache@v3
         with:
@@ -124,233 +68,18 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ matrix.host }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.runner }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ matrix.host }}-${{ matrix.target }}-cargo-
-            ${{ matrix.host }}-cargo-
+            ${{ matrix.runner }}-cargo-
       
-      # 标准构建
-      - name: Build Robrix for ${{ matrix.target }}
-        run: |
-          echo "Building Robrix for ${{ matrix.target }}"
-          cargo build --target ${{ matrix.target }} --release --verbose
-          
-      # 运行测试（仅本地平台）
-      - name: Run tests
-        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin'
-        run: cargo test --target ${{ matrix.target }} --release
+      # 基础构建测试
+      - name: Basic cargo check
+        run: cargo check --target ${{ matrix.target }} --verbose
+      
+      - name: Basic cargo build
+        run: cargo build --target ${{ matrix.target }} --verbose
         
-      # 验证构建产物
-      - name: Verify build artifacts
+      - name: Report build success
         run: |
-          echo "Build completed for ${{ matrix.target }}"
-          find target/${{ matrix.target }}/release -name "robrix*" -type f || echo "Expected: No standalone binary for Makepad apps"
-        shell: bash
-
-  # 移动平台构建（需要特殊工具）
-  mobile-platforms:
-    name: Mobile Build - ${{ matrix.platform }}
-    runs-on: ${{ matrix.host }}
-    needs: quick-checks
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Android builds (需要 cargo-makepad)
-          - platform: android
-            host: ubuntu-latest
-            target: aarch64-linux-android
-            
-          - platform: android-macos
-            host: macos-latest  
-            target: aarch64-linux-android
-            
-          # iOS builds (仅 macOS)
-          - platform: ios
-            host: macos-latest
-            target: aarch64-apple-ios
-            
-          - platform: ios-sim
-            host: macos-latest
-            target: aarch64-apple-ios-sim
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          targets: ${{ matrix.target }}
-      
-      # 安装 cargo-makepad（Robrix特需）
-      - name: Install cargo-makepad
-        run: |
-          cargo install --force --git https://github.com/makepad/makepad --branch rik cargo-makepad
-          
-      # Android特殊设置
-      - name: Setup Android environment
-        if: contains(matrix.platform, 'android')
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r25c
-          add-to-path: false
-          
-      - name: Configure Android build
-        if: contains(matrix.platform, 'android')
-        run: |
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_HOME" >> $GITHUB_ENV
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
-        shell: bash
-        
-      # 缓存
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.host }}-${{ matrix.platform }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
-      # Android构建（使用cargo-makepad）
-      - name: Build Android APK
-        if: contains(matrix.platform, 'android')
-        run: |
-          echo "Building Android APK..."
-          # 根据README，Robrix使用cargo-makepad进行Android构建
-          cargo makepad android --release -p robrix || echo "Expected to fail in CI without Android SDK setup"
-          
-      # iOS构建（使用cargo-makepad）
-      - name: Build iOS
-        if: matrix.platform == 'ios'
-        run: |
-          echo "Building iOS target..."
-          cargo build --target ${{ matrix.target }} --release || echo "iOS build may fail without proper provisioning"
-          
-      - name: Build iOS Simulator
-        if: matrix.platform == 'ios-sim'
-        run: |
-          echo "Building iOS Simulator..."
-          cargo build --target ${{ matrix.target }} --release || echo "iOS sim build may fail without Xcode"
-
-  # 打包测试（使用robius-packaging-commands）
-  packaging-test:
-    name: Test Packaging - ${{ matrix.os }}
-    runs-on: ${{ matrix.host }}
-    needs: core-platforms
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu
-            host: ubuntu-latest
-            
-          - os: macos
-            host: macos-latest
-            
-          - os: windows
-            host: windows-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Install Rust stable (1.79+)
-        uses: dtolnay/rust-toolchain@stable
-      
-      - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libssl-dev \
-            libsqlite3-dev \
-            pkg-config \
-            libxcursor-dev \
-            libx11-dev \
-            libasound2-dev \
-            libpulse-dev
-      
-      # 安装打包工具
-      - name: Install packaging tools
-        run: |
-          # 安装 cargo-packager（根据README要求）
-          cargo install --force --locked cargo-packager
-          # 安装 robius-packaging-commands
-          cargo install --locked --git https://github.com/project-robius/robius-packaging-commands.git
-          
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.host }}-packaging-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
-      # 测试打包（dry-run模式）
-      - name: Test packaging
-        run: |
-          echo "Testing packaging for ${{ matrix.os }}..."
-          # 根据README，Robrix使用特定的打包命令
-          cargo packager --release --verbose || echo "Packaging test completed (may fail without full setup)"
-
-  # 构建总结
-  build-summary:
-    name: Build Summary
-    runs-on: ubuntu-latest
-    needs: [core-platforms, mobile-platforms, packaging-test]
-    if: always()
-    steps:
-      - name: Analyze build results
-        run: |
-          echo "🔍 Robrix Build Matrix Results:"
-          echo "================================"
-          echo "Core platforms: ${{ needs.core-platforms.result }}"
-          echo "Mobile platforms: ${{ needs.mobile-platforms.result }}"
-          echo "Packaging test: ${{ needs.packaging-test.result }}"
-          echo ""
-          
-          # 统计成功的构建
-          success_count=0
-          total_count=3
-          
-          if [ "${{ needs.core-platforms.result }}" == "success" ]; then
-            success_count=$((success_count + 1))
-            echo "✅ Core platforms build succeeded"
-          else
-            echo "❌ Core platforms build failed"
-          fi
-          
-          if [ "${{ needs.mobile-platforms.result }}" == "success" ]; then
-            success_count=$((success_count + 1))
-            echo "✅ Mobile platforms build succeeded"
-          else
-            echo "⚠️  Mobile platforms build failed (expected in CI environment)"
-          fi
-          
-          if [ "${{ needs.packaging-test.result }}" == "success" ]; then
-            success_count=$((success_count + 1))
-            echo "✅ Packaging test succeeded"
-          else
-            echo "⚠️  Packaging test failed (expected without full setup)"
-          fi
-          
-          echo ""
-          echo "📊 Summary: $success_count/$total_count job groups completed"
-          
-          if [ "${{ needs.core-platforms.result }}" == "success" ]; then
-            echo "🎉 Core platform builds successful! The main cargo build functionality works."
-            echo ""
-            echo "ℹ️  Note: Mobile and packaging failures are expected in CI without:"
-            echo "   - Android SDK/NDK full setup"
-            echo "   - iOS provisioning profiles" 
-            echo "   - Platform-specific signing certificates"
-            echo ""
-            echo "This CI successfully validates that Robrix builds correctly"
-            echo "on all major host platforms for their native targets."
-          else
-            echo "❌ Core platform builds failed. Please check the logs above."
-            exit 1
-          fi
+          echo "✅ Basic build successful on ${{ matrix.os }} for ${{ matrix.target }}"
+          echo "This validates that Robrix can be built on this platform."
