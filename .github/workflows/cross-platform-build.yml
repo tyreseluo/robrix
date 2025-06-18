@@ -1,0 +1,246 @@
+name: Cross-Platform Build
+
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: main
+  schedule:
+    - cron:  '0 0 * * 0' # Weekly on Sundays
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  quick-checks:
+    name: Quick Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      
+      - name: Run cargo check
+        run: cargo check --all-targets --all-features
+
+  build-matrix:
+    name: Build on ${{ matrix.host }} for ${{ matrix.target }}
+    runs-on: ${{ matrix.host }}
+    needs: quick-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            rust-target: x86_64-unknown-linux-gnu
+            setup-deps: true
+            
+          - host: ubuntu-latest
+            target: aarch64-linux-android
+            rust-target: aarch64-linux-android
+            setup-deps: true
+            setup-android: true
+            
+          # Windows
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-target: x86_64-pc-windows-msvc
+            
+          - host: windows-latest
+            target: aarch64-linux-android
+            rust-target: aarch64-linux-android
+            setup-android: true
+            
+          # macOS 
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            rust-target: x86_64-apple-darwin
+            
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            rust-target: aarch64-apple-darwin
+            
+          - host: macos-latest
+            target: aarch64-apple-ios
+            rust-target: aarch64-apple-ios
+            
+          - host: macos-latest
+            target: x86_64-apple-ios
+            rust-target: x86_64-apple-ios
+            
+          - host: macos-latest
+            target: aarch64-linux-android
+            rust-target: aarch64-linux-android
+            setup-android: true
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+      
+      # Linux  dependencies installation
+      - name: Install Linux dependencies
+        if: matrix.setup-deps && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            libsqlite3-dev \
+            pkg-config \
+            binfmt-support \
+            libxcursor-dev \
+            libx11-dev \
+            libasound2-dev \
+            libpulse-dev \
+            clang \
+            libclang-dev
+      
+      # Android dependencies installation
+      - name: Setup Android NDK
+        if: matrix.setup-android
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+          add-to-path: false
+          
+      - name: Setup Android environment
+        if: matrix.setup-android
+        run: |
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          echo "CC_aarch64_linux_android=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+        shell: bash
+        
+      # cache settings
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.host }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.host }}-${{ matrix.target }}-cargo-
+            ${{ matrix.host }}-cargo-
+      
+      - name: Build for ${{ matrix.target }}
+        run: cargo build --target ${{ matrix.rust-target }} --release --verbose
+        env:
+          RUST_LOG: debug
+          
+      - name: Run tests
+        if: matrix.target == matrix.rust-target && !contains(matrix.target, 'android') && !contains(matrix.target, 'ios')
+        run: cargo test --target ${{ matrix.rust-target }} --release
+        
+      - name: Check build artifacts
+        run: |
+          echo "Build completed for ${{ matrix.target }}"
+          find target/${{ matrix.rust-target }}/release -name "robrix*" -type f || echo "No robrix binary found (expected for library crates)"
+        shell: bash
+        
+      - name: Upload build artifacts
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'x86_64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: robrix-${{ matrix.target }}
+          path: |
+            target/${{ matrix.rust-target }}/release/robrix*
+            !target/${{ matrix.rust-target }}/release/robrix.d
+          retention-days: 7
+
+  special-builds:
+    name: Special Platform Builds
+    runs-on: ${{ matrix.host }}
+    needs: quick-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # WASM builds
+          - host: ubuntu-latest
+            target: wasm32-unknown-unknown
+            rust-target: wasm32-unknown-unknown
+            special: wasm
+            
+          # With special tools for macOS iOS simulator builds
+          - host: macos-latest
+            target: ios-sim
+            special: ios-simulator
+            
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+          
+      # WASM special builds
+      - name: Install wasm-pack
+        if: matrix.special == 'wasm'
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        
+      - name: Build WASM
+        if: matrix.special == 'wasm'
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      # iOS simulator special  builds
+      - name: Install iOS tools
+        if: matrix.special == 'ios-simulator'
+        run: |
+          rustup target add aarch64-apple-ios-sim
+          rustup target add x86_64-apple-ios
+          
+      - name: Build iOS Simulator
+        if: matrix.special == 'ios-simulator'
+        run: |
+          cargo build --target aarch64-apple-ios-sim --release
+          cargo build --target x86_64-apple-ios --release
+
+  build-summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-matrix, special-builds]
+    if: always()
+    steps:
+      - name: Check build results
+        run: |
+          echo "Build matrix completed!"
+          echo "Regular builds: ${{ needs.build-matrix.result }}"
+          echo "Special builds: ${{ needs.special-builds.result }}"
+          
+          if [ "${{ needs.build-matrix.result }}" != "success" ] || [ "${{ needs.special-builds.result }}" != "success" ]; then
+            echo "Some builds failed. Check the individual job results above."
+            exit 1
+          else
+            echo "All builds completed successfully! 🎉"
+          fi
