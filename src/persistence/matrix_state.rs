@@ -160,11 +160,15 @@ pub async fn restore_session(
         title: "Connecting to homeserver".into(),
         status: status_str,
     });
+
+    let http_proxy = robius_proxy::get_system_proxy().http_proxy();
+
     // Build the client with the previous settings from the session.
     let client = Client::builder()
         .homeserver_url(client_session.homeserver)
         .sqlite_store(client_session.db_path, Some(&client_session.passphrase))
         .handle_refresh_tokens()
+        .proxy(&http_proxy)
         .build()
         .await?;
     let sliding_sync_version = sliding_sync_version.into();

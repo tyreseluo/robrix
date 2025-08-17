@@ -120,6 +120,8 @@ async fn build_client(
         .unwrap_or("https://matrix-client.matrix.org/");
         // .unwrap_or("https://matrix.org/");
 
+    let http_proxy = robius_proxy::get_system_proxy().http_proxy();
+
     let mut builder = Client::builder()
         .server_name_or_homeserver_url(homeserver_url)
         // Use a sqlite database to persist the client's encryption setup.
@@ -132,6 +134,7 @@ async fn build_client(
             backup_download_strategy: matrix_sdk::encryption::BackupDownloadStrategy::OneShot,
             auto_enable_backups: true,
         })
+        .proxy(&http_proxy)
         .with_enable_share_history_on_invite(true)
         .handle_refresh_tokens();
 
