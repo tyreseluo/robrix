@@ -265,10 +265,25 @@ jobs:
             echo "UPLOAD_FILES=./dist/$FILE" >> $GITHUB_ENV
           fi
 
-      - name: Upload Desktop Build Artifacts
+      - name: Upload Release Artifacts
+        if: |
+          (github.event_name == 'push') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || format('v{0}', env.VERSION) }}
+          name: ${{ github.event_name == 'workflow_dispatch' && format('Robrix {0}', github.event.inputs.release_tag) || format('Robrix v{0}', env.VERSION) }}
+          token: ${{ secrets.ROBRIX_RELEASE }}
+          files: ${{ env.UPLOAD_FILES }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pre_release == 'true' || contains(github.ref, '-') }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Upload Artifacts (No Release)
+        if: |
+          github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: robrix-desktop-${{ env.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}
+          name: robrix-${{ env.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ env.UPLOAD_FILES }}
           retention-days: 30
 
@@ -302,8 +317,8 @@ jobs:
             echo "Unsupported platform: ${{ matrix.platform }}"
             exit 1
           fi
-      
-      - name: Build for Mobile
+
+      - name: Build Mobile Artifacts
         run: |
           if [[ "${{ matrix.platform }}" == "android" ]]; then
             cargo makepad android build -p robrix --release                                   # makepad-android-apk/robrix/apk/robrix.apk
@@ -315,7 +330,7 @@ jobs:
               --app=robrix \
               --profile=${{secrets.IOS_PROFILE}} \
               --cert=${{secrets.IOS_CERTIFICATE}} \
-              --device=IPhone \ 
+              --device=IPhone \
               run-device -p robrix --release  # makepad-apple-app/aarch64-apple-ios/release/../.
           else
             echo "Unsupported platform: ${{ matrix.platform }}"
@@ -358,87 +373,24 @@ jobs:
             exit 1
           fi
 
-      - name: Upload Mobile Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: robrix-mobile-${{ env.VERSION }}-${{ matrix.platform }}
-          path: ${{ env.UPLOAD_FILES }}
-          retention-days: 30
-
-  upload_release_artifacts:
-    name: Upload Release Artifacts
-    runs-on: ubuntu-latest
-    needs: [build_robrix_for_desktop, build_robrix_for_mobile]
-    if: |
-      always() &&
-      (needs.build_robrix_for_desktop.result == 'success' || needs.build_robrix_for_mobile.result == 'success') &&
-      ((github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'))
-    steps:
-      - name: Set Version
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
-            VERSION="${{ github.event.inputs.release_tag }}"
-            VERSION="${VERSION#v}"
-          else
-            # Get version from either desktop or mobile build outputs
-            VERSION="${{ needs.build_robrix_for_desktop.outputs.version || needs.build_robrix_for_mobile.outputs.version }}"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-        shell: bash
-
-      - name: Download All Build Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: robrix-*-${{ env.VERSION }}-*
-          merge-multiple: true
-          path: ./artifacts
-
-      - name: List Downloaded Artifacts
-        run: |
-          echo "Downloaded artifacts:"
-          find ./artifacts -type f -name "*" | sort
-
-      - name: Create GitHub Release
+      - name: Upload Release Artifacts
+        if: |
+          (github.event_name == 'push') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || format('v{0}', env.VERSION) }}
           name: ${{ github.event_name == 'workflow_dispatch' && format('Robrix {0}', github.event.inputs.release_tag) || format('Robrix v{0}', env.VERSION) }}
           token: ${{ secrets.ROBRIX_RELEASE }}
-          files: ./artifacts/*
+          files: ${{ env.UPLOAD_FILES }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pre_release == 'true' || contains(github.ref, '-') }}
           draft: ${{ github.event_name == 'workflow_dispatch' }}
 
-  upload_artifacts_no_release:
-    name: Upload Artifacts (No Release)
-    runs-on: ubuntu-latest
-    needs: [build_robrix_for_desktop, build_robrix_for_mobile]
-    if: |
-      always() &&
-      (needs.build_robrix_for_desktop.result == 'success' || needs.build_robrix_for_mobile.result == 'success') &&
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'true')
-    steps:
-      - name: Set Version
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
-            VERSION="${{ github.event.inputs.release_tag }}"
-            VERSION="${VERSION#v}"
-          else
-            # Get version from either desktop or mobile build outputs
-            VERSION="${{ needs.build_robrix_for_desktop.outputs.version || needs.build_robrix_for_mobile.outputs.version }}"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-        shell: bash
-
-      - name: Download All Build Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: robrix-*-${{ env.VERSION }}-*
-          merge-multiple: true
-          path: ./artifacts
-
-      - name: Upload Combined Artifacts
+      - name: Upload Artifacts (No Release)
+        if: |
+          github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: robrix-all-platforms-${{ env.VERSION }}
-          path: ./artifacts/*
+          name: robrix-${{ env.VERSION }}-${{ matrix.platform }}
+          path: ${{ env.UPLOAD_FILES }}
           retention-days: 30
