@@ -355,7 +355,12 @@ jobs:
             security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
             echo "=== Import certificate into keychain ==="
-            security import "$CERT_FILE" -k "$KEYCHAIN_PATH" -P "" -T /usr/bin/codesign -T /usr/bin/security
+            CERT_PASSWORD="${{ secrets.IOS_CERT_PASSWORD }}"
+            if [[ -n "$CERT_PASSWORD" ]]; then
+              security import "$CERT_FILE" -k "$KEYCHAIN_PATH" -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+            else
+              security import "$CERT_FILE" -k "$KEYCHAIN_PATH" -P "" -T /usr/bin/codesign -T /usr/bin/security
+            fi
 
             # Add keychain to search list
             security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
