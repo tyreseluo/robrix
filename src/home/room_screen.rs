@@ -30,11 +30,11 @@ use crate::{
         user_profile::{AvatarState, ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
-    room::{room_input_bar::RoomInputBarState, typing_notice::TypingNoticeWidgetExt},
+    room::{loading_screen::RoomLoadingScreenAction, room_input_bar::RoomInputBarState, typing_notice::TypingNoticeWidgetExt},
     shared::{
-        avatar::AvatarWidgetRefExt, callout_tooltip::TooltipAction, html_or_plaintext::{HtmlOrPlaintextRef, HtmlOrPlaintextWidgetRefExt, RobrixHtmlLinkAction}, jump_to_bottom_button::{JumpToBottomButtonWidgetExt, UnreadMessageCount}, popup_list::{enqueue_popup_notification, PopupItem, PopupKind}, restore_status_view::RestoreStatusViewWidgetExt, styles::*, text_or_image::{TextOrImageRef, TextOrImageWidgetRefExt}, timestamp::TimestampWidgetRefExt
+        avatar::AvatarWidgetRefExt, callout_tooltip::TooltipAction, html_or_plaintext::{HtmlOrPlaintextRef, HtmlOrPlaintextWidgetRefExt, RobrixHtmlLinkAction}, jump_to_bottom_button::{JumpToBottomButtonWidgetExt, UnreadMessageCount}, popup_list::{PopupItem, PopupKind, enqueue_popup_notification}, restore_status_view::RestoreStatusViewWidgetExt, styles::*, text_or_image::{TextOrImageRef, TextOrImageWidgetRefExt}, timestamp::TimestampWidgetRefExt
     },
-    sliding_sync::{get_client, submit_async_request, take_timeline_endpoints, BackwardsPaginateUntilEventRequest, MatrixRequest, PaginationDirection, TimelineEndpoints, TimelineRequestSender, UserPowerLevels}, utils::{self, room_name_or_id, unix_time_millis_to_datetime, ImageFormat, MEDIA_THUMBNAIL_FORMAT}
+    sliding_sync::{BackwardsPaginateUntilEventRequest, MatrixRequest, PaginationDirection, TimelineEndpoints, TimelineRequestSender, UserPowerLevels, get_client, submit_async_request, take_timeline_endpoints}, utils::{self, ImageFormat, MEDIA_THUMBNAIL_FORMAT, room_name_or_id, unix_time_millis_to_datetime}
 };
 use crate::home::event_reaction_list::ReactionListWidgetRefExt;
 use crate::home::room_read_receipt::AvatarRowWidgetRefExt;
@@ -1435,6 +1435,7 @@ impl RoomScreen {
         action: &Action,
         pane: &UserProfileSlidingPaneRef,
     ) -> bool {
+        let uid = self.widget_uid();
         // A closure that handles both MatrixToUri and MatrixUri links,
         // and returns whether the link was handled.
         let mut handle_matrix_link = |id: &MatrixId, _via: &[OwnedServerName]| -> bool {
@@ -1474,20 +1475,20 @@ impl RoomScreen {
                         });
                         return true;
                     }
-                    if let Some(_known_room) = get_client().and_then(|c| c.get_room(room_id)) {
-                        log!("TODO: jump to known room {}", room_id);
-                    } else {
-                        log!("TODO: fetch and display room preview for room {}", room_id);
-                    }
-                    false
+                    cx.widget_action(
+                        uid,
+                        &Scope::empty().path,
+                        RoomLoadingScreenAction::Loading(room_id.clone().into()),
+                    );
+                    true
                 }
                 MatrixId::RoomAlias(room_alias) => {
-                    log!("TODO: open room alias {}", room_alias);
-                    // TODO: open a room loading screen that shows a spinner
-                    //       while our background async task calls Client::resolve_room_alias()
-                    //       and then either jumps to the room if known, or fetches and displays
-                    //       a room preview for that room.
-                    false
+                    cx.widget_action(
+                        uid,
+                        &Scope::empty().path,
+                        RoomLoadingScreenAction::Loading(room_alias.clone().into()),
+                    );
+                    true
                 }
                 MatrixId::Event(room_id, event_id) => {
                     log!("TODO: open event {} in room {}", event_id, room_id);

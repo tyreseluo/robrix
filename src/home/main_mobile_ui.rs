@@ -90,6 +90,14 @@ impl Widget for MainMobileUI {
                     .invite_screen(ids!(invite_screen))
                     .set_displayed_invite(cx, room_id.clone().into(), room_name.clone());
             }
+            Some(SelectedRoom::PreviewedRoom { room_id, room_name }) => {
+                show_welcome = false;
+                show_room = true;
+                show_invite = false;
+                self.view
+                    .room_screen(ids!(room_screen))
+                    .set_displayed_room(cx, room_id.clone().into(), room_name.clone());
+            }
             None => {
                 show_welcome = true;
                 show_room = false;

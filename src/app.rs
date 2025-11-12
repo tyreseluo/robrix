@@ -633,6 +633,10 @@ pub enum SelectedRoom {
         room_id: OwnedRoomIdRon,
         room_name: Option<String>,
     },
+    PreviewedRoom {
+        room_id: OwnedRoomIdRon,
+        room_name: Option<String>,
+    }
 }
 
 impl SelectedRoom {
@@ -640,6 +644,7 @@ impl SelectedRoom {
         match self {
             SelectedRoom::JoinedRoom { room_id, .. } => room_id,
             SelectedRoom::InvitedRoom { room_id, .. } => room_id,
+            SelectedRoom::PreviewedRoom { room_id, .. } => room_id,
         }
     }
 
@@ -647,6 +652,7 @@ impl SelectedRoom {
         match self {
             SelectedRoom::JoinedRoom { room_name, .. } => room_name.as_ref(),
             SelectedRoom::InvitedRoom { room_name, .. } => room_name.as_ref(),
+            SelectedRoom::PreviewedRoom { room_name , ..} => room_name.as_ref(),
         }
     }
 

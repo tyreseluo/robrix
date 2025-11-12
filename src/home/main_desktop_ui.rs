@@ -1,9 +1,10 @@
 use makepad_widgets::*;
 use matrix_sdk::ruma::OwnedRoomId;
+use ruma::{OwnedRoomAliasId, OwnedRoomOrAliasId};
 use tokio::sync::Notify;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{app::{AppState, AppStateAction, SelectedRoom}, utils::room_name_or_id};
+use crate::{app::{AppState, AppStateAction, SelectedRoom}, room::{self, RoomAliasResolveAction, loading_screen::{LoadingScreenWidgetRefExt, LoadingStatus, LoadingTabState, RoomLoadingScreenAction}}, shared::popup_list::{PopupItem, PopupKind, enqueue_popup_notification}, sliding_sync::{MatrixRequest, get_client, submit_async_request}, utils::room_name_or_id};
 use super::{invite_screen::InviteScreenWidgetRefExt, room_screen::RoomScreenWidgetRefExt, rooms_list::RoomsListAction};
 
 live_design! {
@@ -17,6 +18,7 @@ live_design! {
     use crate::home::welcome_screen::WelcomeScreen;
     use crate::home::room_screen::RoomScreen;
     use crate::home::invite_screen::InviteScreen;
+    use crate::room::loading_screen::LoadingScreen;
 
     pub MainDesktopUI = {{MainDesktopUI}} {
         dock = <Dock> {
@@ -54,6 +56,7 @@ live_design! {
             welcome_screen = <WelcomeScreen> {}
             room_screen = <RoomScreen> {}
             invite_screen = <InviteScreen> {}
+            loading_screen = <LoadingScreen> {}
         }
     }
 }
@@ -88,6 +91,15 @@ pub struct MainDesktopUI {
     /// If true, this widget proceeds to draw the desktop UI as normal.
     #[rust]
     drawn_previously: bool,
+
+    #[rust]
+    loading_tab_counter: usize,
+
+    #[rust]
+    loading_tabs: HashMap<LiveId, LoadingTabState>,
+
+    #[rust]
+    resolved_room_aliases: HashMap<OwnedRoomAliasId, OwnedRoomId>,
 }
 
 impl Widget for MainDesktopUI {
@@ -138,6 +150,10 @@ impl MainDesktopUI {
                 id!(invite_screen),
                 room_name_or_id(room_name.as_ref(), room_id),
             ),
+            SelectedRoom::PreviewedRoom { room_id, room_name } => (
+                id!(room_screen),
+                room_name_or_id(room_name.as_ref(), room_id),
+            ),
         };
         let new_tab_widget = dock.create_and_select_tab(
             cx,
@@ -168,6 +184,7 @@ impl MainDesktopUI {
                         room.room_name().cloned()
                     );
                 }
+                _ => {}
             }
             cx.action(MainDesktopUiAction::SaveDockIntoAppState);
         } else {
@@ -181,6 +198,15 @@ impl MainDesktopUI {
     /// Closes a tab in the dock and focuses on the latest open room.
     fn close_tab(&mut self, cx: &mut Cx, tab_id: LiveId) {
         let dock = self.view.dock(ids!(dock));
+
+        // if the tab type is loading tab, remove it from loading tabs
+        if let Some(_loading_tab) = self.loading_tabs.get(&tab_id) {
+            self.loading_tabs.remove(&tab_id);
+            dock.close_tab(cx, tab_id);
+            self.tab_to_close = None;
+            return;
+        }
+
         if let Some(room_being_closed) = self.open_rooms.get(&tab_id) {
             self.room_order.retain(|sr| sr != room_being_closed);
 
@@ -214,6 +240,11 @@ impl MainDesktopUI {
     /// Closes all tabs
     pub fn close_all_tabs(&mut self, cx: &mut Cx) {
         let dock = self.view.dock(ids!(dock));
+
+        for loading_tab_id in self.loading_tabs.keys() {
+            dock.close_tab(cx, *loading_tab_id);
+        }
+
         for tab_id in self.open_rooms.keys() {        
             dock.close_tab(cx, *tab_id);
         }
@@ -223,9 +254,74 @@ impl MainDesktopUI {
 
         // Clear tab-related dock UI state.
         self.open_rooms.clear();
+        self.loading_tabs.clear();
         self.tab_to_close = None;
         self.room_order.clear();
         self.most_recently_selected_room = None;
+    }
+
+    fn find_loading_tab(&self, room_or_alias_id: OwnedRoomOrAliasId) -> Option<(LiveId, LoadingTabState)> {
+        match OwnedRoomId::try_from(room_or_alias_id) {
+            Ok(room_id) => {
+                self.loading_tabs.iter().find_map(|(live_id, loading_tab_state)| {
+                    if loading_tab_state.room_id.as_ref() == Some(&room_id) {
+                        Some((live_id.clone(), loading_tab_state.clone()))
+                    } else {
+                        None
+                    }
+                })
+            },
+            Err(room_alias_id) => {
+                self.loading_tabs.iter().find_map(|(live_id, loading_tab_state)| {
+                    if let Some(room_alias_id_in_tab) = &loading_tab_state.room_alias_id {
+                        if room_alias_id_in_tab == &room_alias_id {
+                            return Some((live_id.clone(), loading_tab_state.clone()));
+                        }
+                    }
+                    None
+                })
+            },
+        }
+    }
+
+    pub fn show_loading_tab(&mut self, cx: &mut Cx, room_or_alias_id: OwnedRoomOrAliasId) {
+        let dock = self.view.dock(ids!(dock));
+
+        // Check if a loading tab already exists for the room or alias
+        if let Some((live_id, ..)) = self.find_loading_tab(room_or_alias_id.clone()) {
+            dock.select_tab(cx, live_id);
+            return;
+        }
+
+        self.loading_tab_counter += 1;
+        let loading_tab_id = LiveId::from_str(&format!("loading_tab_{}", self.loading_tab_counter));
+        let loading_state = LoadingTabState {
+            room_id: OwnedRoomId::try_from(room_or_alias_id.clone()).ok(),
+            room_alias_id: OwnedRoomAliasId::try_from(room_or_alias_id.clone()).ok(),
+            status: LoadingStatus::Loading,
+        };
+
+        let (tab_bar, _pos) = dock.find_tab_bar_of_tab(id!(home_tab)).unwrap();
+        let new_tab_widget = dock.create_and_select_tab(
+            cx,
+            tab_bar,
+            loading_tab_id,
+            id!(loading_screen),
+            "Loading...".to_owned(),
+            id!(CloseableTab),
+            None,
+        );
+
+        if let Some(widget) = new_tab_widget {
+            widget.as_loading_screen().set_loading_with_message(
+                cx,
+                "Loading room...",
+                Some(room_or_alias_id.to_string())
+            );
+            self.loading_tabs.insert(loading_tab_id, loading_state);
+        } else {
+            error!("BUG: failed to create loading tab");
+        }
     }
 
     /// Replaces an invite with a joined room in the dock.
@@ -280,6 +376,21 @@ impl WidgetMatchEvent for MainDesktopUI {
                 self.close_all_tabs(cx);
                 on_close_all.notify_one();
                 continue;
+            }
+
+            match action.downcast_ref() {
+                Some(RoomAliasResolveAction::Resolved { room_alias_id, room_id, .. }) => {
+                    log!("Resolved room alias {} to room ID {}", room_alias_id, room_id);
+                }
+                Some(RoomAliasResolveAction::Failed { room_alias_id, error }) => {
+                    todo!()
+                }
+                None => {}
+            }
+
+            match widget_action.cast() {
+                RoomLoadingScreenAction::Loading(room_or_alias_id) => self.show_loading_tab(cx, room_or_alias_id),
+                _ => {}
             }
 
             // Handle actions emitted by the dock within the MainDesktopUI
