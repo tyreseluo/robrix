@@ -34,7 +34,7 @@ use crate::{
     }, login::login_screen::LoginAction, logout::{logout_confirm_modal::LogoutAction, logout_state_machine::{LogoutConfig, is_logout_in_progress, logout_with_state_machine}}, media_cache::{MediaCacheEntry, MediaCacheEntryRef}, persistence::{self, ClientSessionPersisted, load_app_state}, profile::{
         user_profile::{AvatarState, UserProfile},
         user_profile_cache::{UserProfileUpdate, enqueue_user_profile_update},
-    }, room::{FetchedRoomAvatar, FetchedRoomPreview, RoomPreviewAction}, shared::{
+    }, room::{FetchedRoomAvatar, FetchedRoomPreview, RoomAliasAction, RoomPreviewAction, preview_screen::PreviewRoomDetails}, shared::{
         html_or_plaintext::MatrixLinkPillState,
         jump_to_bottom_button::UnreadMessageCount,
         popup_list::{PopupItem, PopupKind, enqueue_popup_notification}
@@ -478,6 +478,10 @@ pub enum MatrixRequest {
         destination: Arc<Mutex<crate::home::link_preview::TimestampedCacheEntry>>,
         update_sender: Option<crossbeam_channel::Sender<TimelineUpdate>>,
     },
+    PaginateRoomTimelineForPreview {
+        room_id: OwnedRoomId,
+        limit: u16,
+    }
 }
 
 /// Submits a request to the worker thread to be executed asynchronously.
@@ -1092,8 +1096,10 @@ async fn matrix_worker_task(
                 let _resolve_task = Handle::current().spawn(async move {
                     log!("Sending resolve room alias request for {room_alias}...");
                     let res = client.resolve_room_alias(&room_alias).await;
-                    log!("Resolved room alias {room_alias} to: {res:?}");
-                    todo!("Send the resolved room alias back to the UI thread somehow.");
+                    Cx::post_action(RoomAliasAction::ResolvedToRoomId {
+                        room_alias,
+                        result: res,
+                    });
                 });
             }
             MatrixRequest::FetchAvatar { mxc_uri, on_fetched } => {
@@ -1479,6 +1485,29 @@ async fn matrix_worker_task(
                     on_fetched(url, destination, result, update_sender);
                     SignalToUI::set_ui_signal();
                 });
+            }
+            MatrixRequest::PaginateRoomTimelineForPreview { room_id, limit } => {
+                //  let (_timeline, sender) = {
+                //     let mut all_preview_rooms = ALL_PREVIEW_ROOMS.lock().unwrap();
+                //     let Some(room_info) = all_preview_rooms.get_mut(&room_id) else {
+                //         log!("Skipping pagination request for not-yet-known room {room_id}");
+                //         continue;
+                //     };
+
+                //     let timeline_ref = room_info.timeline.clone();
+                //     let sender = room_info.timeline_update_sender.clone();
+                //     (timeline_ref, sender)
+                // };
+
+                // let _fetch_room_events_for_preview = Handle::current().spawn(async move {
+                //     if let Err(e) = fetch_preview_room_events(
+                //         room_id.clone(),
+                //         limit,
+                //         sender.clone()
+                //     ).await {
+                //         error!("Failed to fetch room events for preview for room {room_id}: {}", e);
+                //     }
+                // });
             }
         }
     }
