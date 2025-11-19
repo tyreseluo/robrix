@@ -2229,43 +2229,6 @@ impl RoomScreen {
         restore_status_view.set_content(cx, false, &self.room_name);
         self.is_preview = true;
 
-        // let state_opt = TIMELINE_STATES.with_borrow_mut(|ts| ts.remove(&room_id));
-        // let (mut tl_state, mut is_first_time_being_loaded) = if let Some(existing) = state_opt {
-        //     (existing, false)
-        // } else {
-        //     let (update_sender, update_receiver) = crossbeam_channel::unbounded();
-        //     let (request_sender, request_receiver) = watch::channel(Vec::<BackwardsPaginateUntilEventRequest>::new());
-
-        //     let tl_state = TimelineUiState {
-        //         room_id: room_id.clone(),
-        //         user_power: UserPowerLevels::empty(),
-        //         room_members: None,
-        //         fully_paginated: false,
-        //         items: Vector::new(),
-        //         content_drawn_since_last_update: RangeSet::new(),
-        //         profile_drawn_since_last_update: RangeSet::new(),
-        //         update_receiver,
-        //         request_sender,
-        //         media_cache: MediaCache::new(Some(update_sender.clone())),
-        //         link_preview_cache: LinkPreviewCache::new(Some(update_sender)),
-        //         saved_state: SavedState::default(),
-        //         message_highlight_animation_state: MessageHighlightAnimationState::default(),
-        //         last_scrolled_index: usize::MAX,
-        //         prev_first_index: None,
-        //         scrolled_past_read_marker: false,
-        //         latest_own_user_receipt: None,
-        //         tombstone_info: None,
-        //     };
-        //     (tl_state, true)
-        // };
-
-        // self.view.restore_status_view(ids!(restore_status_view)).set_visible(cx, !self.is_loaded);
-
-        // if is_first_time_being_loaded {
-        //     self.is_loaded = true;
-        // }
-
-        // self.tl_state = Some(tl_state);
         self.redraw(cx);
     }
 
