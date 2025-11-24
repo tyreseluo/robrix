@@ -34,7 +34,7 @@ use crate::{
     }, login::login_screen::LoginAction, logout::{logout_confirm_modal::LogoutAction, logout_state_machine::{LogoutConfig, is_logout_in_progress, logout_with_state_machine}}, media_cache::{MediaCacheEntry, MediaCacheEntryRef}, persistence::{self, ClientSessionPersisted, load_app_state}, profile::{
         user_profile::{AvatarState, UserProfile},
         user_profile_cache::{UserProfileUpdate, enqueue_user_profile_update},
-    }, room::{FetchedRoomAvatar, FetchedRoomPreview, RoomPreviewAction}, shared::{
+    }, room::{FetchedRoomAvatar, FetchedRoomPreview, RoomAliasAction, RoomPreviewAction}, shared::{
         html_or_plaintext::MatrixLinkPillState,
         jump_to_bottom_button::UnreadMessageCount,
         popup_list::{PopupItem, PopupKind, enqueue_popup_notification}
@@ -1092,8 +1092,10 @@ async fn matrix_worker_task(
                 let _resolve_task = Handle::current().spawn(async move {
                     log!("Sending resolve room alias request for {room_alias}...");
                     let res = client.resolve_room_alias(&room_alias).await;
-                    log!("Resolved room alias {room_alias} to: {res:?}");
-                    todo!("Send the resolved room alias back to the UI thread somehow.");
+                    Cx::post_action(RoomAliasAction::ResolvedToRoomId { 
+                        room_alias_id: room_alias,
+                        result: res,
+                    });
                 });
             }
             MatrixRequest::FetchAvatar { mxc_uri, on_fetched } => {

@@ -1,6 +1,7 @@
 use std::{ops::Deref, sync::Arc};
 use makepad_widgets::Cx;
 use matrix_sdk::{room_preview::RoomPreview, ruma::OwnedRoomId, SuccessorRoom};
+use ruma::{OwnedRoomAliasId, api::client::alias::get_alias};
 
 use crate::utils::avatar_from_room_name;
 
@@ -8,11 +9,15 @@ pub mod reply_preview;
 pub mod room_input_bar;
 pub mod room_display_filter;
 pub mod typing_notice;
+pub mod loading_screen;
+pub mod preview_screen;
 
 pub fn live_design(cx: &mut Cx) {
     reply_preview::live_design(cx);
     room_input_bar::live_design(cx);
     typing_notice::live_design(cx);
+    loading_screen::live_design(cx);
+    preview_screen::live_design(cx);
 }
 
 /// Basic details needed to display a brief summary of a room.
@@ -52,7 +57,7 @@ pub enum RoomPreviewAction {
 }
 
 /// A [`RoomPreview`] from the Matrix SDK, plus the room's fetched avatar.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FetchedRoomPreview {
     pub room_preview: RoomPreview,
     pub room_avatar: FetchedRoomAvatar,
@@ -81,5 +86,15 @@ impl std::fmt::Debug for FetchedRoomAvatar {
             FetchedRoomAvatar::Text(text) => f.debug_tuple("Text").field(text).finish(),
             FetchedRoomAvatar::Image(_) => f.debug_tuple("Image").finish(),
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum RoomAliasAction {
+    ResolvedToRoomId {
+        /// The original room alias ID.
+        room_alias_id: OwnedRoomAliasId,
+        /// The result of the room alias resolution.
+        result: Result<get_alias::v3::Response, matrix_sdk::HttpError>,
     }
 }

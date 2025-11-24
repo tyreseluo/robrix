@@ -1,9 +1,10 @@
 use makepad_widgets::*;
-use matrix_sdk::ruma::OwnedRoomId;
+use matrix_sdk::{RoomState, ruma::OwnedRoomId};
+use ruma::OwnedRoomAliasId;
 use tokio::sync::Notify;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{app::{AppState, AppStateAction, SelectedRoom}, utils::room_name_or_id};
+use crate::{app::{AppState, AppStateAction, SelectedRoom}, room::{RoomAliasAction, RoomPreviewAction, loading_screen::{LoadingScreenWidgetRefExt, LoadingStatus, LoadingTabState, LoadingType, RoomLoadingScreenAction}, preview_screen::PreviewScreenWidgetRefExt}, shared::popup_list::{PopupItem, PopupKind, enqueue_popup_notification}, sliding_sync::{MatrixRequest, get_client, submit_async_request}, utils::room_name_or_id};
 use super::{invite_screen::InviteScreenWidgetRefExt, room_screen::RoomScreenWidgetRefExt, rooms_list::RoomsListAction};
 
 live_design! {
@@ -17,6 +18,8 @@ live_design! {
     use crate::home::welcome_screen::WelcomeScreen;
     use crate::home::room_screen::RoomScreen;
     use crate::home::invite_screen::InviteScreen;
+    use crate::room::loading_screen::LoadingScreen;
+    use crate::room::preview_screen::PreviewScreen;
 
     pub MainDesktopUI = {{MainDesktopUI}} {
         dock = <Dock> {
@@ -54,6 +57,8 @@ live_design! {
             welcome_screen = <WelcomeScreen> {}
             room_screen = <RoomScreen> {}
             invite_screen = <InviteScreen> {}
+            loading_screen = <LoadingScreen> {}
+            preview_screen = <PreviewScreen> {}
         }
     }
 }
@@ -66,6 +71,9 @@ pub struct MainDesktopUI {
     /// The rooms that are currently open, keyed by the LiveId of their tab.
     #[rust]
     open_rooms: HashMap<LiveId, SelectedRoom>,
+    
+    #[rust]
+    loading_tabs: HashMap<LiveId, LoadingTabState>,
 
     /// The tab that should be closed in the next draw event
     #[rust]
@@ -88,6 +96,9 @@ pub struct MainDesktopUI {
     /// If true, this widget proceeds to draw the desktop UI as normal.
     #[rust]
     drawn_previously: bool,
+    
+    #[rust]
+    resolved_room_aliases: HashMap<OwnedRoomAliasId, OwnedRoomId>,
 }
 
 impl Widget for MainDesktopUI {
@@ -209,11 +220,17 @@ impl MainDesktopUI {
         dock.close_tab(cx, tab_id);
         self.tab_to_close = None;
         self.open_rooms.remove(&tab_id);
+        self.loading_tabs.remove(&tab_id);
     }
 
     /// Closes all tabs
     pub fn close_all_tabs(&mut self, cx: &mut Cx) {
         let dock = self.view.dock(ids!(dock));
+        
+        for loading_tab_id in self.loading_tabs.keys() {
+            dock.close_tab(cx, *loading_tab_id);
+        }
+        
         for tab_id in self.open_rooms.keys() {        
             dock.close_tab(cx, *tab_id);
         }
@@ -223,6 +240,7 @@ impl MainDesktopUI {
 
         // Clear tab-related dock UI state.
         self.open_rooms.clear();
+        self.loading_tabs.clear();
         self.tab_to_close = None;
         self.room_order.clear();
         self.most_recently_selected_room = None;
@@ -280,6 +298,296 @@ impl WidgetMatchEvent for MainDesktopUI {
                 self.close_all_tabs(cx);
                 on_close_all.notify_one();
                 continue;
+            }
+            
+            if let Some(RoomAliasAction::ResolvedToRoomId { room_alias_id, result }) = action.downcast_ref() {
+                let dock = self.view.dock(ids!(dock));
+                // 1. check the loading tab is existing, if not, we do nothing
+                let room_alias_id_as_live_id = LiveId::from_str(room_alias_id.as_str());
+                let Some(loading_tab_state) = self.loading_tabs.get_mut(&room_alias_id_as_live_id) else {
+                    log!("The loading tab does not exist");
+                    return;
+                };
+                
+                match result {
+                    Ok(response) => {
+                        let room_id = response.room_id.clone();
+                        let via = response.servers.clone();
+                        loading_tab_state.room_id = Some(room_id.clone());
+                        loading_tab_state.via = via.clone();
+                        self.resolved_room_aliases.insert(room_alias_id.clone(), room_id.clone());
+                        
+                        // 2.If the room is already open, select (jump to) its existing tab
+                        if let Some(opened_room) = self.open_rooms.get(&room_alias_id_as_live_id) {
+                            dock.select_tab(cx, room_alias_id_as_live_id);
+                            self.most_recently_selected_room = Some(opened_room.to_owned());
+                            return;
+                        }
+                        
+                        // 3. If the room is known room, select it, and jump.
+                        if let Some(known_room) = get_client().and_then(|c| c.get_room(&room_id)) {
+                            match known_room.state() {
+                                RoomState::Joined => {
+                                    self.focus_or_create_tab(cx, SelectedRoom::JoinedRoom { 
+                                        room_id: room_id.clone().into(),
+                                        room_name: known_room.name() 
+                                    });
+                                },
+                                RoomState::Invited => {
+                                    self.focus_or_create_tab(cx, SelectedRoom::InvitedRoom { 
+                                        room_id: room_id.clone().into(),
+                                        room_name: known_room.name() 
+                                    });
+                                }
+                                _ => {
+                                    enqueue_popup_notification(PopupItem {
+                                        message: String::from("The room state is not supported yet, only joined and invited"),
+                                        kind: PopupKind::Warning,
+                                        auto_dismissal_duration: Some(3.0),
+                                    });
+                                }
+                            }
+                            dock.close_tab(cx, room_alias_id_as_live_id.clone());
+                            self.loading_tabs.remove(&room_alias_id_as_live_id);
+                            return;
+                        };
+                        
+                        // 4. Continue to fetch the room preview information
+                        submit_async_request(MatrixRequest::GetRoomPreview {
+                            room_or_alias_id: room_id.clone().into(),
+                            via: via.clone(),
+                        });
+                    }
+                    Err(error) => {
+                        // Replace the loading screen with an error message
+                        let Some((new_widget, true)) = dock.replace_tab(
+                            cx,
+                            room_alias_id_as_live_id,
+                            id!(loading_screen),
+                            Some(String::from("Loading Error")),
+                            false,
+                        ) else {
+                            // Nothing we can really do here except log an error.
+                            error!("BUG: failed to replace LoadingScreen error status tab with loading status for {room_alias_id}");
+                            return;
+                        };
+                        
+                        new_widget.as_loading_screen()
+                            .set_error_status(
+                                cx,
+                                Some(String::from("Loading Error")),
+                                Some(format!("Failed to load room: {}", error))
+                            )
+                    }
+                }
+            }
+            
+            if let Some(RoomPreviewAction::Fetched(res)) = action.downcast_ref() {              
+                match res {
+                    Ok(frp) => {
+                        let dock = self.view.dock(ids!(dock));
+                        let room_id = frp.room_id.clone();
+                        let room_name = frp.name.clone();
+
+                        let loading_tab = self.loading_tabs.iter()
+                                .find(|(_, state)| state.room_id == Some(room_id.clone()))
+                                .map(|(live_id, state)| (*live_id, state));
+                        
+                        if let Some((live_id, state)) = loading_tab {
+                            let (tab_bar, _pos) = dock.find_tab_bar_of_tab(id!(home_tab)).unwrap();
+                            if let Some(_room_alias_id) = &state.room_alias_id {
+                                let room_id_as_live_id = LiveId::from_str(room_id.as_str());
+                                let new_tab_widget = dock.create_and_select_tab(
+                                    cx,
+                                    tab_bar,
+                                    room_id_as_live_id,
+                                    id!(preview_screen),
+                                    room_name_or_id(room_name.clone(), room_id.clone()),
+                                    id!(CloseableTab),
+                                    None,
+                                );
+                                if let Some(new_widget) = new_tab_widget {
+                                    new_widget.as_preview_screen()
+                                       .set_displayed_preview(
+                                           cx,
+                                           frp.clone()
+                                       );
+                                    dock.close_tab(cx, live_id);
+                                    self.loading_tabs.remove(&live_id);
+                                } else {
+                                    error!("BUG: failed to create tab for {room_name:?}");
+                                }
+                            } else {
+                                let Some((new_widget, true)) = dock.replace_tab(
+                                    cx,
+                                    live_id,
+                                    id!(preview_screen),
+                                    Some(room_name_or_id(room_name.clone(), room_id.clone())),
+                                    false,
+                                ) else {
+                                    error!("BUG: failed to replace tab for {room_name:?}");
+                                    return;
+                                };
+                                
+                                new_widget.as_preview_screen()
+                                    .set_displayed_preview(
+                                        cx, 
+                                        frp.clone()
+                                    );
+                            }
+                        } else {
+                            // This should never happen, but if it does, we need to handle it gracefully.
+                            error!("Failed to find loading tab for room {}", room_id);
+                        }
+                    }
+                    Err(err) => {
+                        log!("Failed to load room: {}", err);
+                    }
+                }
+            }
+            
+            // Handle actions emitted by the room loading screen within the MainDesktopUI
+            match widget_action.cast() {
+                RoomLoadingScreenAction::Loading(loading_type) => {
+                    let dock = self.view.dock(ids!(dock));
+                    
+                    match loading_type {
+                        LoadingType::Preview { room_or_alias_id, via } => {
+                            match OwnedRoomId::try_from(room_or_alias_id) {
+                                Ok(room_id) => {
+                                    let room_id_as_live_id = LiveId::from_str(room_id.as_str());
+                                    
+                                    // 1.If the room is already open, select (jump to) its existing tab
+                                    if let Some(opened_room) = self.open_rooms.get(&room_id_as_live_id) {
+                                        dock.select_tab(cx, room_id_as_live_id);
+                                        self.most_recently_selected_room = Some(opened_room.to_owned());
+                                        return;
+                                    }
+                                    
+                                    // 2. If the room is loading status, select (jump to) the loading tab, wait
+                                    // for the room to be loaded.
+                                    if let Some(_loading_tab) = self.loading_tabs.get(&room_id_as_live_id) {
+                                        dock.select_tab(cx, room_id_as_live_id);
+                                        // We don't need to set the most recently selected room here, 
+                                        // because loading tab is temporary and will be replaced by the actual different room tab once it is loaded.
+                                        return;
+                                    }
+                                    
+                                    // 3. If the room's status is not open and not loading,
+                                    // create a loading tab for waiting for the room to be loaded.
+                                    let (tab_bar, _pos) = dock.find_tab_bar_of_tab(id!(home_tab)).unwrap();
+                                    let new_loading_tab_widget = dock.create_and_select_tab(
+                                        cx,
+                                        tab_bar,
+                                        room_id_as_live_id,
+                                        id!(loading_screen),
+                                        "Loading...".into(),
+                                        id!(CloseableTab),
+                                        None
+                                    );
+                                    self.loading_tabs.insert(
+                                        room_id_as_live_id, 
+                                        LoadingTabState {
+                                            room_id: Some(room_id.clone()),
+                                            room_alias_id: None,
+                                            via: via.clone(),
+                                            loading_type: LoadingType::Preview { 
+                                                room_or_alias_id: room_id.clone().into(),
+                                                via: via.clone()
+                                            },
+                                            status: LoadingStatus::Loading
+                                        }
+                                    );
+                                    
+                                    if let Some(_new_widget) = new_loading_tab_widget {
+                                        log!("Successful to create a loading screen!");
+                                        submit_async_request(MatrixRequest::GetRoomPreview {
+                                            room_or_alias_id: room_id.clone().into(),
+                                            via: via.clone(),
+                                        });
+                                    } else {
+                                        error!("BUG: failed to create tab for {:?}", room_id_as_live_id);
+                                    }
+                                }
+                                Err(room_alias_id) => {
+                                    // 1. if the room alias is resolved, check if the room is already opened or it's client known room.
+                                    if let Some(room_id) = self.resolved_room_aliases.get(&room_alias_id) {
+                                        let room_id_as_live_id = LiveId::from_str(room_id.as_str());
+                                        if let Some(opened_room) = self.open_rooms.get(&room_id_as_live_id) {
+                                            dock.select_tab(cx, room_id_as_live_id);
+                                            self.most_recently_selected_room = Some(opened_room.to_owned());
+                                            return;
+                                        }
+                                        
+                                        if let Some(known_room) = get_client().and_then(|c| c.get_room(&room_id)) {
+                                            match known_room.state() {
+                                                RoomState::Joined => {
+                                                    self.focus_or_create_tab(cx, SelectedRoom::JoinedRoom { 
+                                                        room_id: room_id.clone().into(),
+                                                        room_name: known_room.name() 
+                                                    });
+                                                },
+                                                RoomState::Invited => {
+                                                    self.focus_or_create_tab(cx, SelectedRoom::InvitedRoom { 
+                                                        room_id: room_id.clone().into(),
+                                                        room_name: known_room.name() 
+                                                    });
+                                                }
+                                                _ => {
+                                                    enqueue_popup_notification(PopupItem {
+                                                        message: String::from("The room state is not supported yet, only joined and invited"),
+                                                        kind: PopupKind::Warning,
+                                                        auto_dismissal_duration: Some(3.0),
+                                                    });
+                                                }
+                                            }
+                                            return;
+                                        };
+                                    }
+                                    
+                                    // 2. We don't to find from the open rooms, because the open rooms' tab id only uses room_id
+                                    let room_alias_id_as_live_id = LiveId::from_str(room_alias_id.as_str());
+                                    if let Some(_loading_tab) = self.loading_tabs.get(&room_alias_id_as_live_id) {
+                                        dock.select_tab(cx, room_alias_id_as_live_id);
+                                        return;
+                                    }
+                                    
+                                    // 3. Create loading screen and to fetch room id by alias id.
+                                    let (tab_bar, _pos) = dock.find_tab_bar_of_tab(id!(home_tab)).unwrap();
+                                    let new_loading_tab_widget = dock.create_and_select_tab(
+                                        cx,
+                                        tab_bar,
+                                        room_alias_id_as_live_id,
+                                        id!(loading_screen),
+                                        "Loading...".into(),
+                                        id!(CloseableTab),
+                                        None
+                                    );
+                                    self.loading_tabs.insert(
+                                        room_alias_id_as_live_id, 
+                                        LoadingTabState {
+                                            room_id: None,
+                                            room_alias_id: Some(room_alias_id.clone()),
+                                            via: Vec::new(),
+                                            loading_type: LoadingType::Preview { 
+                                                room_or_alias_id: room_alias_id.clone().into(),
+                                                via: Vec::new()
+                                            },
+                                            status: LoadingStatus::Loading
+                                        }
+                                    );
+                                    
+                                    if let Some(_new_widget) = new_loading_tab_widget {
+                                        submit_async_request(MatrixRequest::ResolveRoomAlias(room_alias_id.clone()));
+                                    } else {
+                                        error!("BUG: failed to create tab for {:?}", room_alias_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                RoomLoadingScreenAction::None => {}
             }
 
             // Handle actions emitted by the dock within the MainDesktopUI
