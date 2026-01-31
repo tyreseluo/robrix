@@ -203,6 +203,19 @@ impl LiveRegister for App {
             cx.link(id!(tsp_link), id!(tsp_disabled));
         }
 
+        // If the `robit` cargo feature is enabled, we create a new "robit_link" DSL namespace
+        // and link it to the real `robit_enabled` DSL namespace, which contains real Robit widgets.
+        // If the `robit` feature is not enabled, link the "robit_link" DSL namespace
+        // to the `robit_disabled` DSL namespace instead, which defines dummy placeholder widgets.
+        #[cfg(feature = "robit")] {
+            crate::robit::live_design(cx);
+            cx.link(id!(robit_link), id!(robit_enabled));
+        }
+        #[cfg(not(feature = "robit"))] {
+            crate::robit_dummy::live_design(cx);
+            cx.link(id!(robit_link), id!(robit_disabled));
+        }
+
         crate::settings::live_design(cx);
         crate::room::live_design(cx);
         crate::join_leave_room_modal::live_design(cx);

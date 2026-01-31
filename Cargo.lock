@@ -4785,6 +4785,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "robit"
+version = "0.1.0"
+
+[[package]]
 name = "robius-android-env"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4876,6 +4880,7 @@ dependencies = [
  "rand 0.8.5",
  "rangemap",
  "reqwest",
+ "robit",
  "robius-directories",
  "robius-location",
  "robius-open",

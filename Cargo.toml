@@ -80,11 +80,14 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 thiserror = "2.0.16"
 
+robit = { path = "../robit/crates/robit" , optional = true }
 
 [features]
 default = []
 ## Enables experimental support for using TSP wallets.
 tsp = ["dep:tsp_sdk", "dep:quinn", "dep:aws-lc-rs", "dep:percent-encoding"]
+
+robit = ["dep:robit"]
 
 ## Hides the command prompt console on Windows.
 hide_windows_console = []

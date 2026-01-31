@@ -39,6 +39,13 @@ pub mod tsp;
 #[cfg(not(feature = "tsp"))]
 pub mod tsp_dummy;
 
+#[cfg(feature = "robit")]
+#[path = "features/robit/robit_settings_screen.rs"]
+pub mod robit;
+#[cfg(not(feature = "robit"))]
+#[path = "features/robit/robit_dummy.rs"]
+pub mod robit_dummy;
+
 
 // Matrix stuff
 pub mod sliding_sync;
