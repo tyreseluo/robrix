@@ -1,12 +1,22 @@
 
 use makepad_widgets::*;
+use serde::Deserialize;
+use tokio::runtime::Builder;
 
 use crate::{
     home::navigation_tab_bar::{NavigationBarAction, get_own_profile},
     profile::user_profile::UserProfile,
     settings::account_settings::AccountSettingsWidgetExt,
-    shared::styles::{COLOR_ACTIVE_PRIMARY, COLOR_PRIMARY},
+    shared::styles::{
+        COLOR_ACTIVE_PRIMARY,
+        COLOR_PRIMARY,
+        COLOR_FG_ACCEPT_GREEN,
+        COLOR_FG_DANGER_RED,
+        COLOR_FG_DISABLED,
+    },
 };
+
+const ROBIT_MODEL_ROW_COUNT: usize = 10;
 
 live_design! {
     use link::theme::*;
@@ -22,6 +32,86 @@ live_design! {
     use link::tsp_link::CreateWalletModal;
     use link::tsp_link::CreateDidModal;
     use link::robit_link::RobitSettingsScreen;
+
+    IMG_PROVIDER_DEEPSEEK = dep("crate://self/resources/img/providers/deepseek.png")
+    IMG_SYNC_REFRESH = dep("crate://self/resources/img/refresh_icon.png")
+
+    RobitSwitch = <Toggle> {
+        // U+200e to avoid rendering a label.
+        text: "‎"
+        draw_bg: {
+            fn pixel(self) -> vec4 {
+                let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                let pill_padding = 2.0;
+                let pill_color_off = #D9D9D9;
+                let pill_color_on = #429E92;
+
+                let pill_radius = self.rect_size.y * 0.5;
+                let ball_radius = pill_radius - pill_padding;
+
+                sdf.circle(pill_radius, pill_radius, pill_radius);
+                sdf.fill(mix(pill_color_off, pill_color_on, self.active));
+
+                sdf.circle(self.rect_size.x - pill_radius, pill_radius, pill_radius);
+                sdf.fill(mix(pill_color_off, pill_color_on, self.active));
+
+                sdf.rect(pill_radius, 0.0, self.rect_size.x - 2.0 * pill_radius, self.rect_size.y);
+                sdf.fill(mix(pill_color_off, pill_color_on, self.active));
+
+                sdf.circle(
+                    pill_padding + ball_radius + self.active * (self.rect_size.x - 2.0 * ball_radius - 2.0 * pill_padding),
+                    pill_radius,
+                    ball_radius
+                );
+                sdf.fill(#fff);
+
+                return sdf.result;
+            }
+        }
+    }
+
+    RobitModelRow = <RoundedView> {
+        visible: false
+        width: Fill,
+        height: Fit,
+        flow: Right,
+        spacing: 8,
+        padding: {top: 6, bottom: 6, left: 8, right: 8},
+
+        show_bg: true,
+        draw_bg: {
+            color: #FFFFFF,
+            border_radius: 4.0
+        }
+
+        model_name = <Label> {
+            width: Fill,
+            draw_text: {
+                text_style: <REGULAR_TEXT>{font_size: 11},
+                color: #000000
+            },
+            text: "model-name"
+        }
+
+        model_toggle = <RoundedView> {
+            width: Fit,
+            height: Fit,
+            padding: {top: 4, bottom: 4, left: 10, right: 10},
+            show_bg: true,
+            draw_bg: {
+                color: (COLOR_BG_ACCEPT_GREEN),
+                border_radius: 10.0
+            }
+
+            <Label> {
+                draw_text: {
+                    text_style: <REGULAR_TEXT>{font_size: 10},
+                    color: (COLOR_FG_ACCEPT_GREEN)
+                },
+                text: "Enabled"
+            }
+        }
+    }
 
     // The main, top-level settings screen widget.
     pub SettingsScreen = {{SettingsScreen}} {
@@ -1981,24 +2071,325 @@ live_design! {
                             robit_content_agent = <View> {
                                 visible: false
                                 width: Fill,
-                                height: Fit,
-                                flow: Down,
-                                spacing: 8,
+                                height: Fill,
+                                flow: Right,
+                                spacing: 12,
 
-                                <TitleLabel> {
-                                    text: "Provider Settings"
+                                provider_list = <RoundedView> {
+                                    width: 170,
+                                    height: Fill,
+                                    flow: Down,
+                                    spacing: 8,
+                                    padding: 10,
+
+                                    show_bg: true,
+                                    draw_bg: {
+                                        color: #F2F2F2,
+                                        border_radius: 8.0
+                                    }
+
+                                    <Label> {
+                                        draw_text: {
+                                            text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                            color: #000000
+                                        },
+                                        text: "Providers"
+                                    }
+
+
+
+                                    provider_item_deepseek = <RoundedView> {
+                                        width: Fill,
+                                        height: Fit,
+                                        flow: Overlay,
+                                        show_bg: true,
+                                        draw_bg: {
+                                            color: #FFFFFF,
+                                            border_radius: 6.0
+                                        }
+
+                                        content = <View> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Right,
+                                            spacing: 8,
+                                            padding: {top: 8, bottom: 8, left: 8, right: 8},
+                                            align: {y: 0.5},
+
+                <Image> {
+                    width: 18,
+                    height: 18,
+                    align: {y: 0.5},
+                    source: (IMG_PROVIDER_DEEPSEEK)
+                }
+
+                <Label> {
+                    align: {y: 0.5},
+                    draw_text: {
+                        text_style: <REGULAR_TEXT>{font_size: 11},
+                        color: #000000
+                                                },
+                                                text: "DeepSeek"
+                                            }
+                                        }
+
+                                        provider_item_deepseek_button = <RobrixIconButton> {
+                                            width: Fill,
+                                            height: Fill,
+                                            padding: 0,
+                                            cursor: Hand,
+                                            draw_bg: {
+                                                color: #00000000,
+                                                color_hover: #00000000,
+                                                border_size: 0.0
+                                            }
+                                            draw_text: { color: #00000000 }
+                                            text: ""
+                                        }
+                                    }
                                 }
 
-                                <Label> {
+                                provider_detail = <RoundedView> {
                                     width: Fill,
-                                    draw_text: {
-                                        text_style: <REGULAR_TEXT>{
-                                            font_size: 13,
-                                        },
-                                        color: #000000,
-                                        wrap: Word
-                                    },
-                                    text: "Provider Settings Page Handler"
+                                    height: Fill,
+                                    flow: Down,
+                                    padding: 12,
+
+                                    show_bg: true,
+                                    draw_bg: {
+                                        color: #F7F7F7,
+                                        border_radius: 8.0
+                                    }
+
+                                    detail_scroll = <ScrollXYView> {
+                                        width: Fill,
+                                        height: Fill,
+                                        flow: Down,
+                                        spacing: 12,
+
+
+
+                                        provider_detail_deepseek = <View> {
+                                            visible: true
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 12,
+
+                                            header_row = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 6,
+
+                                                header_title_row = <View> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 8,
+                                                    align: {y: 0.5},
+
+                                                    <Label> {
+                                                        draw_text: {
+                                                            text_style: <THEME_FONT_BOLD>{font_size: 13},
+                                                            color: #000000
+                                                        },
+                                                        text: "DeepSeek"
+                                                    }
+
+                                                    <Label> {
+                                                        margin: {left: 6},
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 11},
+                                                            color: #666666
+                                                        },
+                                                        text: "Type: DeepSeek"
+                                                    }
+                                                }
+
+                                                header_actions_row = <View> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    align: {y: 0.5},
+
+                                                    <FillerX> {}
+
+                                                    refresh_button = <View> {
+                                                        visible: false
+                                                        cursor: Hand
+                                                        width: 22,
+                                                        height: 22,
+                                                        align: {y: 0.5},
+
+                                                        refresh_icon = <Image> {
+                                                            width: 16,
+                                                            height: 16,
+                                                            source: (IMG_SYNC_REFRESH)
+                                                        }
+                                                    }
+
+                                                    provider_enabled_switch = <RobitSwitch> {
+                                                        width: 34,
+                                                        height: 18
+                                                    }
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            api_host_group = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 6,
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "API Host"
+                                                }
+
+                                                api_host_input = <RobrixTextInput> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    text: "https://api.deepseek.com/v1",
+                                                    draw_bg: {
+                                                        color: #FFFFFF,
+                                                        border_size: 1.0,
+                                                        border_color: #DDDDDD,
+                                                        border_radius: 4.0
+                                                    }
+                                                    draw_text: {
+                                                        color: #000000
+                                                        text_style: <REGULAR_TEXT> {font_size: 11}
+                                                    }
+                                                }
+                                            }
+
+                                            api_key_group = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 6,
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "API Key"
+                                                }
+
+                                                api_key_row = <View> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 6,
+                                                    align: {y: 0.5},
+
+                                                    api_key_input = <RobrixTextInput> {
+                                                        width: Fill,
+                                                        height: Fit,
+                                                        text: "",
+                                                        empty_text: "sk-deepseek-********************************",
+                                                        is_password: true,
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                    }
+
+                                                    toggle_key_visibility = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        }
+                                                        draw_icon: {
+                                                            svg_file: (ICON_VIEW_SOURCE),
+                                                            color: #666666
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                            }
+
+                                            save_provider_button = <RobrixIconButton> {
+                                                width: Fit,
+                                                padding: {top: 6, bottom: 6, left: 12, right: 12}
+                                                draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                text: "Save"
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            <Label> {
+                                                draw_text: {
+                                                    text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                    color: #000000
+                                                },
+                                                text: "Models"
+                                            }
+
+                                            models_status_label = <Label> {
+                                                width: Fill,
+                                                draw_text: {
+                                                    text_style: <REGULAR_TEXT>{font_size: 10},
+                                                    color: #666666
+                                                },
+                                                text: "Haven't synchronized models since app launch"
+                                            }
+
+                                            models_list = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 6,
+
+                                                model_row_0 = <RobitModelRow> {}
+                                                model_row_1 = <RobitModelRow> {}
+                                                model_row_2 = <RobitModelRow> {}
+                                                model_row_3 = <RobitModelRow> {}
+                                                model_row_4 = <RobitModelRow> {}
+                                                model_row_5 = <RobitModelRow> {}
+                                                model_row_6 = <RobitModelRow> {}
+                                                model_row_7 = <RobitModelRow> {}
+                                                model_row_8 = <RobitModelRow> {}
+                                                model_row_9 = <RobitModelRow> {}
+
+                                                models_overflow_label = <Label> {
+                                                    visible: false
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 10},
+                                                        color: #666666
+                                                    },
+                                                    text: ""
+                                                }
+
+                                                models_empty_label = <Label> {
+                                                    visible: false
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 10},
+                                                        color: #666666
+                                                    },
+                                                    text: "No models synced yet"
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -2064,6 +2455,9 @@ live_design! {
 pub struct SettingsScreen {
     #[deref] view: View,
     #[rust] robit_modal_tab: RobitModalTab,
+    #[rust] robit_provider_show_key_deepseek: bool,
+    #[rust] robit_provider_models: Vec<String>,
+    #[rust] robit_provider_sync_status: RobitProviderSyncStatus,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
@@ -2072,6 +2466,27 @@ enum RobitModalTab {
     All,
     Agent,
     About,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum RobitProviderSyncStatus {
+    Disconnected,
+    Connecting,
+    Synced,
+    Error(String),
+}
+
+impl Default for RobitProviderSyncStatus {
+    fn default() -> Self {
+        RobitProviderSyncStatus::Disconnected
+    }
+}
+
+#[derive(Clone, Debug, DefaultNone)]
+enum RobitProviderSyncAction {
+    None,
+    Success(Vec<String>),
+    Failure(String),
 }
 
 impl Widget for SettingsScreen {
@@ -2106,6 +2521,17 @@ impl Widget for SettingsScreen {
         if let Event::Actions(actions) = event {
             if self.view.button(ids!(robit_settings_screen.robit_open_button)).clicked(actions) {
                 self.set_robit_modal_tab(cx, RobitModalTab::All);
+                self.robit_provider_show_key_deepseek = false;
+                self.reset_robit_provider_state(cx);
+                self.view
+                    .text_input(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.api_key_row.api_key_input))
+                    .apply_over(cx, live! { is_password: true });
+                self.view
+                    .check_box(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.header_row.header_actions_row.provider_enabled_switch))
+                    .set_active(cx, false);
+                self.view
+                    .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.header_row.header_actions_row.refresh_button))
+                    .set_visible(cx, false);
                 self.view.modal(ids!(robit_modal)).open(cx);
             }
 
@@ -2119,6 +2545,50 @@ impl Widget for SettingsScreen {
 
             if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_about_button)).clicked(actions) {
                 self.set_robit_modal_tab(cx, RobitModalTab::About);
+            }
+
+            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.api_key_row.toggle_key_visibility)).clicked(actions) {
+                self.robit_provider_show_key_deepseek = !self.robit_provider_show_key_deepseek;
+                self.view
+                    .text_input(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.api_key_row.api_key_input))
+                    .apply_over(cx, live! { is_password: (!self.robit_provider_show_key_deepseek) });
+            }
+
+            let provider_enabled_switch = self
+                .view
+                .check_box(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.header_row.header_actions_row.provider_enabled_switch));
+            if let Some(enabled) = provider_enabled_switch.changed(actions) {
+                self.view
+                    .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.header_row.header_actions_row.refresh_button))
+                    .set_visible(cx, enabled);
+            }
+
+            if self
+                .view
+                .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.header_row.header_actions_row.refresh_button))
+                .finger_up(actions)
+                .is_some()
+            {
+                self.start_deepseek_model_sync(cx);
+            }
+
+            for action in actions {
+                if let Some(sync_action) = action.downcast_ref::<RobitProviderSyncAction>() {
+                    match sync_action {
+                        RobitProviderSyncAction::Success(models) => {
+                            self.robit_provider_models = models.clone();
+                            self.set_robit_provider_sync_status(cx, RobitProviderSyncStatus::Synced);
+                            self.apply_robit_provider_models(cx);
+                        }
+                        RobitProviderSyncAction::Failure(error) => {
+                            self.set_robit_provider_sync_status(
+                                cx,
+                                RobitProviderSyncStatus::Error(error.clone()),
+                            );
+                        }
+                        RobitProviderSyncAction::None => {}
+                    }
+                }
             }
 
             if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_close_button)).clicked(actions)
@@ -2205,6 +2675,7 @@ impl SettingsScreen {
         self.update_robit_modal_nav_styles(cx);
     }
 
+
     fn update_robit_modal_nav_styles(&mut self, cx: &mut Cx) {
         let unselected_bg = vec4(0.89, 0.89, 0.89, 1.0);
         let unselected_text = vec4(0.2, 0.2, 0.2, 1.0);
@@ -2239,6 +2710,192 @@ impl SettingsScreen {
             self.robit_modal_tab == RobitModalTab::About,
         );
     }
+
+    fn reset_robit_provider_state(&mut self, cx: &mut Cx) {
+        self.robit_provider_models = vec![
+            "deepseek-chat".to_string(),
+            "deepseek-reasoner".to_string(),
+            "deepseek-coder".to_string(),
+        ];
+        self.set_robit_provider_sync_status(cx, RobitProviderSyncStatus::Disconnected);
+        self.apply_robit_provider_models(cx);
+    }
+
+    fn set_robit_provider_sync_status(&mut self, cx: &mut Cx, status: RobitProviderSyncStatus) {
+        self.robit_provider_sync_status = status.clone();
+        let status_label = self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_status_label));
+        match status {
+            RobitProviderSyncStatus::Disconnected => {
+                status_label.set_text(cx, "Haven't synchronized models since app launch");
+                status_label.apply_over(cx, live!{
+                    draw_text: { color: (COLOR_FG_DISABLED) }
+                });
+            }
+            RobitProviderSyncStatus::Connecting => {
+                status_label.set_text(cx, "Connecting...");
+                status_label.apply_over(cx, live!{
+                    draw_text: { color: (COLOR_FG_DISABLED) }
+                });
+            }
+            RobitProviderSyncStatus::Synced => {
+                status_label.set_text(cx, "Models synchronized");
+                status_label.apply_over(cx, live!{
+                    draw_text: { color: (COLOR_FG_ACCEPT_GREEN) }
+                });
+            }
+            RobitProviderSyncStatus::Error(message) => {
+                status_label.set_text(cx, &message);
+                status_label.apply_over(cx, live!{
+                    draw_text: { color: (COLOR_FG_DANGER_RED) }
+                });
+            }
+        }
+    }
+
+    fn apply_robit_provider_models(&mut self, cx: &mut Cx) {
+        let models = self.robit_provider_models.clone();
+        let mut rendered = 0;
+        for (index, model) in models.iter().enumerate() {
+            if index >= ROBIT_MODEL_ROW_COUNT {
+                break;
+            }
+            if !self.set_robit_model_row(cx, index, Some(model)) {
+                break;
+            }
+            rendered += 1;
+        }
+
+        for index in rendered..ROBIT_MODEL_ROW_COUNT {
+            self.set_robit_model_row(cx, index, None);
+        }
+
+        let overflow = models.len().saturating_sub(ROBIT_MODEL_ROW_COUNT);
+        let overflow_label = self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.models_overflow_label));
+        if overflow > 0 {
+            overflow_label.set_text(cx, &format!("and {overflow} more"));
+            overflow_label.set_visible(cx, true);
+        } else {
+            overflow_label.set_visible(cx, false);
+        }
+
+        let empty_label = self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.models_empty_label));
+        empty_label.set_visible(cx, models.is_empty());
+    }
+
+    fn set_robit_model_row(&mut self, cx: &mut Cx, index: usize, model_name: Option<&str>) -> bool {
+        let visible = model_name.is_some();
+        match index {
+            0 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_0)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_0.model_name)).set_text(cx, name);
+                }
+            }
+            1 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_1)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_1.model_name)).set_text(cx, name);
+                }
+            }
+            2 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_2)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_2.model_name)).set_text(cx, name);
+                }
+            }
+            3 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_3)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_3.model_name)).set_text(cx, name);
+                }
+            }
+            4 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_4)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_4.model_name)).set_text(cx, name);
+                }
+            }
+            5 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_5)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_5.model_name)).set_text(cx, name);
+                }
+            }
+            6 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_6)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_6.model_name)).set_text(cx, name);
+                }
+            }
+            7 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_7)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_7.model_name)).set_text(cx, name);
+                }
+            }
+            8 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_8)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_8.model_name)).set_text(cx, name);
+                }
+            }
+            9 => {
+                self.view.view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_9)).set_visible(cx, visible);
+                if let Some(name) = model_name {
+                    self.view.label(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.models_list.model_row_9.model_name)).set_text(cx, name);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn start_deepseek_model_sync(&mut self, cx: &mut Cx) {
+        let api_host = self
+            .view
+            .text_input(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.api_host_group.api_host_input))
+            .text()
+            .trim()
+            .to_string();
+        let api_key = self
+            .view
+            .text_input(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent.provider_detail.detail_scroll.provider_detail_deepseek.api_key_row.api_key_input))
+            .text()
+            .trim()
+            .to_string();
+
+        if api_host.is_empty() {
+            self.set_robit_provider_sync_status(
+                cx,
+                RobitProviderSyncStatus::Error("Missing API host".to_string()),
+            );
+            return;
+        }
+
+        if api_key.is_empty() {
+            self.set_robit_provider_sync_status(
+                cx,
+                RobitProviderSyncStatus::Error("Missing API key".to_string()),
+            );
+            return;
+        }
+
+        self.set_robit_provider_sync_status(cx, RobitProviderSyncStatus::Connecting);
+
+        cx.spawn_thread(move || {
+            let runtime = Builder::new_current_thread().enable_all().build();
+            let result = match runtime {
+                Ok(rt) => rt.block_on(fetch_deepseek_models(api_host, api_key)),
+                Err(err) => Err(err.to_string()),
+            };
+            match result {
+                Ok(models) => Cx::post_action(RobitProviderSyncAction::Success(models)),
+                Err(error) => Cx::post_action(RobitProviderSyncAction::Failure(error)),
+            }
+            SignalToUI::set_ui_signal();
+        });
+    }
+
     /// Fetches the current user's profile and uses it to populate the settings screen.
     pub fn populate(&mut self, cx: &mut Cx, own_profile: Option<UserProfile>) {
         let Some(profile) = own_profile.or_else(|| get_own_profile(cx)) else {
@@ -2250,6 +2907,37 @@ impl SettingsScreen {
         cx.set_key_focus(self.view.area());
         self.redraw(cx);
     }
+}
+
+#[derive(Deserialize)]
+struct DeepSeekModelsResponse {
+    data: Vec<DeepSeekModelItem>,
+}
+
+#[derive(Deserialize)]
+struct DeepSeekModelItem {
+    id: String,
+}
+
+async fn fetch_deepseek_models(api_host: String, api_key: String) -> Result<Vec<String>, String> {
+    let base = api_host.trim_end_matches('/');
+    let url = format!("{base}/models");
+    let client = reqwest::Client::new();
+    let response = client
+        .get(url)
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?
+        .error_for_status()
+        .map_err(|err| err.to_string())?;
+    let payload = response
+        .json::<DeepSeekModelsResponse>()
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut models: Vec<String> = payload.data.into_iter().map(|model| model.id).collect();
+    models.sort();
+    Ok(models)
 }
 
 impl SettingsScreenRef {
