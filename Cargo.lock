@@ -4787,6 +4787,12 @@ dependencies = [
 [[package]]
 name = "robit"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "robius-android-env"

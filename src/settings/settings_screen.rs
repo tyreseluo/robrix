@@ -137,91 +137,1847 @@ live_design! {
                     robit_modal_body = <View> {
                         width: Fill,
                         height: Fill,
-                        flow: Right,
+                        flow: Overlay,
                         spacing: 0,
-
-                        robit_modal_nav = <RoundedView> {
-                            width: 200,
-                            height: Fill,
-                            flow: Down,
-                            spacing: 8,
-                            padding: 10,
-
-                            show_bg: true,
-                            draw_bg: {
-                                color: (COLOR_SECONDARY),
-                            }
-
-                            robit_nav_all_button = <RobrixIconButton> {
-                                width: Fill,
-                                padding: {top: 8, bottom: 8, left: 10, right: 10}
-                                draw_bg: {
-                                    color: (COLOR_SECONDARY)
-                                }
-                                draw_text: {
-                                    color: (MESSAGE_TEXT_COLOR)
-                                    text_style: <REGULAR_TEXT> {font_size: 12}
-                                }
-                                text: "All"
-                            }
-
-                            robit_nav_agent_button = <RobrixIconButton> {
-                                width: Fill,
-                                padding: {top: 8, bottom: 8, left: 10, right: 10}
-                                draw_bg: {
-                                    color: (COLOR_SECONDARY)
-                                }
-                                draw_text: {
-                                    color: (MESSAGE_TEXT_COLOR)
-                                    text_style: <REGULAR_TEXT> {font_size: 12}
-                                }
-                                text: "Agents Config"
-                            }
-
-                            robit_nav_about_button = <RobrixIconButton> {
-                                width: Fill,
-                                padding: {top: 8, bottom: 8, left: 10, right: 10}
-                                draw_bg: {
-                                    color: (COLOR_SECONDARY)
-                                }
-                                draw_text: {
-                                    color: (MESSAGE_TEXT_COLOR)
-                                    text_style: <REGULAR_TEXT> {font_size: 12}
-                                }
-                                text: "About"
-                            }
-                        }
-
-                        robit_modal_content = <View> {
+                        robit_modal_main = <View> {
                             width: Fill,
                             height: Fill,
-                            flow: Down,
-                            spacing: 10,
-                            padding: {top: 20, right: 20, bottom: 20, left: 20},
+                            flow: Right,
+                            spacing: 0,
 
-                            robit_content_all = <View> {
-                                width: Fill,
-                                height: Fit,
+
+                            robit_modal_nav = <RoundedView> {
+                                width: 200,
+                                height: Fill,
                                 flow: Down,
                                 spacing: 8,
+                                padding: 10,
 
-                                <TitleLabel> {
+                                show_bg: true,
+                                draw_bg: {
+                                    color: (COLOR_SECONDARY),
+                                }
+
+                                robit_nav_close_button = <RobrixIconButton> {
+                                    width: Fit,
+                                    height: Fit,
+                                    margin: {bottom: 4},
+                                    padding: 6,
+                                    draw_bg: {
+                                        color: #00000000,
+                                        color_hover: #00000000,
+                                        border_size: 0.0
+                                    },
+                                    draw_icon: {
+                                        svg_file: (ICON_CLOSE),
+                                        color: #000000
+                                    }
+                                    icon_walk: {width: 12, height: 12}
+                                }
+
+                                robit_nav_all_button = <RobrixIconButton> {
+                                    width: Fill,
+                                    padding: {top: 8, bottom: 8, left: 10, right: 10}
+                                    draw_bg: {
+                                        color: (COLOR_SECONDARY)
+                                    }
+                                    draw_text: {
+                                        color: (MESSAGE_TEXT_COLOR)
+                                        text_style: <REGULAR_TEXT> {font_size: 12}
+                                    }
                                     text: "All"
                                 }
 
-                                <Label> {
+                                robit_nav_agent_button = <RobrixIconButton> {
                                     width: Fill,
+                                    padding: {top: 8, bottom: 8, left: 10, right: 10}
+                                    draw_bg: {
+                                        color: (COLOR_SECONDARY)
+                                    }
                                     draw_text: {
-                                        text_style: <REGULAR_TEXT>{
-                                            font_size: 13,
-                                        },
-                                        color: #000000,
-                                        wrap: Word
-                                    },
-                                    text: "All 页面内容占位。"
+                                        color: (MESSAGE_TEXT_COLOR)
+                                        text_style: <REGULAR_TEXT> {font_size: 12}
+                                    }
+                                    text: "Provider Settings"
+                                }
+
+                                robit_nav_about_button = <RobrixIconButton> {
+                                    width: Fill,
+                                    padding: {top: 8, bottom: 8, left: 10, right: 10}
+                                    draw_bg: {
+                                        color: (COLOR_SECONDARY)
+                                    }
+                                    draw_text: {
+                                        color: (MESSAGE_TEXT_COLOR)
+                                        text_style: <REGULAR_TEXT> {font_size: 12}
+                                    }
+                                    text: "About Robit"
                                 }
                             }
 
+                            robit_modal_content = <View> {
+                                width: Fill,
+                                height: Fill,
+                                flow: Down,
+                                spacing: 10,
+                                padding: {top: 20, right: 20, bottom: 20, left: 20},
+
+                                robit_content_all = <View> {
+                                    width: Fill,
+                                    height: Fill,
+                                    flow: Down,
+                                    spacing: 12,
+
+                                    all_toolbar = <View> {
+                                        width: Fill,
+                                        height: Fit,
+                                        flow: Right,
+                                        align: {y: 0.5},
+                                        padding: {bottom: 6},
+
+                                        <FillerX> {}
+
+                                        new_robit_button = <RobrixIconButton> {
+                                            padding: {top: 8, bottom: 8, left: 12, right: 12}
+                                            draw_bg: {
+                                                color: (COLOR_ACTIVE_PRIMARY)
+                                            }
+                                            draw_icon: {
+                                                svg_file: (ICON_ADD)
+                                                color: (COLOR_PRIMARY)
+                                            }
+                                            draw_text: {
+                                                color: (COLOR_PRIMARY)
+                                                text_style: <REGULAR_TEXT> {font_size: 12}
+                                            }
+                                            icon_walk: {width: 12, height: 12}
+                                            text: "New Robit"
+                                        }
+                                    }
+
+                                    all_scroll = <ScrollXYView> {
+                                        width: Fill,
+                                        height: Fill,
+                                        flow: Down,
+                                        spacing: 12,
+
+                                        workspace_card_design = <RoundedView> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 8,
+                                            padding: 12,
+
+                                            show_bg: true,
+                                            draw_bg: {
+                                                color: #F6F6F6,
+                                                border_radius: 8.0
+                                            }
+
+                                            workspace_header = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 8,
+                                                align: {y: 0.5},
+                                                cursor: Hand,
+
+                                                <Label> {
+                                                    width: 14,
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #333333
+                                                    },
+                                                    text: "▾"
+                                                }
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "Design Ops"
+                                                }
+
+                                                <Label> {
+                                                    margin: {left: 6},
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "3 rooms"
+                                                }
+
+                                                <FillerX> {}
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "Default: gpt-4.1-mini"
+                                                }
+
+                                                workspace_delete_button = <RobrixIconButton> {
+                                                    padding: 6,
+                                                    draw_bg: {
+                                                        color: #00000000,
+                                                        color_hover: #00000000,
+                                                        border_size: 0.0
+                                                    },
+                                                    draw_icon: {
+                                                        svg_file: (ICON_TRASH),
+                                                        color: (COLOR_FG_DANGER_RED)
+                                                    }
+                                                    icon_walk: {width: 12, height: 12}
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            workspace_rooms = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 4,
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#product-briefs"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4.1-mini ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#design-reviews"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4.1 ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: true
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#ux-research"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4o-mini ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        workspace_card_sales = <RoundedView> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 8,
+                                            padding: 12,
+
+                                            show_bg: true,
+                                            draw_bg: {
+                                                color: #F6F6F6,
+                                                border_radius: 8.0
+                                            }
+
+                                            workspace_header = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 8,
+                                                align: {y: 0.5},
+                                                cursor: Hand,
+
+                                                <Label> {
+                                                    width: 14,
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #333333
+                                                    },
+                                                    text: "▾"
+                                                }
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "Sales Hub"
+                                                }
+
+                                                <Label> {
+                                                    margin: {left: 6},
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "3 rooms"
+                                                }
+
+                                                <FillerX> {}
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "Default: gpt-4o-mini"
+                                                }
+
+                                                workspace_delete_button = <RobrixIconButton> {
+                                                    padding: 6,
+                                                    draw_bg: {
+                                                        color: #00000000,
+                                                        color_hover: #00000000,
+                                                        border_size: 0.0
+                                                    },
+                                                    draw_icon: {
+                                                        svg_file: (ICON_TRASH),
+                                                        color: (COLOR_FG_DANGER_RED)
+                                                    }
+                                                    icon_walk: {width: 12, height: 12}
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            workspace_rooms = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 4,
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#pipeline-qa"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4o-mini ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#partner-requests"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4o ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#pricing-ops"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4.1-mini ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        workspace_card_growth = <RoundedView> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 8,
+                                            padding: 12,
+
+                                            show_bg: true,
+                                            draw_bg: {
+                                                color: #F6F6F6,
+                                                border_radius: 8.0
+                                            }
+
+                                            workspace_header = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 8,
+                                                align: {y: 0.5},
+                                                cursor: Hand,
+
+                                                <Label> {
+                                                    width: 14,
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #333333
+                                                    },
+                                                    text: "▸"
+                                                }
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "Growth"
+                                                }
+
+                                                <Label> {
+                                                    margin: {left: 6},
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "4 rooms"
+                                                }
+
+                                                <FillerX> {}
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "Default: gpt-4o"
+                                                }
+
+                                                workspace_delete_button = <RobrixIconButton> {
+                                                    padding: 6,
+                                                    draw_bg: {
+                                                        color: #00000000,
+                                                        color_hover: #00000000,
+                                                        border_size: 0.0
+                                                    },
+                                                    draw_icon: {
+                                                        svg_file: (ICON_TRASH),
+                                                        color: (COLOR_FG_DANGER_RED)
+                                                    }
+                                                    icon_walk: {width: 12, height: 12}
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            workspace_rooms = <View> {
+                                                visible: false
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 4,
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#growth-experiments"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4o ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        workspace_card_platform = <RoundedView> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 8,
+                                            padding: 12,
+
+                                            show_bg: true,
+                                            draw_bg: {
+                                                color: #F6F6F6,
+                                                border_radius: 8.0
+                                            }
+
+                                            workspace_header = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 8,
+                                                align: {y: 0.5},
+                                                cursor: Hand,
+
+                                                <Label> {
+                                                    width: 14,
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #333333
+                                                    },
+                                                    text: "▾"
+                                                }
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "Platform"
+                                                }
+
+                                                <Label> {
+                                                    margin: {left: 6},
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "3 rooms"
+                                                }
+
+                                                <FillerX> {}
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "Default: gpt-4.1"
+                                                }
+
+                                                workspace_delete_button = <RobrixIconButton> {
+                                                    padding: 6,
+                                                    draw_bg: {
+                                                        color: #00000000,
+                                                        color_hover: #00000000,
+                                                        border_size: 0.0
+                                                    },
+                                                    draw_icon: {
+                                                        svg_file: (ICON_TRASH),
+                                                        color: (COLOR_FG_DANGER_RED)
+                                                    }
+                                                    icon_walk: {width: 12, height: 12}
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            workspace_rooms = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 4,
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#infra-alerts"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4.1 ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#release-notes"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4.1-mini ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#oncall"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4o ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        workspace_card_unassigned = <RoundedView> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 8,
+                                            padding: 12,
+
+                                            show_bg: true,
+                                            draw_bg: {
+                                                color: #F6F6F6,
+                                                border_radius: 8.0
+                                            }
+
+                                            workspace_header = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 8,
+                                                align: {y: 0.5},
+
+                                                <Label> {
+                                                    width: 14,
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #333333
+                                                    },
+                                                    text: "•"
+                                                }
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "Standalone Rooms"
+                                                }
+
+                                                <Label> {
+                                                    margin: {left: 6},
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "2 rooms"
+                                                }
+
+                                                <FillerX> {}
+
+                                                workspace_delete_button = <RobrixIconButton> {
+                                                    padding: 6,
+                                                    draw_bg: {
+                                                        color: #00000000,
+                                                        color_hover: #00000000,
+                                                        border_size: 0.0
+                                                    },
+                                                    draw_icon: {
+                                                        svg_file: (ICON_TRASH),
+                                                        color: (COLOR_FG_DANGER_RED)
+                                                    }
+                                                    icon_walk: {width: 12, height: 12}
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            workspace_rooms = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Down,
+                                                spacing: 4,
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#random"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4o-mini ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+
+                                                <RoundedView> {
+                                                    width: Fill,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 10,
+                                                    padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                    cursor: Hand,
+
+                                                    show_bg: true,
+                                                    draw_bg: {
+                                                        instance hover: 0.0
+                                                        color: #00000000
+                                                        color_hover: #00000010
+                                                        border_radius: 4.0
+                                                        fn get_color(self) -> vec4 {
+                                                            return mix(self.color, self.color_hover, self.hover);
+                                                        }
+                                                        fn pixel(self) -> vec4 {
+                                                            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                            sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                            sdf.fill(self.get_color());
+                                                            return sdf.result;
+                                                        }
+                                                    }
+
+                                                    <Label> {
+                                                        width: Fill,
+                                                        draw_text: {
+                                                            text_style: <REGULAR_TEXT>{font_size: 12},
+                                                            color: #000000,
+                                                            wrap: Word
+                                                        },
+                                                        text: "#private-notes"
+                                                    }
+
+                                                    model_select = <RobrixIconButton> {
+                                                        width: 150,
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: {
+                                                            color: #FFFFFF,
+                                                            border_size: 1.0,
+                                                            border_color: #DDDDDD,
+                                                            border_radius: 4.0
+                                                        }
+                                                        draw_text: {
+                                                            color: #000000
+                                                            text_style: <REGULAR_TEXT> {font_size: 11}
+                                                        }
+                                                        text: "gpt-4.1-mini ▾"
+                                                    }
+
+                                                    model_actions = <View> {
+                                                        width: Fit,
+                                                        height: Fit,
+                                                        flow: Right,
+                                                        spacing: 6,
+                                                        visible: false
+
+                                                        save_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                            draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Save"
+                                                        }
+
+                                                        cancel_button = <RobrixIconButton> {
+                                                            padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                            draw_bg: { color: (COLOR_SECONDARY) }
+                                                            draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                            text: "Cancel"
+                                                        }
+                                                    }
+
+                                                    room_delete_button = <RobrixIconButton> {
+                                                        padding: 6,
+                                                        draw_bg: {
+                                                            color: #00000000,
+                                                            color_hover: #00000000,
+                                                            border_size: 0.0
+                                                        },
+                                                        draw_icon: {
+                                                            svg_file: (ICON_TRASH),
+                                                            color: (COLOR_FG_DANGER_RED)
+                                                        }
+                                                        icon_walk: {width: 12, height: 12}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        room_card_personal = <RoundedView> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 8,
+                                            padding: 12,
+
+                                            show_bg: true,
+                                            draw_bg: {
+                                                color: #F6F6F6,
+                                                border_radius: 8.0
+                                            }
+
+                                            room_header = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 8,
+                                                align: {y: 0.5},
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "Standalone Room"
+                                                }
+
+                                                <Label> {
+                                                    margin: {left: 6},
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "no workspace"
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            <RoundedView> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 10,
+                                                padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                cursor: Hand,
+
+                                                show_bg: true,
+                                                draw_bg: {
+                                                    instance hover: 0.0
+                                                    color: #00000000
+                                                    color_hover: #00000010
+                                                    border_radius: 4.0
+                                                    fn get_color(self) -> vec4 {
+                                                        return mix(self.color, self.color_hover, self.hover);
+                                                    }
+                                                    fn pixel(self) -> vec4 {
+                                                        let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                        sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                        sdf.fill(self.get_color());
+                                                        return sdf.result;
+                                                    }
+                                                }
+
+                                                <Label> {
+                                                    width: Fill,
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 12},
+                                                        color: #000000,
+                                                        wrap: Word
+                                                    },
+                                                    text: "#personal-journal"
+                                                }
+
+                                                model_select = <RobrixIconButton> {
+                                                    width: 150,
+                                                    padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                    draw_bg: {
+                                                        color: #FFFFFF,
+                                                        border_size: 1.0,
+                                                        border_color: #DDDDDD,
+                                                        border_radius: 4.0
+                                                    }
+                                                    draw_text: {
+                                                        color: #000000
+                                                        text_style: <REGULAR_TEXT> {font_size: 11}
+                                                    }
+                                                    text: "gpt-4.1-mini ▾"
+                                                }
+
+                                                model_actions = <View> {
+                                                    width: Fit,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 6,
+                                                    visible: false
+
+                                                    save_button = <RobrixIconButton> {
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                        draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                        text: "Save"
+                                                    }
+
+                                                    cancel_button = <RobrixIconButton> {
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: { color: (COLOR_SECONDARY) }
+                                                        draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                        text: "Cancel"
+                                                    }
+                                                }
+
+                                                room_delete_button = <RobrixIconButton> {
+                                                    padding: 6,
+                                                    draw_bg: {
+                                                        color: #00000000,
+                                                        color_hover: #00000000,
+                                                        border_size: 0.0
+                                                    },
+                                                    draw_icon: {
+                                                        svg_file: (ICON_TRASH),
+                                                        color: (COLOR_FG_DANGER_RED)
+                                                    }
+                                                    icon_walk: {width: 12, height: 12}
+                                                }
+                                            }
+                                        }
+
+                                        room_card_incident = <RoundedView> {
+                                            width: Fill,
+                                            height: Fit,
+                                            flow: Down,
+                                            spacing: 8,
+                                            padding: 12,
+
+                                            show_bg: true,
+                                            draw_bg: {
+                                                color: #F6F6F6,
+                                                border_radius: 8.0
+                                            }
+
+                                            room_header = <View> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 8,
+                                                align: {y: 0.5},
+
+                                                <Label> {
+                                                    draw_text: {
+                                                        text_style: <THEME_FONT_BOLD>{font_size: 12},
+                                                        color: #000000
+                                                    },
+                                                    text: "Standalone Room"
+                                                }
+
+                                                <Label> {
+                                                    margin: {left: 6},
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 11},
+                                                        color: #666666
+                                                    },
+                                                    text: "no workspace"
+                                                }
+                                            }
+
+                                            <LineH> { padding: 6 }
+
+                                            <RoundedView> {
+                                                width: Fill,
+                                                height: Fit,
+                                                flow: Right,
+                                                spacing: 10,
+                                                padding: {top: 6, bottom: 6, left: 8, right: 8},
+                                                cursor: Hand,
+
+                                                show_bg: true,
+                                                draw_bg: {
+                                                    instance hover: 0.0
+                                                    color: #00000000
+                                                    color_hover: #00000010
+                                                    border_radius: 4.0
+                                                    fn get_color(self) -> vec4 {
+                                                        return mix(self.color, self.color_hover, self.hover);
+                                                    }
+                                                    fn pixel(self) -> vec4 {
+                                                        let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                                                        sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, max(1.0, self.border_radius));
+                                                        sdf.fill(self.get_color());
+                                                        return sdf.result;
+                                                    }
+                                                }
+
+                                                <Label> {
+                                                    width: Fill,
+                                                    draw_text: {
+                                                        text_style: <REGULAR_TEXT>{font_size: 12},
+                                                        color: #000000,
+                                                        wrap: Word
+                                                    },
+                                                    text: "#incident-ops"
+                                                }
+
+                                                model_select = <RobrixIconButton> {
+                                                    width: 150,
+                                                    padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                    draw_bg: {
+                                                        color: #FFFFFF,
+                                                        border_size: 1.0,
+                                                        border_color: #DDDDDD,
+                                                        border_radius: 4.0
+                                                    }
+                                                    draw_text: {
+                                                        color: #000000
+                                                        text_style: <REGULAR_TEXT> {font_size: 11}
+                                                    }
+                                                    text: "gpt-4o-mini ▾"
+                                                }
+
+                                                model_actions = <View> {
+                                                    width: Fit,
+                                                    height: Fit,
+                                                    flow: Right,
+                                                    spacing: 6,
+                                                    visible: false
+
+                                                    save_button = <RobrixIconButton> {
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: { color: (COLOR_ACTIVE_PRIMARY) }
+                                                        draw_text: { color: (COLOR_PRIMARY) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                        text: "Save"
+                                                    }
+
+                                                    cancel_button = <RobrixIconButton> {
+                                                        padding: {top: 6, bottom: 6, left: 10, right: 10}
+                                                        draw_bg: { color: (COLOR_SECONDARY) }
+                                                        draw_text: { color: (MESSAGE_TEXT_COLOR) text_style: <REGULAR_TEXT>{font_size: 11} }
+                                                        text: "Cancel"
+                                                    }
+                                                }
+
+                                                room_delete_button = <RobrixIconButton> {
+                                                    padding: 6,
+                                                    draw_bg: {
+                                                        color: #00000000,
+                                                        color_hover: #00000000,
+                                                        border_size: 0.0
+                                                    },
+                                                    draw_icon: {
+                                                        svg_file: (ICON_TRASH),
+                                                        color: (COLOR_FG_DANGER_RED)
+                                                    }
+                                                    icon_walk: {width: 12, height: 12}
+                                                }
+                                            }
+                                        }
+
+                                    }
+                                }
                             robit_content_agent = <View> {
                                 visible: false
                                 width: Fill,
@@ -230,7 +1986,7 @@ live_design! {
                                 spacing: 8,
 
                                 <TitleLabel> {
-                                    text: "Agent 配置页面"
+                                    text: "Provider Settings"
                                 }
 
                                 <Label> {
@@ -242,7 +1998,7 @@ live_design! {
                                         color: #000000,
                                         wrap: Word
                                     },
-                                    text: "Agent 配置页面内容占位。"
+                                    text: "Provider Settings Page Handler"
                                 }
                             }
 
@@ -295,35 +2051,13 @@ live_design! {
                             }
                         }
                     }
-
-                    robit_modal_close_layer = <View> {
-                        width: Fill,
-                        height: Fit,
-                        flow: Right,
-                        align: {x: 1.0, y: 0.0},
-                        padding: {top: 8, right: 8},
-
-                        robit_modal_close_button = <RobrixIconButton> {
-                            width: Fit, height: Fit,
-                            padding: 6,
-                            draw_bg: {
-                                color: #00000000,
-                                color_hover: #00000000,
-                                border_size: 0.0
-                            },
-                            draw_icon: {
-                                svg_file: (ICON_CLOSE),
-                                color: #000000
-                            }
-                            icon_walk: {width: 12, height: 12}
-                        }
-                    }
                 }
             }
         }
     }
 }
 
+}
 
 /// The top-level widget showing all app and user settings/preferences.
 #[derive(Live, LiveHook, Widget)]
@@ -375,19 +2109,19 @@ impl Widget for SettingsScreen {
                 self.view.modal(ids!(robit_modal)).open(cx);
             }
 
-            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_nav.robit_nav_all_button)).clicked(actions) {
+            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_all_button)).clicked(actions) {
                 self.set_robit_modal_tab(cx, RobitModalTab::All);
             }
 
-            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_nav.robit_nav_agent_button)).clicked(actions) {
+            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_agent_button)).clicked(actions) {
                 self.set_robit_modal_tab(cx, RobitModalTab::Agent);
             }
 
-            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_nav.robit_nav_about_button)).clicked(actions) {
+            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_about_button)).clicked(actions) {
                 self.set_robit_modal_tab(cx, RobitModalTab::About);
             }
 
-            if self.view.button(ids!(robit_modal_inner.robit_modal_close_layer.robit_modal_close_button)).clicked(actions)
+            if self.view.button(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_close_button)).clicked(actions)
                 || actions.iter().any(|a| matches!(a.downcast_ref(), Some(ModalAction::Dismissed)))
             {
                 self.view.modal(ids!(robit_modal)).close(cx);
@@ -459,13 +2193,13 @@ impl SettingsScreen {
         let show_about = tab == RobitModalTab::About;
 
         self.view
-            .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_content.robit_content_all))
+            .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_all))
             .set_visible(cx, show_all);
         self.view
-            .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_content.robit_content_agent))
+            .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_agent))
             .set_visible(cx, show_agent);
         self.view
-            .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_content.robit_content_about))
+            .view(ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_content.robit_content_about))
             .set_visible(cx, show_about);
 
         self.update_robit_modal_nav_styles(cx);
@@ -493,15 +2227,15 @@ impl SettingsScreen {
         };
 
         apply_style(
-            ids!(robit_modal_inner.robit_modal_body.robit_modal_nav.robit_nav_all_button),
+            ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_all_button),
             self.robit_modal_tab == RobitModalTab::All,
         );
         apply_style(
-            ids!(robit_modal_inner.robit_modal_body.robit_modal_nav.robit_nav_agent_button),
+            ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_agent_button),
             self.robit_modal_tab == RobitModalTab::Agent,
         );
         apply_style(
-            ids!(robit_modal_inner.robit_modal_body.robit_modal_nav.robit_nav_about_button),
+            ids!(robit_modal_inner.robit_modal_body.robit_modal_main.robit_modal_nav.robit_nav_about_button),
             self.robit_modal_tab == RobitModalTab::About,
         );
     }
