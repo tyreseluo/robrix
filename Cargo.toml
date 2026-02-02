@@ -88,6 +88,7 @@ default = []
 tsp = ["dep:tsp_sdk", "dep:quinn", "dep:aws-lc-rs", "dep:percent-encoding"]
 
 robit = ["dep:robit"]
+robit-omnix-mlx = ["dep:robit", "robit/ai-omnix-mlx"]
 
 ## Hides the command prompt console on Windows.
 hide_windows_console = []

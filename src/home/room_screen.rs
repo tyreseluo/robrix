@@ -35,6 +35,7 @@ use crate::{
     },
     sliding_sync::{BackwardsPaginateUntilEventRequest, MatrixRequest, PaginationDirection, TimelineEndpoints, TimelineRequestSender, UserPowerLevels, get_client, submit_async_request, take_timeline_endpoints}, utils::{self, ImageFormat, MEDIA_THUMBNAIL_FORMAT, RoomNameId, unix_time_millis_to_datetime}
 };
+use crate::robit_runtime;
 use crate::home::event_reaction_list::ReactionListWidgetRefExt;
 use crate::home::room_read_receipt::AvatarRowWidgetRefExt;
 use crate::room::room_input_bar::RoomInputBarWidgetExt;
@@ -55,6 +56,98 @@ const MAX_ITEMS_TO_SEARCH_THROUGH: usize = 100;
 const BLURHASH_IMAGE_MAX_SIZE: u32 = 500;
 
 static UNNAMED_ROOM: &str = "Unnamed Room";
+
+fn forward_robit_messages(
+    room_id: &OwnedRoomId,
+    items: &Vector<Arc<TimelineItem>>,
+    changed_indices: Range<usize>,
+    is_append: bool,
+) {
+    if !is_append {
+        return;
+    }
+    if !robit_runtime::room_ready(room_id) {
+        log!("Robit forward skipped: room not ready yet ({})", room_id);
+        return;
+    }
+    let end = changed_indices.end.min(items.len());
+    let start = changed_indices.start.min(end);
+    let context_window = robit_runtime::context_window_size();
+    if context_window > 0 && !robit_runtime::context_loaded(room_id) {
+        let context_end = start;
+        let context_start = context_end.saturating_sub(context_window);
+        for (index, item) in items.iter().enumerate() {
+            if index < context_start || index >= context_end {
+                continue;
+            }
+            let Some(event_item) = item.as_event() else {
+                continue;
+            };
+            if event_item.content().as_message().is_none() {
+                continue;
+            }
+            let Some(event_id) = event_item.event_id() else {
+                continue;
+            };
+            let text = plaintext_body_of_timeline_item(event_item);
+            if text.trim().is_empty() {
+                continue;
+            }
+            let (role, cleaned) = if robit_runtime::is_robit_message(text.as_str()) {
+                ("assistant", robit_runtime::strip_robit_prefix(text.as_str()))
+            } else {
+                ("user", text.trim())
+            };
+            if cleaned.is_empty() {
+                continue;
+            }
+            robit_runtime::submit_context_message(
+                room_id,
+                event_id.as_str(),
+                event_item.sender().as_str(),
+                cleaned,
+                role,
+            );
+        }
+        robit_runtime::mark_context_loaded(room_id);
+    }
+    for item in items.iter().skip(start).take(end - start) {
+        let Some(event_item) = item.as_event() else {
+            continue;
+        };
+        if event_item.content().as_message().is_none() {
+            continue;
+        }
+        let Some(event_id) = event_item.event_id() else {
+            continue;
+        };
+        let text = plaintext_body_of_timeline_item(event_item);
+        if text.trim().is_empty() {
+            continue;
+        }
+        if robit_runtime::is_robit_message(text.as_str()) {
+            log!(
+                "Robit forward skipped: tagged message in room {}, event_id={}",
+                room_id.as_str(),
+                event_id.as_str()
+            );
+            continue;
+        }
+        log!(
+            "Robit forward: room={}, event_id={}, sender={}, text={:?}",
+            room_id.as_str(),
+            event_id.as_str(),
+            event_item.sender().as_str(),
+            text
+        );
+        robit_runtime::submit_message(
+            room_id,
+            event_id.as_str(),
+            event_item.sender().as_str(),
+            text.trim(),
+        );
+    }
+}
 
 live_design! {
     use link::theme::*;
@@ -1215,6 +1308,7 @@ impl RoomScreen {
                     jump_to_bottom.update_visibility(cx, true);
 
                     tl.items = initial_items;
+                    robit_runtime::mark_room_ready(&tl.room_id);
                     done_loading = true;
                 }
                 TimelineUpdate::NewItems { new_items, changed_indices, is_append, clear_cache } => {
@@ -1327,6 +1421,7 @@ impl RoomScreen {
                         // log!("process_timeline_updates(): changed_indices: {changed_indices:?}, items len: {}\ncontent drawn: {:#?}\nprofile drawn: {:#?}", items.len(), tl.content_drawn_since_last_update, tl.profile_drawn_since_last_update);
                     }
                     tl.items = new_items;
+                    forward_robit_messages(&tl.room_id, &tl.items, changed_indices.clone(), is_append);
                     done_loading = true;
                 }
                 TimelineUpdate::NewUnreadMessagesCount(unread_messages_count) => {

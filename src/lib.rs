@@ -46,6 +46,12 @@ pub mod robit;
 #[path = "features/robit/robit_dummy.rs"]
 pub mod robit_dummy;
 
+#[cfg(feature = "robit")]
+pub mod robit_runtime;
+#[cfg(not(feature = "robit"))]
+#[path = "robit_runtime_dummy.rs"]
+pub mod robit_runtime;
+
 
 // Matrix stuff
 pub mod sliding_sync;

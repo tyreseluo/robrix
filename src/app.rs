@@ -306,6 +306,7 @@ impl MatchEvent for App {
                 self.ui.modal(ids!(logout_confirm_modal)).close(cx);
                 self.update_login_visibility(cx);
                 self.ui.redraw(cx);
+                crate::robit_runtime::shutdown();
                 continue;
             }
 
@@ -323,6 +324,7 @@ impl MatchEvent for App {
                 self.app_state.logged_in = true;
                 self.update_login_visibility(cx);
                 self.ui.redraw(cx);
+                crate::robit_runtime::init_from_config();
                 continue;
             }
 
