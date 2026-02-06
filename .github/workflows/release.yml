@@ -79,13 +79,6 @@ permissions:
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' && github.event.inputs.release_tag || '' }}
-  RELEASE_NAME: >-
-    ${{ github.event_name == 'push' && format('Robrix {0}', github.ref_name) ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' && format('Robrix {0}', github.event.inputs.release_tag)) ||
-        '' }}
-  RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
-  RELEASE_PRERELEASE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' && github.event.inputs.pre_release == 'true') || (github.event_name == 'push' && contains(github.ref, '-')) }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -215,11 +208,36 @@ jobs:
               for key, value in outputs.items():
                   handle.write(f"{key}={value}\n")
           PY
+
+  create_release:
+    name: Create Release
+    needs: [check_tag_version, determine_matrices]
+    if: >-
+      ${{ always() && (
+        (github.event_name == 'push' && needs.check_tag_version.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+      ) }}
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create_release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_tag }}
+          name: ${{ github.event_name == 'push' && format('Robrix {0}', github.ref_name) || format('Robrix {0}', github.event.inputs.release_tag) }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          prerelease: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.pre_release == 'true') || (github.event_name == 'push' && contains(github.ref, '-')) }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
   
   # Desktop packaging jobs (Linux/macOS/Windows) #
   for_linux:
     name: Release Robrix for Linux (${{ matrix.os }}, ${{ matrix.arch }})
-    needs: [check_tag_version, determine_matrices]
+    needs: [check_tag_version, determine_matrices, create_release]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.determine_matrices.outputs.run_linux == 'true')) }}
     strategy:
       fail-fast: false
@@ -255,14 +273,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           packager_formats: ${{ matrix.packager_formats }}
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: ${{ env.RELEASE_NAME }}
-          releaseDraft: ${{ env.RELEASE_DRAFT }}
-          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          releaseId: ${{ needs.create_release.outputs.release_id }}
 
   for_macos:
     name: Release Robrix for macOS (${{ matrix.os }}, ${{ matrix.arch }})
-    needs: [check_tag_version, determine_matrices]
+    needs: [check_tag_version, determine_matrices, create_release]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.determine_matrices.outputs.run_macos == 'true')) }}
     strategy:
       fail-fast: false
@@ -280,14 +295,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           packager_formats: ${{ matrix.packager_formats }}
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: ${{ env.RELEASE_NAME }}
-          releaseDraft: ${{ env.RELEASE_DRAFT }}
-          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          releaseId: ${{ needs.create_release.outputs.release_id }}
 
   for_windows:
     name: Release Robrix for Windows (${{ matrix.os }}, ${{ matrix.arch }})
-    needs: [check_tag_version, determine_matrices]
+    needs: [check_tag_version, determine_matrices, create_release]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.determine_matrices.outputs.run_windows == 'true')) }}
     strategy:
       fail-fast: false
@@ -305,15 +317,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           packager_formats: ${{ matrix.packager_formats }}
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: ${{ env.RELEASE_NAME }}
-          releaseDraft: ${{ env.RELEASE_DRAFT }}
-          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          releaseId: ${{ needs.create_release.outputs.release_id }}
 
   # Mobile packaging jobs (Android/iOS) #
   for_android:
     name: Release Robrix for Android
-    needs: [check_tag_version, determine_matrices]
+    needs: [check_tag_version, determine_matrices, create_release]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_android_aarch64 == 'true')) }}
     runs-on: ubuntu-22.04
     steps:
@@ -328,14 +337,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           args: --target aarch64-linux-android
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: ${{ env.RELEASE_NAME }}
-          releaseDraft: ${{ env.RELEASE_DRAFT }}
-          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          releaseId: ${{ needs.create_release.outputs.release_id }}
 
   for_ios:
     name: Release Robrix for iOS
-    needs: [check_tag_version, determine_matrices]
+    needs: [check_tag_version, determine_matrices, create_release]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_ios == 'true')) }}
     runs-on: macos-14
     steps:
@@ -363,7 +369,4 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         with:
           args: --target aarch64-apple-ios
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: ${{ env.RELEASE_NAME }}
-          releaseDraft: ${{ env.RELEASE_DRAFT }}
-          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          releaseId: ${{ needs.create_release.outputs.release_id }}
