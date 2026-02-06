@@ -44,8 +44,8 @@ on:
         required: false
         type: boolean
         default: false
-      build_android:
-        description: 'Build Android APK'
+      build_android_aarch64:
+        description: 'Build Android APK (aarch64)'
         required: false
         type: boolean
         default: false
@@ -79,6 +79,13 @@ permissions:
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' && github.event.inputs.release_tag || '' }}
+  RELEASE_NAME: >-
+    ${{ github.event_name == 'push' && format('Robrix {0}', github.ref_name) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' && format('Robrix {0}', github.event.inputs.release_tag)) ||
+        '' }}
+  RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
+  RELEASE_PRERELEASE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' && github.event.inputs.pre_release == 'true') || (github.event_name == 'push' && contains(github.ref, '-')) }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -119,6 +126,12 @@ jobs:
       run_macos: ${{ steps.set.outputs.run_macos }}
       run_windows: ${{ steps.set.outputs.run_windows }}
     steps:
+      - name: Validate release inputs
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' && github.event.inputs.release_tag == '' }}
+        run: |
+          echo "release_tag is required when create_release=true."
+          exit 1
+
       - name: Build matrix from inputs
         id: set
         run: |
@@ -202,90 +215,11 @@ jobs:
               for key, value in outputs.items():
                   handle.write(f"{key}={value}\n")
           PY
-
-  create_release:
-    name: Create Release
-    needs: [check_tag_version, determine_matrices]
-    if: >-
-      ${{ always() && (
-        (github.event_name == 'push' && needs.check_tag_version.result == 'success') ||
-        (github.event_name == 'workflow_dispatch' &&
-          github.event.inputs.create_release == 'true' &&
-          (
-            needs.determine_matrices.outputs.run_linux == 'true' ||
-            needs.determine_matrices.outputs.run_macos == 'true' ||
-            needs.determine_matrices.outputs.run_windows == 'true' ||
-            github.event.inputs.build_android == 'true' ||
-            github.event.inputs.build_ios == 'true'
-          )
-        )
-      ) }}
-    runs-on: ubuntu-22.04
-    outputs:
-      release_id: ${{ steps.create_release.outputs.id }}
-      release_tag: ${{ steps.resolve.outputs.tag }}
-      release_name: ${{ steps.resolve.outputs.name }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve release metadata
-        id: resolve
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-
-          def read_version(path: str) -> str:
-              in_package = False
-              for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
-                  line = raw_line.strip()
-                  if line.startswith("[") and line.endswith("]"):
-                      in_package = line == "[package]"
-                      continue
-                  if not in_package or not line.startswith("version"):
-                      continue
-                  _, value = line.split("=", 1)
-                  value = value.strip().strip('"').strip("'")
-                  if value:
-                      return value
-              return ""
-
-          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-          ref_name = os.environ.get("GITHUB_REF_NAME", "").strip()
-          release_tag_input = os.environ.get("RELEASE_TAG", "").strip()
-          version = read_version("Cargo.toml")
-
-          if event_name == "push" and ref_name:
-              tag = ref_name
-              name = f"Robrix {ref_name}"
-          else:
-              if not version:
-                  raise SystemExit("Unable to resolve Cargo.toml package version.")
-              tag = release_tag_input or f"v{version}"
-              tag = tag.replace("__VERSION__", version)
-              name = f"Robrix v{version}"
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-              handle.write(f"tag={tag}\n")
-              handle.write(f"name={name}\n")
-          PY
-        env:
-          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.resolve.outputs.tag }}
-          name: ${{ steps.resolve.outputs.name }}
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
-          prerelease: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.pre_release == 'true') || (github.event_name == 'push' && contains(github.ref, '-')) }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
+  
+  # Desktop packaging jobs (Linux/macOS/Windows) #
   for_linux:
     name: Release Robrix for Linux (${{ matrix.os }}, ${{ matrix.arch }})
-    needs: [check_tag_version, determine_matrices, create_release]
+    needs: [check_tag_version, determine_matrices]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.determine_matrices.outputs.run_linux == 'true')) }}
     strategy:
       fail-fast: false
@@ -316,16 +250,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Package (desktop)
-        uses: Project-Robius-China/makepad-packaging-action@main
+        uses: Project-Robius-China/makepad-packaging-action@codex/auto-tag-from-ref
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           packager_formats: ${{ matrix.packager_formats }}
-          releaseId: ${{ needs.create_release.outputs.release_id }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: ${{ env.RELEASE_NAME }}
+          releaseDraft: ${{ env.RELEASE_DRAFT }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
 
   for_macos:
     name: Release Robrix for macOS (${{ matrix.os }}, ${{ matrix.arch }})
-    needs: [check_tag_version, determine_matrices, create_release]
+    needs: [check_tag_version, determine_matrices]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.determine_matrices.outputs.run_macos == 'true')) }}
     strategy:
       fail-fast: false
@@ -338,16 +275,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Package (macos)
-        uses: Project-Robius-China/makepad-packaging-action@main
+        uses: Project-Robius-China/makepad-packaging-action@codex/auto-tag-from-ref
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           packager_formats: ${{ matrix.packager_formats }}
-          releaseId: ${{ needs.create_release.outputs.release_id }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: ${{ env.RELEASE_NAME }}
+          releaseDraft: ${{ env.RELEASE_DRAFT }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
 
   for_windows:
     name: Release Robrix for Windows (${{ matrix.os }}, ${{ matrix.arch }})
-    needs: [check_tag_version, determine_matrices, create_release]
+    needs: [check_tag_version, determine_matrices]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.determine_matrices.outputs.run_windows == 'true')) }}
     strategy:
       fail-fast: false
@@ -360,17 +300,21 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Package (windows)
-        uses: Project-Robius-China/makepad-packaging-action@main
+        uses: Project-Robius-China/makepad-packaging-action@codex/auto-tag-from-ref
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           packager_formats: ${{ matrix.packager_formats }}
-          releaseId: ${{ needs.create_release.outputs.release_id }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: ${{ env.RELEASE_NAME }}
+          releaseDraft: ${{ env.RELEASE_DRAFT }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
 
+  # Mobile packaging jobs (Android/iOS) #
   for_android:
     name: Release Robrix for Android
-    needs: [check_tag_version, create_release]
-    if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_android == 'true')) }}
+    needs: [check_tag_version, determine_matrices]
+    if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_android_aarch64 == 'true')) }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -379,16 +323,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Package (android)
-        uses: Project-Robius-China/makepad-packaging-action@main
+        uses: Project-Robius-China/makepad-packaging-action@codex/auto-tag-from-ref
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           args: --target aarch64-linux-android
-          releaseId: ${{ needs.create_release.outputs.release_id }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: ${{ env.RELEASE_NAME }}
+          releaseDraft: ${{ env.RELEASE_DRAFT }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
 
   for_ios:
     name: Release Robrix for iOS
-    needs: [check_tag_version, create_release]
+    needs: [check_tag_version, determine_matrices]
     if: ${{ always() && ((github.event_name == 'push' && needs.check_tag_version.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_ios == 'true')) }}
     runs-on: macos-14
     steps:
@@ -398,7 +345,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Package (iOS)
-        uses: Project-Robius-China/makepad-packaging-action@main
+        uses: Project-Robius-China/makepad-packaging-action@codex/auto-tag-from-ref
         env:
           GITHUB_TOKEN: ${{ github.token }}
           MAKEPAD_IOS_ORG: org.robius.robrix
@@ -416,4 +363,7 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         with:
           args: --target aarch64-apple-ios
-          releaseId: ${{ needs.create_release.outputs.release_id }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: ${{ env.RELEASE_NAME }}
+          releaseDraft: ${{ env.RELEASE_DRAFT }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
