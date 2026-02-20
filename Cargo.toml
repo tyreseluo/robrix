@@ -234,7 +234,7 @@ minimum_system_version = "11.0"
 frameworks = [ ]
 info_plist_path = "./packaging/Info.plist"
 entitlements = "./packaging/Entitlements.plist"
-signing_identity = "Developer ID Application: AppChef Inc. (SFVQ5V48GD)"
+signing_identity = "-"
 
 
 ## Configuration for `cargo packager`'s generation of a macOS `.dmg`.
