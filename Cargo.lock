@@ -1057,6 +1057,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "crew-robrix-channel"
+version = "0.1.0"
+source = "git+https://github.com/Project-Robius-China/crew-robrix-channel.git?branch=main#d5d252a813b608300f6c36370cced6b8cb4e5459"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "futures-core",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "url",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4876,6 +4892,7 @@ dependencies = [
  "bytesize",
  "chrono",
  "clap",
+ "crew-robrix-channel",
  "crossbeam-channel",
  "crossbeam-queue",
  "eyeball",
@@ -4901,7 +4918,6 @@ dependencies = [
  "robius-location",
  "robius-open",
  "robius-use-makepad",
- "robrix-crew-bridge",
  "ruma",
  "sanitize-filename",
  "serde",
@@ -4911,21 +4927,6 @@ dependencies = [
  "tracing-subscriber",
  "tsp_sdk",
  "unicode-segmentation",
- "url",
-]
-
-[[package]]
-name = "robrix-crew-bridge"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "futures-core",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
  "url",
 ]
 
