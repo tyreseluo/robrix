@@ -3,17 +3,22 @@
 use std::sync::Arc;
 use makepad_widgets::Cx;
 use matrix_sdk::{RoomDisplayName, RoomHero, RoomState, SuccessorRoom, room_preview::RoomPreview};
-use ruma::{OwnedRoomAliasId, OwnedRoomId, room::{JoinRuleSummary, RoomType}};
+use ruma::{
+    OwnedRoomAliasId, OwnedRoomId,
+    room::{JoinRuleSummary, RoomType},
+};
 
 use crate::utils::RoomNameId;
 
 pub mod reply_preview;
+pub mod crew_room_panel;
 pub mod room_input_bar;
 pub mod room_display_filter;
 pub mod typing_notice;
 
 pub fn live_design(cx: &mut Cx) {
     reply_preview::live_design(cx);
+    crew_room_panel::live_design(cx);
     room_input_bar::live_design(cx);
     typing_notice::live_design(cx);
 }
@@ -50,7 +55,7 @@ impl From<&SuccessorRoom> for BasicRoomDetails {
 }
 impl From<FetchedRoomPreview> for BasicRoomDetails {
     fn from(frp: FetchedRoomPreview) -> Self {
-       BasicRoomDetails::FetchedRoomPreview(frp)
+        BasicRoomDetails::FetchedRoomPreview(frp)
     }
 }
 impl BasicRoomDetails {
@@ -58,7 +63,7 @@ impl BasicRoomDetails {
         match self {
             Self::RoomId(room_name_id)
             | Self::Name(room_name_id)
-            | Self::NameAndAvatar { room_name_id, ..} => room_name_id.room_id(),
+            | Self::NameAndAvatar { room_name_id, .. } => room_name_id.room_id(),
             Self::FetchedRoomPreview(frp) => frp.room_name_id.room_id(),
         }
     }
@@ -80,14 +85,12 @@ impl BasicRoomDetails {
     /// If this is the `RoomId` or `Name` variants, the avatar will be empty.
     pub fn room_avatar(&self) -> &FetchedRoomAvatar {
         match self {
-            Self::RoomId(_)
-            | Self::Name(_) => &EMPTY_AVATAR,
-            Self::NameAndAvatar { room_avatar, ..} => room_avatar,
+            Self::RoomId(_) | Self::Name(_) => &EMPTY_AVATAR,
+            Self::NameAndAvatar { room_avatar, .. } => room_avatar,
             Self::FetchedRoomPreview(frp) => &frp.room_avatar,
         }
     }
 }
-
 
 /// Actions related to room previews being fetched.
 #[derive(Debug)]
@@ -104,7 +107,6 @@ pub struct FetchedRoomPreview {
     pub room_avatar: FetchedRoomAvatar,
 
     // Below: copied from the `RoomPreview` struct.
-
     /// The canonical alias for the room.
     pub canonical_alias: Option<OwnedRoomAliasId>,
     /// The room's topic, if set.
@@ -131,10 +133,9 @@ pub struct FetchedRoomPreview {
 }
 impl FetchedRoomPreview {
     pub fn from(room_preview: RoomPreview, room_avatar: FetchedRoomAvatar) -> Self {
-        let display_name = room_preview.name.map_or(
-            RoomDisplayName::Empty,
-            RoomDisplayName::Named,
-        );
+        let display_name = room_preview
+            .name
+            .map_or(RoomDisplayName::Empty, RoomDisplayName::Named);
         Self {
             room_name_id: RoomNameId::new(display_name, room_preview.room_id),
             room_avatar,
@@ -151,7 +152,6 @@ impl FetchedRoomPreview {
         }
     }
 }
-
 
 static EMPTY_AVATAR: FetchedRoomAvatar = FetchedRoomAvatar::Text(String::new());
 

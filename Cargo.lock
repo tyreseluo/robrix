@@ -4901,6 +4901,7 @@ dependencies = [
  "robius-location",
  "robius-open",
  "robius-use-makepad",
+ "robrix-crew-bridge",
  "ruma",
  "sanitize-filename",
  "serde",
@@ -4910,6 +4911,21 @@ dependencies = [
  "tracing-subscriber",
  "tsp_sdk",
  "unicode-segmentation",
+ "url",
+]
+
+[[package]]
+name = "robrix-crew-bridge"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "futures-core",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
  "url",
 ]
 

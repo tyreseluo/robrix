@@ -1,7 +1,10 @@
-
 use makepad_widgets::*;
 
-use crate::{home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, profile::user_profile::UserProfile, settings::account_settings::AccountSettingsWidgetExt};
+use crate::{
+    home::navigation_tab_bar::{NavigationBarAction, get_own_profile},
+    profile::user_profile::UserProfile,
+    settings::{account_settings::AccountSettingsWidgetExt, crew_settings::CrewSettingsWidgetExt},
+};
 
 live_design! {
     use link::theme::*;
@@ -12,6 +15,7 @@ live_design! {
     use crate::shared::styles::*;
     use crate::shared::icon_button::*;
     use crate::settings::account_settings::AccountSettings;
+    use crate::settings::crew_settings::CrewSettings;
     use link::tsp_link::TspSettingsScreen;
     use link::tsp_link::CreateWalletModal;
     use link::tsp_link::CreateDidModal;
@@ -80,9 +84,7 @@ live_design! {
 
                 <LineH> { width: 400, padding: 10, margin: {top: 20, bottom: 5} }
 
-                // Add other settings sections here as needed.
-                // Don't forget to add a `show()` fn to those settings sections
-                // and call them in `SettingsScreen::show()`.
+                crew_settings = <CrewSettings> {}
             }
         }
 
@@ -101,11 +103,11 @@ live_design! {
     }
 }
 
-
 /// The top-level widget showing all app and user settings/preferences.
 #[derive(Live, LiveHook, Widget)]
 pub struct SettingsScreen {
-    #[deref] view: View,
+    #[deref]
+    view: View,
 }
 
 impl Widget for SettingsScreen {
@@ -122,16 +124,15 @@ impl Widget for SettingsScreen {
             matches!(
                 event,
                 Event::Actions(actions) if self.button(ids!(close_button)).clicked(actions)
-            )
-            || event.back_pressed()
-            || match event.hits(cx, area) {
-                Hit::KeyUp(key) => key.key_code == KeyCode::Escape,
-                Hit::FingerDown(_fde) => {
-                    cx.set_key_focus(area);
-                    false
+            ) || event.back_pressed()
+                || match event.hits(cx, area) {
+                    Hit::KeyUp(key) => key.key_code == KeyCode::Escape,
+                    Hit::FingerDown(_fde) => {
+                        cx.set_key_focus(area);
+                        false
+                    }
+                    _ => false,
                 }
-                _ => false,
-            }
         };
         if close_pane {
             cx.action(NavigationBarAction::CloseSettings);
@@ -149,26 +150,30 @@ impl Widget for SettingsScreen {
                 match action.downcast_ref() {
                     Some(CreateWalletModalAction::Open) => {
                         use crate::tsp::create_wallet_modal::CreateWalletModalWidgetExt;
-                        self.view.create_wallet_modal(ids!(create_wallet_modal_inner)).show(cx);
+                        self.view
+                            .create_wallet_modal(ids!(create_wallet_modal_inner))
+                            .show(cx);
                         self.view.modal(ids!(create_wallet_modal)).open(cx);
                     }
                     Some(CreateWalletModalAction::Close) => {
                         self.view.modal(ids!(create_wallet_modal)).close(cx);
                     }
-                    None => { }
+                    None => {}
                 }
 
                 // Handle the create DID modal being opened or closed.
                 match action.downcast_ref() {
                     Some(CreateDidModalAction::Open) => {
                         use crate::tsp::create_did_modal::CreateDidModalWidgetExt;
-                        self.view.create_did_modal(ids!(create_did_modal_inner)).show(cx);
+                        self.view
+                            .create_did_modal(ids!(create_did_modal_inner))
+                            .show(cx);
                         self.view.modal(ids!(create_did_modal)).open(cx);
                     }
                     Some(CreateDidModalAction::Close) => {
                         self.view.modal(ids!(create_did_modal)).close(cx);
                     }
-                    None => { }
+                    None => {}
                 }
             }
         }
@@ -181,12 +186,22 @@ impl Widget for SettingsScreen {
 
 impl SettingsScreen {
     /// Fetches the current user's profile and uses it to populate the settings screen.
-    pub fn populate(&mut self, cx: &mut Cx, own_profile: Option<UserProfile>) {
+    pub fn populate(
+        &mut self,
+        cx: &mut Cx,
+        own_profile: Option<UserProfile>,
+        selected_room_id: Option<String>,
+    ) {
         let Some(profile) = own_profile.or_else(|| get_own_profile(cx)) else {
             error!("Failed to get own profile for settings screen.");
             return;
         };
-        self.view.account_settings(ids!(account_settings)).populate(cx, profile);
+        self.view
+            .account_settings(ids!(account_settings))
+            .populate(cx, profile);
+        self.view
+            .crew_settings(ids!(crew_settings))
+            .populate(cx, selected_room_id);
         self.view.button(ids!(close_button)).reset_hover(cx);
         cx.set_key_focus(self.view.area());
         self.redraw(cx);
@@ -195,8 +210,15 @@ impl SettingsScreen {
 
 impl SettingsScreenRef {
     /// See [`SettingsScreen::populate()`].
-    pub fn populate(&self, cx: &mut Cx, own_profile: Option<UserProfile>) {
-        let Some(mut inner) = self.borrow_mut() else { return; };
-        inner.populate(cx, own_profile);
+    pub fn populate(
+        &self,
+        cx: &mut Cx,
+        own_profile: Option<UserProfile>,
+        selected_room_id: Option<String>,
+    ) {
+        let Some(mut inner) = self.borrow_mut() else {
+            return;
+        };
+        inner.populate(cx, own_profile, selected_room_id);
     }
 }

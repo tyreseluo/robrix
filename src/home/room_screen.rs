@@ -26,7 +26,7 @@ use matrix_sdk_ui::timeline::{
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
 use crate::{
-    app::{AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
+    app::{AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, crew::CrewSettingsAction, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
@@ -56,6 +56,7 @@ const MAX_ITEMS_TO_SEARCH_THROUGH: usize = 100;
 const BLURHASH_IMAGE_MAX_SIZE: u32 = 500;
 
 static UNNAMED_ROOM: &str = "Unnamed Room";
+const CREW_THINKING_REACTION: &str = "🤔";
 
 /// #FFF4E5
 const COLOR_THREAD_SUMMARY_BG: Vec4 = vec4(1.0, 0.957, 0.898, 1.0);
@@ -649,6 +650,8 @@ pub struct RoomScreen {
     #[rust] is_loaded: bool,
     /// Whether or not all rooms have been loaded (received from the homeserver).
     #[rust] all_rooms_loaded: bool,
+    /// Timeline item IDs currently marked with a Crew "thinking" reaction.
+    #[rust] crew_thinking_targets: Vec<TimelineEventItemId>,
 }
 impl Drop for RoomScreen {
     fn drop(&mut self) {
@@ -798,6 +801,31 @@ impl Widget for RoomScreen {
             self.handle_message_actions(cx, actions, &portal_list, &loading_pane);
 
             for action in actions {
+                if let Some(CrewSettingsAction::StreamStarted { room_id, .. }) =
+                    action.downcast_ref()
+                {
+                    if self.room_id().is_some_and(|id| id.as_str() == room_id) {
+                        self.add_crew_thinking_reaction();
+                    }
+                    continue;
+                }
+                if let Some(CrewSettingsAction::StreamFinished { room_id, .. }) =
+                    action.downcast_ref()
+                {
+                    if self.room_id().is_some_and(|id| id.as_str() == room_id) {
+                        self.clear_crew_thinking_reaction();
+                    }
+                    continue;
+                }
+                if let Some(CrewSettingsAction::StreamFailed { room_id, .. }) =
+                    action.downcast_ref()
+                {
+                    if self.room_id().is_some_and(|id| id.as_str() == room_id) {
+                        self.clear_crew_thinking_reaction();
+                    }
+                    continue;
+                }
+
                 // Handle actions related to restoring the previously-saved state of rooms.
                 if let Some(AppStateAction::RoomLoadedSuccessfully { room_name_id, ..}) = action.downcast_ref() {
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_name_id.room_id()) {
@@ -2410,6 +2438,7 @@ impl RoomScreen {
             timeline_kind,
             subscribe: false,
         });
+        self.crew_thinking_targets.clear();
     }
 
     /// Removes the current room's visual UI state from this widget
@@ -2432,6 +2461,137 @@ impl RoomScreen {
         tl.room_members = None;
         // Store this Timeline's `TimelineUiState` in the global map of states.
         TIMELINE_STATES.with_borrow_mut(|ts| ts.insert(tl.kind.clone(), tl));
+    }
+
+    fn add_crew_thinking_reaction(&mut self) {
+        let Some(tl) = self.tl_state.as_ref() else { return };
+        let Some(own_user_id) = get_client().and_then(|client| client.user_id().map(ToOwned::to_owned)) else {
+            return;
+        };
+        let Some(timeline_event_id) = Self::find_latest_own_message_id(tl, &own_user_id) else {
+            return;
+        };
+
+        submit_async_request(MatrixRequest::ToggleReaction {
+            timeline_kind: tl.kind.clone(),
+            timeline_event_id: timeline_event_id.clone(),
+            reaction: CREW_THINKING_REACTION.to_owned(),
+        });
+        self.crew_thinking_targets.push(timeline_event_id);
+    }
+
+    fn clear_crew_thinking_reaction(&mut self) {
+        let Some(tl) = self.tl_state.as_ref() else { return };
+        let Some(own_user_id) = get_client().and_then(|client| client.user_id().map(ToOwned::to_owned)) else {
+            return;
+        };
+        let Some(queued_target) = self.crew_thinking_targets.pop() else { return };
+        let timeline_event_id = Self::resolve_crew_thinking_target_id(tl, &own_user_id, &queued_target)
+            .or_else(|| Self::find_latest_own_message_with_crew_thinking_reaction_id(tl, &own_user_id))
+            .unwrap_or(queued_target);
+
+        submit_async_request(MatrixRequest::ToggleReaction {
+            timeline_kind: tl.kind.clone(),
+            timeline_event_id,
+            reaction: CREW_THINKING_REACTION.to_owned(),
+        });
+    }
+
+    fn find_latest_own_message_id(
+        tl: &TimelineUiState,
+        own_user_id: &OwnedUserId,
+    ) -> Option<TimelineEventItemId> {
+        tl.items
+            .iter()
+            .rev()
+            .filter_map(|item| item.as_event())
+            .find_map(|event| {
+                if event.sender() != own_user_id {
+                    return None;
+                }
+                if event.content().as_message().is_none() {
+                    return None;
+                }
+
+                Some(Self::stable_event_identifier(event))
+            })
+    }
+
+    fn find_latest_own_message_with_crew_thinking_reaction_id(
+        tl: &TimelineUiState,
+        own_user_id: &OwnedUserId,
+    ) -> Option<TimelineEventItemId> {
+        tl.items
+            .iter()
+            .rev()
+            .filter_map(|item| item.as_event())
+            .find_map(|event| {
+                if event.sender() != own_user_id {
+                    return None;
+                }
+                if event.content().as_message().is_none() {
+                    return None;
+                }
+                if !Self::has_crew_thinking_reaction(event, own_user_id) {
+                    return None;
+                }
+
+                Some(Self::stable_event_identifier(event))
+            })
+    }
+
+    fn resolve_crew_thinking_target_id(
+        tl: &TimelineUiState,
+        own_user_id: &OwnedUserId,
+        queued_target: &TimelineEventItemId,
+    ) -> Option<TimelineEventItemId> {
+        match queued_target {
+            TimelineEventItemId::EventId(target_event_id) => tl
+                .items
+                .iter()
+                .rev()
+                .filter_map(|item| item.as_event())
+                .find(|event| event.event_id().is_some_and(|event_id| event_id == target_event_id))
+                .map(Self::stable_event_identifier),
+            TimelineEventItemId::TransactionId(target_txn_id) => {
+                if let Some(item_id) = tl
+                    .items
+                    .iter()
+                    .rev()
+                    .filter_map(|item| item.as_event())
+                    .find(|event| event.transaction_id().is_some_and(|txn_id| txn_id == target_txn_id))
+                    .map(Self::stable_event_identifier)
+                {
+                    return Some(item_id);
+                }
+
+                tl.items
+                    .iter()
+                    .rev()
+                    .filter_map(|item| item.as_event())
+                    .find(|event| {
+                        event.sender() == own_user_id
+                            && event.content().as_message().is_some()
+                            && Self::has_crew_thinking_reaction(event, own_user_id)
+                    })
+                    .map(Self::stable_event_identifier)
+            }
+        }
+    }
+
+    fn has_crew_thinking_reaction(event: &EventTimelineItem, own_user_id: &OwnedUserId) -> bool {
+        event
+            .content()
+            .reactions()
+            .and_then(|reactions| reactions.get(CREW_THINKING_REACTION))
+            .is_some_and(|senders| senders.contains_key(own_user_id))
+    }
+
+    fn stable_event_identifier(event: &EventTimelineItem) -> TimelineEventItemId {
+        event
+            .event_id()
+            .map(|event_id| TimelineEventItemId::EventId(event_id.to_owned()))
+            .unwrap_or_else(|| event.identifier())
     }
 
     /// Restores the previously-saved visual UI state of this room.
