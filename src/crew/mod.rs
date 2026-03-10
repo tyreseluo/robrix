@@ -5,7 +5,7 @@ use std::{
 
 use futures_util::StreamExt;
 use makepad_widgets::Cx;
-use robrix_crew_bridge::{
+use crew_robrix_channel::{
     BridgeEvent, BridgeManager, CrewGlueState, CrewTransport, ExecutionProfile, InventorySnapshot,
     ProviderProfile, ResolveError, RoomBinding, RoomInventory, SpaceInventory, StateStore,
     UserSnapshot, Workspace, resolve_room_binding,
@@ -310,9 +310,9 @@ pub fn describe_room_binding(room_id: &str) -> String {
     match resolve_room_binding(&state, room_id) {
         Ok(resolved) => {
             let source = match &resolved.source {
-                robrix_crew_bridge::resolver::BindingSource::Room(_) => "room binding",
-                robrix_crew_bridge::resolver::BindingSource::Space(_) => "space binding",
-                robrix_crew_bridge::resolver::BindingSource::Default => "global default",
+                crew_robrix_channel::resolver::BindingSource::Room(_) => "room binding",
+                crew_robrix_channel::resolver::BindingSource::Space(_) => "space binding",
+                crew_robrix_channel::resolver::BindingSource::Default => "global default",
             };
             let workspace = resolved
                 .workspace
