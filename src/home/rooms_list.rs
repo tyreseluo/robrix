@@ -1779,7 +1779,7 @@ impl RoomsListRef {
             .map(|smv| smv.parent_chain.clone())
     }
 
-    pub(crate) fn crew_room_snapshots(&self) -> Vec<CrewRoomSnapshot> {
+    pub(crate) fn bot_room_snapshots(&self) -> Vec<BotRoomSnapshot> {
         let Some(inner) = self.borrow() else {
             return Vec::new();
         };
@@ -1798,7 +1798,7 @@ impl RoomsListRef {
                     }
                 }
 
-                CrewRoomSnapshot {
+                BotRoomSnapshot {
                     room_id: room_id.clone(),
                     display_name: joined_room.room_name_id.display_name().to_string(),
                     canonical_alias: joined_room.canonical_alias.clone(),
@@ -1809,7 +1809,7 @@ impl RoomsListRef {
             .collect()
     }
 
-    pub(crate) fn crew_space_snapshots(&self) -> Vec<CrewSpaceSnapshot> {
+    pub(crate) fn bot_space_snapshots(&self) -> Vec<BotSpaceSnapshot> {
         let Some(inner) = self.borrow() else {
             return Vec::new();
         };
@@ -1817,7 +1817,7 @@ impl RoomsListRef {
         inner
             .space_map
             .iter()
-            .map(|(space_id, space_value)| CrewSpaceSnapshot {
+            .map(|(space_id, space_value)| BotSpaceSnapshot {
                 space_id: space_id.clone(),
                 child_room_ids: space_value.direct_child_rooms.iter().cloned().collect(),
             })
@@ -1832,7 +1832,7 @@ pub struct RoomsListScopeProps {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CrewRoomSnapshot {
+pub(crate) struct BotRoomSnapshot {
     pub room_id: OwnedRoomId,
     pub display_name: String,
     pub canonical_alias: Option<OwnedRoomAliasId>,
@@ -1841,7 +1841,7 @@ pub(crate) struct CrewRoomSnapshot {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CrewSpaceSnapshot {
+pub(crate) struct BotSpaceSnapshot {
     pub space_id: OwnedRoomId,
     pub child_room_ids: Vec<OwnedRoomId>,
 }

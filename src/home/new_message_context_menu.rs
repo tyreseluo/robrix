@@ -242,6 +242,8 @@ bitflags! {
         const CanDelete = 1 << 5;
         /// Whether this message contains HTML content that the user can copy.
         const HasHtml = 1 << 6;
+        /// Whether the user can cancel sending this local-echo message.
+        const CanCancelSending = 1 << 7;
     }
 }
 impl MessageAbilities {
@@ -254,8 +256,11 @@ impl MessageAbilities {
     ) -> Self {
         let mut abilities = Self::empty();
         abilities.set(Self::CanEdit, event_tl_item.is_editable());
+        if event_tl_item.local_echo_send_handle().is_some() {
+            abilities.set(Self::CanCancelSending, true);
+        }
         // Currently we only support deleting one's own messages.
-        if event_tl_item.is_own() {
+        else if event_tl_item.is_own() {
             abilities.set(Self::CanDelete, user_power_levels.can_redact_own());
         }
         abilities.set(Self::CanReplyTo, event_tl_item.can_be_replied_to());
@@ -479,10 +484,17 @@ impl WidgetMatchEvent for NewMessageContextMenu {
             cx.widget_action(
                 details.room_screen_widget_uid,
                 &scope.path,
-                MessageAction::Redact {
-                    details: details.clone(),
-                    // TODO: show a Modal to confirm deletion, and get the reason.
-                    reason: None,
+                if details
+                    .abilities
+                    .contains(MessageAbilities::CanCancelSending)
+                {
+                    MessageAction::CancelSend(details.clone())
+                } else {
+                    MessageAction::Redact {
+                        details: details.clone(),
+                        // TODO: show a Modal to confirm deletion, and get the reason.
+                        reason: None,
+                    }
                 },
             );
             close_menu = true;
@@ -547,7 +559,10 @@ impl NewMessageContextMenu {
         let show_view_source = true;
         let show_jump_to_related = details.related_event_id.is_some();
         // let show_report = true;
-        let show_delete = details.abilities.contains(MessageAbilities::CanDelete);
+        let show_delete = details.abilities.contains(MessageAbilities::CanDelete)
+            || details
+                .abilities
+                .contains(MessageAbilities::CanCancelSending);
         let show_divider_before_report_delete = show_delete; // || show_report;
 
         // Actually set the buttons' visibility.
@@ -564,6 +579,14 @@ impl NewMessageContextMenu {
             show_pin = true;
         } else {
             show_pin = false;
+        }
+        if details
+            .abilities
+            .contains(MessageAbilities::CanCancelSending)
+        {
+            delete_button.set_text(cx, "Cancel Sending");
+        } else {
+            delete_button.set_text(cx, "Delete");
         }
         pin_button.set_visible(cx, show_pin);
         copy_html_button.set_visible(cx, show_copy_html);

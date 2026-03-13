@@ -86,7 +86,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "http2",
     "macos-system-configuration",
 ] }
-crew-robrix-channel = { git = "https://github.com/Project-Robius-China/crew-robrix-channel.git", branch = "main" }
+robrix-botfather = { path = "../robrix-botfather" }
 
 
 [features]

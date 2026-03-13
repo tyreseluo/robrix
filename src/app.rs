@@ -11,7 +11,7 @@ use matrix_sdk::{
 use serde::{Deserialize, Serialize};
 use crate::{
     avatar_cache::clear_avatar_cache,
-    crew,
+    botfather,
     home::{
         event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt},
         invite_modal::{InviteModalAction, InviteModalWidgetRefExt},
@@ -379,7 +379,7 @@ impl MatchEvent for App {
                 Some(LogoutAction::ClearAppState { on_clear_appstate }) => {
                     // Clear user profile cache, invited_rooms timeline states
                     clear_all_app_state(cx);
-                    crew::clear_loaded_state();
+                    botfather::clear_loaded_state();
                     // Reset all app state to its default.
                     self.app_state = Default::default();
                     on_clear_appstate.notify_one();
@@ -391,7 +391,7 @@ impl MatchEvent for App {
             if let Some(LoginAction::LoginSuccess) = action.downcast_ref() {
                 log!("Received LoginAction::LoginSuccess, hiding login view.");
                 self.app_state.logged_in = true;
-                let _ = crew::ensure_loaded_for_current_user();
+                let _ = botfather::ensure_loaded_for_current_user();
                 self.update_login_visibility(cx);
                 self.ui.redraw(cx);
                 continue;

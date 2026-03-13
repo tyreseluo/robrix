@@ -26,7 +26,7 @@ use matrix_sdk_ui::timeline::{
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
 use crate::{
-    app::{AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, crew::CrewSettingsAction, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
+    app::{AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, botfather::BotfatherAction, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
@@ -34,7 +34,7 @@ use crate::{
     shared::{
         avatar::{AvatarState, AvatarWidgetRefExt}, callout_tooltip::{CalloutTooltipOptions, TooltipAction, TooltipPosition}, confirmation_modal::ConfirmationModalContent, html_or_plaintext::{HtmlOrPlaintextRef, HtmlOrPlaintextWidgetRefExt, RobrixHtmlLinkAction}, image_viewer::{ImageViewerAction, ImageViewerMetaData, LoadState}, jump_to_bottom_button::{JumpToBottomButtonWidgetExt, UnreadMessageCount}, popup_list::{PopupKind, enqueue_popup_notification}, restore_status_view::RestoreStatusViewWidgetExt, styles::*, text_or_image::{TextOrImageAction, TextOrImageRef, TextOrImageWidgetRefExt}, timestamp::TimestampWidgetRefExt
     },
-    sliding_sync::{BackwardsPaginateUntilEventRequest, MatrixRequest, PaginationDirection, TimelineEndpoints, TimelineKind, TimelineRequestSender, UserPowerLevels, get_client, submit_async_request, take_timeline_endpoints}, utils::{self, ImageFormat, MEDIA_THUMBNAIL_FORMAT, RoomNameId, unix_time_millis_to_datetime}
+    sliding_sync::{BackwardsPaginateUntilEventRequest, MatrixRequest, PaginationDirection, TimelineEndpoints, TimelineKind, TimelineRequestSender, UserPowerLevels, get_client, spawn_on_tokio, submit_async_request, take_timeline_endpoints}, utils::{self, ImageFormat, MEDIA_THUMBNAIL_FORMAT, RoomNameId, unix_time_millis_to_datetime}
 };
 use crate::home::event_reaction_list::ReactionListWidgetRefExt;
 use crate::home::room_read_receipt::AvatarRowWidgetRefExt;
@@ -650,8 +650,8 @@ pub struct RoomScreen {
     #[rust] is_loaded: bool,
     /// Whether or not all rooms have been loaded (received from the homeserver).
     #[rust] all_rooms_loaded: bool,
-    /// Timeline item IDs currently marked with a Crew "thinking" reaction.
-    #[rust] crew_thinking_targets: Vec<TimelineEventItemId>,
+    /// Timeline item IDs currently marked with a bot "thinking" reaction.
+    #[rust] bot_thinking_targets: Vec<TimelineEventItemId>,
 }
 impl Drop for RoomScreen {
     fn drop(&mut self) {
@@ -801,27 +801,35 @@ impl Widget for RoomScreen {
             self.handle_message_actions(cx, actions, &portal_list, &loading_pane);
 
             for action in actions {
-                if let Some(CrewSettingsAction::StreamStarted { room_id, .. }) =
+                if let Some(BotfatherAction::StreamStarted { room_id, .. }) =
                     action.downcast_ref()
                 {
                     if self.room_id().is_some_and(|id| id.as_str() == room_id) {
-                        self.add_crew_thinking_reaction();
+                        self.add_bot_thinking_reaction();
                     }
                     continue;
                 }
-                if let Some(CrewSettingsAction::StreamFinished { room_id, .. }) =
+                if let Some(BotfatherAction::StreamFinished { room_id, .. }) =
                     action.downcast_ref()
                 {
                     if self.room_id().is_some_and(|id| id.as_str() == room_id) {
-                        self.clear_crew_thinking_reaction();
+                        self.clear_bot_thinking_reaction();
                     }
                     continue;
                 }
-                if let Some(CrewSettingsAction::StreamFailed { room_id, .. }) =
+                if let Some(BotfatherAction::StreamFailed { room_id, .. }) =
                     action.downcast_ref()
                 {
                     if self.room_id().is_some_and(|id| id.as_str() == room_id) {
-                        self.clear_crew_thinking_reaction();
+                        self.clear_bot_thinking_reaction();
+                    }
+                    continue;
+                }
+                if let Some(BotfatherAction::StreamCancelled { room_id }) =
+                    action.downcast_ref()
+                {
+                    if self.room_id().is_some_and(|id| id.as_str() == room_id) {
+                        self.clear_bot_thinking_reaction();
                     }
                     continue;
                 }
@@ -2130,6 +2138,64 @@ impl RoomScreen {
                     };
                     cx.action(ConfirmDeleteAction::Show(RefCell::new(Some(content))));
                 }
+                MessageAction::CancelSend(details) => {
+                    let Some(tl) = self.tl_state.as_ref() else { return };
+                    let Some(event_tl_item) = Self::find_event_in_timeline(&tl.items, details).cloned() else {
+                        enqueue_popup_notification(
+                            "Could not find the pending message to cancel.",
+                            PopupKind::Error,
+                            Some(5.0),
+                        );
+                        continue;
+                    };
+                    let Some(send_handle) = event_tl_item.local_echo_send_handle() else {
+                        enqueue_popup_notification(
+                            "This message is no longer pending and cannot be cancelled.",
+                            PopupKind::Warning,
+                            Some(4.0),
+                        );
+                        continue;
+                    };
+
+                    let room_id = tl.kind.room_id().to_string();
+                    let local_created_at = event_tl_item
+                        .local_created_at()
+                        .map(|timestamp| timestamp.get().into());
+
+                    spawn_on_tokio(async move {
+                        match send_handle.abort().await {
+                            Ok(true) => {
+                                let stopped_bot_request = local_created_at.is_some_and(
+                                    |local_created_at| {
+                                        crate::botfather::cancel_stream_for_local_echo(
+                                            &room_id,
+                                            local_created_at,
+                                        )
+                                    },
+                                );
+                                enqueue_popup_notification(
+                                    if stopped_bot_request {
+                                        "Cancelled sending message and stopped bot request."
+                                    } else {
+                                        "Cancelled sending message."
+                                    },
+                                    PopupKind::Success,
+                                    Some(4.0),
+                                );
+                            }
+                            Ok(false) => enqueue_popup_notification(
+                                "This message was already sent and could not be cancelled.",
+                                PopupKind::Warning,
+                                Some(4.0),
+                            ),
+                            Err(error) => enqueue_popup_notification(
+                                format!("Failed to cancel sending: {error}"),
+                                PopupKind::Error,
+                                Some(5.0),
+                            ),
+                        }
+                    });
+                }
                 // MessageAction::Report(details) => {
                 //     // TODO
                 // }
@@ -2438,7 +2504,7 @@ impl RoomScreen {
             timeline_kind,
             subscribe: false,
         });
-        self.crew_thinking_targets.clear();
+        self.bot_thinking_targets.clear();
     }
 
     /// Removes the current room's visual UI state from this widget
@@ -2463,7 +2529,7 @@ impl RoomScreen {
         TIMELINE_STATES.with_borrow_mut(|ts| ts.insert(tl.kind.clone(), tl));
     }
 
-    fn add_crew_thinking_reaction(&mut self) {
+    fn add_bot_thinking_reaction(&mut self) {
         let Some(tl) = self.tl_state.as_ref() else { return };
         let Some(own_user_id) = get_client().and_then(|client| client.user_id().map(ToOwned::to_owned)) else {
             return;
@@ -2477,17 +2543,17 @@ impl RoomScreen {
             timeline_event_id: timeline_event_id.clone(),
             reaction: CREW_THINKING_REACTION.to_owned(),
         });
-        self.crew_thinking_targets.push(timeline_event_id);
+        self.bot_thinking_targets.push(timeline_event_id);
     }
 
-    fn clear_crew_thinking_reaction(&mut self) {
+    fn clear_bot_thinking_reaction(&mut self) {
         let Some(tl) = self.tl_state.as_ref() else { return };
         let Some(own_user_id) = get_client().and_then(|client| client.user_id().map(ToOwned::to_owned)) else {
             return;
         };
-        let Some(queued_target) = self.crew_thinking_targets.pop() else { return };
-        let timeline_event_id = Self::resolve_crew_thinking_target_id(tl, &own_user_id, &queued_target)
-            .or_else(|| Self::find_latest_own_message_with_crew_thinking_reaction_id(tl, &own_user_id))
+        let Some(queued_target) = self.bot_thinking_targets.pop() else { return };
+        let timeline_event_id = Self::resolve_bot_thinking_target_id(tl, &own_user_id, &queued_target)
+            .or_else(|| Self::find_latest_own_message_with_bot_thinking_reaction_id(tl, &own_user_id))
             .unwrap_or(queued_target);
 
         submit_async_request(MatrixRequest::ToggleReaction {
@@ -2517,7 +2583,7 @@ impl RoomScreen {
             })
     }
 
-    fn find_latest_own_message_with_crew_thinking_reaction_id(
+    fn find_latest_own_message_with_bot_thinking_reaction_id(
         tl: &TimelineUiState,
         own_user_id: &OwnedUserId,
     ) -> Option<TimelineEventItemId> {
@@ -2532,7 +2598,7 @@ impl RoomScreen {
                 if event.content().as_message().is_none() {
                     return None;
                 }
-                if !Self::has_crew_thinking_reaction(event, own_user_id) {
+                if !Self::has_bot_thinking_reaction(event, own_user_id) {
                     return None;
                 }
 
@@ -2540,7 +2606,7 @@ impl RoomScreen {
             })
     }
 
-    fn resolve_crew_thinking_target_id(
+    fn resolve_bot_thinking_target_id(
         tl: &TimelineUiState,
         own_user_id: &OwnedUserId,
         queued_target: &TimelineEventItemId,
@@ -2572,14 +2638,14 @@ impl RoomScreen {
                     .find(|event| {
                         event.sender() == own_user_id
                             && event.content().as_message().is_some()
-                            && Self::has_crew_thinking_reaction(event, own_user_id)
+                            && Self::has_bot_thinking_reaction(event, own_user_id)
                     })
                     .map(Self::stable_event_identifier)
             }
         }
     }
 
-    fn has_crew_thinking_reaction(event: &EventTimelineItem, own_user_id: &OwnedUserId) -> bool {
+    fn has_bot_thinking_reaction(event: &EventTimelineItem, own_user_id: &OwnedUserId) -> bool {
         event
             .content()
             .reactions()
@@ -4716,6 +4782,8 @@ pub enum MessageAction {
         details: MessageDetails,
         reason: Option<String>,
     },
+    /// The user cancelled sending a local-echo message that is still pending.
+    CancelSend(MessageDetails),
 
     // /// The user clicked the "report" button on a message.
     // Report(MessageDetails),

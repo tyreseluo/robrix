@@ -623,6 +623,7 @@ pub enum MatrixRequest {
         timeline_kind: TimelineKind,
         message: RoomMessageEventContent,
         replied_to: Option<Reply>,
+        bot_prompt: Option<String>,
         #[cfg(feature = "tsp")]
         sign_with_tsp: bool,
     },
@@ -1810,6 +1811,7 @@ async fn matrix_worker_task(
                 timeline_kind,
                 message,
                 replied_to,
+                bot_prompt,
                 #[cfg(feature = "tsp")]
                 sign_with_tsp,
             } => {
@@ -1822,6 +1824,7 @@ async fn matrix_worker_task(
                 // Spawn a new async task that will send the actual message.
                 let _send_message_task = Handle::current().spawn(async move {
                     log!("Sending message to {timeline_kind}: {message:?}...");
+                    let room_id_for_bot_stream = timeline_kind.room_id().to_string();
                     let message = {
                         #[cfg(not(feature = "tsp"))] {
                             message
@@ -1884,7 +1887,22 @@ async fn matrix_worker_task(
                             }
                         };
                         match timeline.send(reply_content.into()).await {
-                            Ok(_send_handle) => log!("Sent reply message to {timeline_kind}."),
+                            Ok(send_handle) => {
+                                log!("Sent reply message to {timeline_kind}.");
+                                if let Some(prompt) = bot_prompt {
+                                    if let Err(error) = crate::botfather::stream_room_prompt_for_local_echo(
+                                        room_id_for_bot_stream,
+                                        prompt,
+                                        send_handle.created_at.get().into(),
+                                    ) {
+                                        enqueue_popup_notification(
+                                            format!("Bot stream not started: {error}"),
+                                            PopupKind::Error,
+                                            Some(5.0),
+                                        );
+                                    }
+                                }
+                            }
                             Err(_e) => {
                                 error!("Failed to send reply message to {timeline_kind}: {_e:?}");
                                 enqueue_popup_notification(format!("Failed to send reply: {_e}"), PopupKind::Error, None);
@@ -1892,7 +1910,22 @@ async fn matrix_worker_task(
                         }
                     } else {
                         match timeline.send(message.into()).await {
-                            Ok(_send_handle) => log!("Sent message to {timeline_kind}."),
+                            Ok(send_handle) => {
+                                log!("Sent message to {timeline_kind}.");
+                                if let Some(prompt) = bot_prompt {
+                                    if let Err(error) = crate::botfather::stream_room_prompt_for_local_echo(
+                                        room_id_for_bot_stream,
+                                        prompt,
+                                        send_handle.created_at.get().into(),
+                                    ) {
+                                        enqueue_popup_notification(
+                                            format!("Bot stream not started: {error}"),
+                                            PopupKind::Error,
+                                            Some(5.0),
+                                        );
+                                    }
+                                }
+                            }
                             Err(_e) => {
                                 error!("Failed to send message to {timeline_kind}: {_e:?}");
                                 enqueue_popup_notification(format!("Failed to send message: {_e}"), PopupKind::Error, None);
@@ -2233,6 +2266,12 @@ pub fn block_on_async_with_timeout<T>(
 }
 
 pub fn spawn_on_tokio(async_future: impl Future<Output = ()> + Send + 'static) {
+    let _ = spawn_on_tokio_with_handle(async_future);
+}
+
+pub fn spawn_on_tokio_with_handle(
+    async_future: impl Future<Output = ()> + Send + 'static,
+) -> JoinHandle<()> {
     let rt = TOKIO_RUNTIME
         .lock()
         .unwrap()
@@ -2241,7 +2280,7 @@ pub fn spawn_on_tokio(async_future: impl Future<Output = ()> + Send + 'static) {
         })
         .handle()
         .clone();
-    rt.spawn(async_future);
+    rt.spawn(async_future)
 }
 
 /// The primary initialization routine for starting the Matrix client sync

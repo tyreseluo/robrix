@@ -11,14 +11,14 @@ use ruma::{
 use crate::utils::RoomNameId;
 
 pub mod reply_preview;
-pub mod crew_room_panel;
+pub mod botfather_room_panel;
 pub mod room_input_bar;
 pub mod room_display_filter;
 pub mod typing_notice;
 
 pub fn live_design(cx: &mut Cx) {
     reply_preview::live_design(cx);
-    crew_room_panel::live_design(cx);
+    botfather_room_panel::live_design(cx);
     room_input_bar::live_design(cx);
     typing_notice::live_design(cx);
 }

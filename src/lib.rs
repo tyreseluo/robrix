@@ -12,8 +12,8 @@ pub mod app;
 pub mod persistence;
 /// The settings screen and settings-related content/widgets.
 pub mod settings;
-/// Robrix-side Crew integration state and runtime helpers.
-pub mod crew;
+/// Robrix-side BotFather integration state and runtime helpers.
+pub mod botfather;
 
 /// Login screen
 pub mod login;

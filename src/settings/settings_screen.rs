@@ -3,7 +3,9 @@ use makepad_widgets::*;
 use crate::{
     home::navigation_tab_bar::{NavigationBarAction, get_own_profile},
     profile::user_profile::UserProfile,
-    settings::{account_settings::AccountSettingsWidgetExt, crew_settings::CrewSettingsWidgetExt},
+    settings::{
+        account_settings::AccountSettingsWidgetExt, botfather_settings::BotfatherSettingsWidgetExt,
+    },
 };
 
 live_design! {
@@ -15,7 +17,7 @@ live_design! {
     use crate::shared::styles::*;
     use crate::shared::icon_button::*;
     use crate::settings::account_settings::AccountSettings;
-    use crate::settings::crew_settings::CrewSettings;
+    use crate::settings::botfather_settings::BotfatherSettings;
     use link::tsp_link::TspSettingsScreen;
     use link::tsp_link::CreateWalletModal;
     use link::tsp_link::CreateDidModal;
@@ -84,7 +86,7 @@ live_design! {
 
                 <LineH> { width: 400, padding: 10, margin: {top: 20, bottom: 5} }
 
-                crew_settings = <CrewSettings> {}
+                botfather_settings = <BotfatherSettings> {}
             }
         }
 
@@ -200,7 +202,7 @@ impl SettingsScreen {
             .account_settings(ids!(account_settings))
             .populate(cx, profile);
         self.view
-            .crew_settings(ids!(crew_settings))
+            .botfather_settings(ids!(botfather_settings))
             .populate(cx, selected_room_id);
         self.view.button(ids!(close_button)).reset_hover(cx);
         cx.set_key_focus(self.view.area());

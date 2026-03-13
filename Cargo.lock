@@ -1057,22 +1057,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crew-robrix-channel"
-version = "0.1.0"
-source = "git+https://github.com/Project-Robius-China/crew-robrix-channel.git?branch=main#d5d252a813b608300f6c36370cced6b8cb4e5459"
-dependencies = [
- "async-stream",
- "async-trait",
- "futures-core",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "url",
-]
-
-[[package]]
 name = "crossbeam-channel"
 version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2363,7 +2347,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots",
+ "webpki-roots 1.0.2",
 ]
 
 [[package]]
@@ -4747,7 +4731,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
- "webpki-roots",
+ "webpki-roots 1.0.2",
 ]
 
 [[package]]
@@ -4892,7 +4876,6 @@ dependencies = [
  "bytesize",
  "chrono",
  "clap",
- "crew-robrix-channel",
  "crossbeam-channel",
  "crossbeam-queue",
  "eyeball",
@@ -4918,6 +4901,7 @@ dependencies = [
  "robius-location",
  "robius-open",
  "robius-use-makepad",
+ "robrix-botfather",
  "ruma",
  "sanitize-filename",
  "serde",
@@ -4928,6 +4912,53 @@ dependencies = [
  "tsp_sdk",
  "unicode-segmentation",
  "url",
+]
+
+[[package]]
+name = "robrix-botfather"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "futures-core",
+ "futures-util",
+ "robrix-crew-channel",
+ "robrix-openclaw-channel",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "url",
+]
+
+[[package]]
+name = "robrix-crew-channel"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "futures-core",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "url",
+]
+
+[[package]]
+name = "robrix-openclaw-channel"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "futures-core",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio-tungstenite",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -6228,6 +6259,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tungstenite",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -6958,6 +6990,15 @@ dependencies = [
  "phf_codegen",
  "string_cache",
  "string_cache_codegen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.2",
 ]
 
 [[package]]

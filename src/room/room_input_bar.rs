@@ -25,7 +25,7 @@ use ruma::{
     OwnedRoomId,
 };
 use crate::{
-    crew::{self, CrewSettingsAction},
+    botfather::{self, BotfatherAction, commands::CommandHandling},
     home::{
         editing_pane::{EditingPaneState, EditingPaneWidgetExt},
         location_preview::LocationPreviewWidgetExt,
@@ -33,7 +33,7 @@ use crate::{
         tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt},
     },
     location::init_location_subscriber,
-    room::crew_room_panel::CrewRoomPanelAction,
+    room::botfather_room_panel::BotfatherRoomPanelAction,
     shared::{
         avatar::AvatarWidgetRefExt,
         html_or_plaintext::HtmlOrPlaintextWidgetRefExt,
@@ -54,7 +54,7 @@ live_design! {
     use crate::shared::avatar::Avatar;
     use crate::shared::html_or_plaintext::*;
     use crate::shared::mentionable_text_input::MentionableTextInput;
-    use crate::room::crew_room_panel::*;
+    use crate::room::botfather_room_panel::*;
     use crate::room::reply_preview::*;
     use crate::home::location_preview::*;
     use crate::home::tombstone_footer::TombstoneFooter;
@@ -93,9 +93,9 @@ live_design! {
         // Below that, display a preview of the current location that a user is about to send.
         location_preview = <LocationPreview> { }
 
-        // Room-scoped Crew actions live above the message composer so the settings screen
+        // Room-scoped bot actions live above the message composer so the settings screen
         // can stay focused on global configuration.
-        crew_panel_scroll = <ScrollYView> {
+        bot_panel_scroll = <ScrollYView> {
             visible: false
             width: Fill,
             // Keep this as a fixed viewport so overflow always scrolls
@@ -103,7 +103,7 @@ live_design! {
             height: 240
             flow: Down
             margin: {bottom: 8}
-            crew_room_panel = <CrewRoomPanel> { }
+            botfather_room_panel = <BotfatherRoomPanel> { }
         }
 
         // Below that, display one of multiple possible views:
@@ -140,7 +140,7 @@ live_design! {
                     text: "",
                 }
 
-                crew_panel_toggle_button = <RobrixIconButton> {
+                bot_panel_toggle_button = <RobrixIconButton> {
                     margin: {left: 6}
                     spacing: 4,
                     padding: 10,
@@ -152,7 +152,7 @@ live_design! {
                         color: (COLOR_BG_PREVIEW),
                     }
                     icon_walk: {width: 14, height: 14}
-                    text: "Crew",
+                    text: "Bot",
                 }
 
                 // A checkbox that enables TSP signing for the outgoing message.
@@ -233,7 +233,7 @@ pub struct RoomInputBar {
     #[rust]
     replying_to: Option<(EventTimelineItem, EmbeddedEvent)>,
     #[rust]
-    crew_panel_visible: bool,
+    bot_panel_visible: bool,
 }
 
 impl Widget for RoomInputBar {
@@ -317,21 +317,28 @@ impl RoomInputBar {
         }
 
         if self
-            .button(ids!(input_bar.crew_panel_toggle_button))
+            .button(ids!(input_bar.bot_panel_toggle_button))
             .clicked(actions)
         {
-            self.set_crew_panel_visible(cx, !self.crew_panel_visible);
+            self.set_bot_panel_visible(cx, !self.bot_panel_visible);
         }
 
         for action in actions {
             match action.as_widget_action().cast_ref() {
-                CrewRoomPanelAction::CloseRequested => self.set_crew_panel_visible(cx, false),
-                CrewRoomPanelAction::None => {}
+                BotfatherRoomPanelAction::CloseRequested => self.set_bot_panel_visible(cx, false),
+                BotfatherRoomPanelAction::None => {}
             }
 
-            if let Some(CrewSettingsAction::StreamFinished { room_id, text }) =
-                action.downcast_ref()
+            if let Some(BotfatherAction::CommandFeedback {
+                message,
+                kind,
+                auto_dismissal_duration,
+            }) = action.downcast_ref()
             {
+                enqueue_popup_notification(message.clone(), kind.clone(), *auto_dismissal_duration);
+            }
+
+            if let Some(BotfatherAction::StreamFinished { room_id, text }) = action.downcast_ref() {
                 if room_screen_props.timeline_kind.room_id().as_str() == room_id
                     && !text.trim().is_empty()
                 {
@@ -341,17 +348,17 @@ impl RoomInputBar {
                         },
                         message: RoomMessageEventContent::text_markdown(text),
                         replied_to: None,
+                        bot_prompt: None,
                         #[cfg(feature = "tsp")]
                         sign_with_tsp: false,
                     });
                 }
             }
 
-            if let Some(CrewSettingsAction::StreamFailed { room_id, error }) = action.downcast_ref()
-            {
+            if let Some(BotfatherAction::StreamFailed { room_id, error }) = action.downcast_ref() {
                 if room_screen_props.timeline_kind.room_id().as_str() == room_id {
                     enqueue_popup_notification(
-                        format!("Crew request failed: {error}"),
+                        format!("Bot request failed: {error}"),
                         PopupKind::Error,
                         Some(5.0),
                     );
@@ -407,6 +414,7 @@ impl RoomInputBar {
                     timeline_kind: room_screen_props.timeline_kind.clone(),
                     message,
                     replied_to,
+                    bot_prompt: None,
                     #[cfg(feature = "tsp")]
                     sign_with_tsp: self.is_tsp_signing_enabled(cx),
                 });
@@ -425,6 +433,25 @@ impl RoomInputBar {
         {
             let entered_text = mentionable_text_input.text().trim().to_string();
             if !entered_text.is_empty() {
+                match botfather::commands::handle_room_command(
+                    room_screen_props.timeline_kind.room_id().as_str(),
+                    &entered_text,
+                ) {
+                    CommandHandling::Consumed(feedback) => {
+                        enqueue_popup_notification(
+                            feedback.message,
+                            feedback.kind,
+                            feedback.auto_dismissal_duration,
+                        );
+                        if feedback.clear_input {
+                            mentionable_text_input.set_text(cx, "");
+                            self.enable_send_message_button(cx, false);
+                        }
+                        return;
+                    }
+                    CommandHandling::NotACommand => {}
+                }
+
                 let message = mentionable_text_input.create_message_with_mentions(&entered_text);
                 let replied_to = self
                     .replying_to
@@ -458,16 +485,10 @@ impl RoomInputBar {
                     timeline_kind: room_screen_props.timeline_kind.clone(),
                     message,
                     replied_to,
+                    bot_prompt: Some(entered_text.clone()),
                     #[cfg(feature = "tsp")]
                     sign_with_tsp: self.is_tsp_signing_enabled(cx),
                 });
-
-                if let Err(error) = crew::stream_room_prompt(
-                    room_screen_props.timeline_kind.room_id().to_string(),
-                    entered_text.clone(),
-                ) {
-                    log!("Crew stream not started for room {}: {error}", room_screen_props.timeline_kind.room_id());
-                }
 
                 self.clear_replying_to(cx);
                 mentionable_text_input.set_text(cx, "");
@@ -696,14 +717,14 @@ impl RoomInputBar {
         self.view.check_box(ids!(tsp_sign_checkbox)).active(cx)
     }
 
-    fn set_crew_panel_visible(&mut self, cx: &mut Cx, visible: bool) {
-        self.crew_panel_visible = visible;
+    fn set_bot_panel_visible(&mut self, cx: &mut Cx, visible: bool) {
+        self.bot_panel_visible = visible;
         self.view
-            .view(ids!(crew_panel_scroll))
+            .view(ids!(bot_panel_scroll))
             .set_visible(cx, visible);
         self.view
-            .button(ids!(input_bar.crew_panel_toggle_button))
-            .set_text(cx, if visible { "Hide Crew" } else { "Crew" });
+            .button(ids!(input_bar.bot_panel_toggle_button))
+            .set_text(cx, if visible { "Hide Bot" } else { "Bot" });
         self.redraw(cx);
     }
 }
@@ -796,7 +817,7 @@ impl RoomInputBarRef {
             text_input_state: inner
                 .text_input(ids!(input_bar.mentionable_text_input.text_input))
                 .save_state(),
-            crew_panel_visible: inner.crew_panel_visible,
+            bot_panel_visible: inner.bot_panel_visible,
         }
     }
 
@@ -817,7 +838,7 @@ impl RoomInputBarRef {
             text_input_state,
             replying_to,
             editing_pane_state,
-            crew_panel_visible,
+            bot_panel_visible,
         } = saved_state;
 
         // Note: we do *not* restore the location preview state here; see `save_state()`.
@@ -856,8 +877,8 @@ impl RoomInputBarRef {
         //    This depends on the `EditingPane` state, so it must be done after Step 3.
         inner.update_tombstone_footer(cx, timeline_kind.room_id(), tombstone_info);
 
-        // 5. Restore the Crew panel toggle.
-        inner.set_crew_panel_visible(cx, crew_panel_visible);
+        // 5. Restore the BotFather panel toggle.
+        inner.set_bot_panel_visible(cx, bot_panel_visible);
     }
 }
 
@@ -872,8 +893,8 @@ pub struct RoomInputBarState {
     replying_to: Option<(EventTimelineItem, EmbeddedEvent)>,
     /// The state of the `EditingPane`, if any message was being edited.
     editing_pane_state: Option<EditingPaneState>,
-    /// Whether the room-scoped Crew panel was visible.
-    crew_panel_visible: bool,
+    /// Whether the room-scoped BotFather panel was visible.
+    bot_panel_visible: bool,
 }
 
 /// Defines what to do when showing the `EditingPane` from the `RoomInputBar`.
