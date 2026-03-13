@@ -1,10 +1,13 @@
 use makepad_widgets::*;
+use matrix_sdk::room::reply::{EnforceThread, Reply};
+use ruma::events::room::message::{ReplyWithinThread, RoomMessageEventContent};
 
 use crate::{
     botfather::{self, BotfatherAction},
     home::room_screen::RoomScreenProps,
     login::login_screen::LoginAction,
     logout::logout_confirm_modal::LogoutAction,
+    sliding_sync::{submit_async_request, MatrixRequest},
 };
 
 live_design! {
@@ -159,6 +162,85 @@ live_design! {
             }
         }
 
+        preview_card = <View> {
+            width: Fill, height: Fit
+            flow: Down
+            spacing: 8
+            padding: 10
+            show_bg: true
+            draw_bg: {
+                color: (COLOR_PRIMARY)
+                border_radius: 4.0
+                border_size: 1.0
+                border_color: (COLOR_SECONDARY)
+            }
+
+            <SubsectionLabel> {
+                text: "Latest Bot Stream"
+            }
+
+            preview_status_label = <Label> {
+                width: Fill, height: Fit
+                flow: RightWrap
+                draw_text: {
+                    wrap: Word
+                    text_style: <REGULAR_TEXT>{font_size: 10.5}
+                    color: (COLOR_TEXT)
+                }
+                text: "No streamed preview yet."
+            }
+
+            preview_body_label = <Label> {
+                width: Fill, height: Fit
+                flow: RightWrap
+                draw_text: {
+                    wrap: Word
+                    text_style: <REGULAR_TEXT>{font_size: 10.5}
+                    color: (COLOR_TEXT)
+                }
+                text: ""
+            }
+
+            <View> {
+                width: Fill, height: Fit
+                flow: RightWrap
+                spacing: 10
+
+                post_preview_button = <RobrixIconButton> {
+                    width: Fit
+                    padding: 12
+                    enabled: false
+                    draw_bg: {
+                        color: (COLOR_ACTIVE_PRIMARY)
+                    }
+                    draw_icon: {
+                        svg_file: (ICON_SEND)
+                        color: (COLOR_PRIMARY)
+                    }
+                    draw_text: {
+                        color: (COLOR_PRIMARY)
+                    }
+                    icon_walk: { width: 14, height: 14 }
+                    text: "Post Preview"
+                }
+
+                clear_preview_button = <RobrixIconButton> {
+                    width: Fit
+                    padding: 12
+                    enabled: false
+                    draw_bg: {
+                        color: (COLOR_SECONDARY)
+                    }
+                    draw_icon: {
+                        svg_file: (ICON_CLOSE)
+                        color: (COLOR_TEXT)
+                    }
+                    icon_walk: { width: 12, height: 12 }
+                    text: "Clear Preview"
+                }
+            }
+        }
+
         status_label = <Label> {
             width: Fill, height: Fit
             flow: RightWrap
@@ -193,7 +275,9 @@ impl Widget for BotfatherRoomPanel {
         if matches!(event, Event::Signal) {
             let _ = botfather::ensure_loaded_for_current_user();
             let _ = botfather::refresh_inventory_from_rooms_list(cx);
+            self.apply_preview_visibility(cx);
             self.refresh_room_state(cx, current_room_id(scope));
+            self.refresh_stream_preview(cx, scope);
         }
 
         if let Event::Actions(actions) = event {
@@ -201,6 +285,8 @@ impl Widget for BotfatherRoomPanel {
             let bot_selector_dropdown = self.drop_down(ids!(bot_selector_dropdown));
             let unbind_room_button = self.view.button(ids!(unbind_room_button));
             let healthcheck_button = self.view.button(ids!(healthcheck_button));
+            let post_preview_button = self.view.button(ids!(post_preview_button));
+            let clear_preview_button = self.view.button(ids!(clear_preview_button));
             let close_button = self.view.button(ids!(close_button));
 
             if let Some(selected_index) = bot_selector_dropdown.selected(actions) {
@@ -209,6 +295,7 @@ impl Widget for BotfatherRoomPanel {
                         Some(room_id) => match botfather::bind_room_to_bot(room_id, &bot_id) {
                             Ok(message) => {
                                 self.refresh_room_state(cx, current_room_id.clone());
+                                self.refresh_stream_preview(cx, scope);
                                 self.set_status(cx, &message);
                             }
                             Err(error) => self.set_status(cx, &error),
@@ -228,6 +315,7 @@ impl Widget for BotfatherRoomPanel {
                     Some(room_id) => match botfather::unbind_room(room_id) {
                         Ok(()) => {
                             self.refresh_room_state(cx, current_room_id.clone());
+                            self.refresh_stream_preview(cx, scope);
                             self.set_status(cx, "Removed the room-level bot override.");
                         }
                         Err(error) => self.set_status(cx, &error),
@@ -246,6 +334,67 @@ impl Widget for BotfatherRoomPanel {
                 }
             }
 
+            if post_preview_button.clicked(actions) {
+                match scope.props.get::<RoomScreenProps>() {
+                    Some(room_props) => {
+                        let thread_root_event_id = room_props
+                            .timeline_kind
+                            .thread_root_event_id()
+                            .map(|event_id| event_id.to_string());
+                        match botfather::take_room_stream_preview_text(
+                            room_props.room_name_id.room_id().as_str(),
+                            thread_root_event_id.as_deref(),
+                        ) {
+                            Some(text) => {
+                                let replied_to = room_props.timeline_kind.thread_root_event_id().map(
+                                    |thread_root_event_id| Reply {
+                                        event_id: thread_root_event_id.clone(),
+                                        enforce_thread: EnforceThread::Threaded(
+                                            ReplyWithinThread::No,
+                                        ),
+                                    },
+                                );
+                                submit_async_request(MatrixRequest::SendMessage {
+                                    timeline_kind: room_props.timeline_kind.clone(),
+                                    message: RoomMessageEventContent::text_markdown(text),
+                                    replied_to,
+                                    bot_prompt: None,
+                                    bot_dispatch_context: None,
+                                    bot_stream_placeholder_context: None,
+                                    #[cfg(feature = "tsp")]
+                                    sign_with_tsp: false,
+                                });
+                                self.refresh_stream_preview(cx, scope);
+                                self.set_status(cx, "Posted the bot preview to Matrix.");
+                            }
+                            None => self.set_status(
+                                cx,
+                                "No finished bot preview is available for this scope yet.",
+                            ),
+                        }
+                    }
+                    None => self.set_status(cx, "This room is not ready for BotFather yet."),
+                }
+            }
+
+            if clear_preview_button.clicked(actions) {
+                match scope.props.get::<RoomScreenProps>() {
+                    Some(room_props) => {
+                        let thread_root_event_id = room_props
+                            .timeline_kind
+                            .thread_root_event_id()
+                            .map(|event_id| event_id.to_string());
+                        botfather::clear_room_stream_preview(
+                            room_props.room_name_id.room_id().as_str(),
+                            thread_root_event_id.as_deref(),
+                        );
+                        self.refresh_stream_preview(cx, scope);
+                        self.set_status(cx, "Cleared the current bot preview buffer.");
+                    }
+                    None => self.set_status(cx, "This room is not ready for BotFather yet."),
+                }
+            }
+
             if close_button.clicked(actions) {
                 cx.widget_action(
                     self.widget_uid(),
@@ -257,7 +406,9 @@ impl Widget for BotfatherRoomPanel {
             for action in actions {
                 if let Some(LoginAction::LoginSuccess) = action.downcast_ref() {
                     let _ = botfather::ensure_loaded_for_current_user();
+                    self.apply_preview_visibility(cx);
                     self.refresh_room_state(cx, current_room_id.clone());
+                    self.refresh_stream_preview(cx, scope);
                     continue;
                 }
 
@@ -267,7 +418,24 @@ impl Widget for BotfatherRoomPanel {
                 }
 
                 if let Some(BotfatherAction::StateChanged) = action.downcast_ref() {
+                    self.apply_preview_visibility(cx);
                     self.refresh_room_state(cx, current_room_id.clone());
+                    self.refresh_stream_preview(cx, scope);
+                    continue;
+                }
+
+                if let Some(
+                    BotfatherAction::StreamQueued { room_id, .. }
+                    | BotfatherAction::StreamStarted { room_id, .. }
+                    | BotfatherAction::StreamDelta { room_id, .. }
+                    | BotfatherAction::StreamFinished { room_id, .. }
+                    | BotfatherAction::StreamFailed { room_id, .. }
+                    | BotfatherAction::StreamCancelled { room_id, .. },
+                ) = action.downcast_ref()
+                {
+                    if current_room_id.as_deref() == Some(room_id.as_str()) {
+                        self.refresh_stream_preview(cx, scope);
+                    }
                     continue;
                 }
 
@@ -310,6 +478,7 @@ impl BotfatherRoomPanel {
                     "This room is not ready yet. Open it again after Robrix finishes loading.",
                 );
                 self.update_bot_selector(cx, None);
+                self.clear_preview(cx);
             }
         }
     }
@@ -320,6 +489,7 @@ impl BotfatherRoomPanel {
             .set_text(cx, "No bot binding resolved yet.");
         self.view.label(ids!(status_label)).set_text(cx, "");
         self.update_bot_selector(cx, None);
+        self.clear_preview(cx);
     }
 
     fn set_status(&mut self, cx: &mut Cx, status: &str) {
@@ -363,6 +533,78 @@ impl BotfatherRoomPanel {
             })
             .unwrap_or(0);
         dropdown.set_selected_item(cx, selected_index);
+    }
+
+    fn refresh_stream_preview(&mut self, cx: &mut Cx, scope: &mut Scope) {
+        let Some(room_props) = scope.props.get::<RoomScreenProps>() else {
+            self.clear_preview(cx);
+            return;
+        };
+        self.refresh_stream_preview_for_room(
+            cx,
+            room_props.room_name_id.room_id().as_str(),
+            room_props
+                .timeline_kind
+                .thread_root_event_id()
+                .map(|event_id| event_id.to_string())
+                .as_deref(),
+        );
+    }
+
+    fn refresh_stream_preview_for_room(
+        &mut self,
+        cx: &mut Cx,
+        room_id: &str,
+        thread_root_event_id: Option<&str>,
+    ) {
+        let post_preview_button = self.view.button(ids!(post_preview_button));
+        let clear_preview_button = self.view.button(ids!(clear_preview_button));
+
+        if let Some(preview) = botfather::room_stream_preview(room_id, thread_root_event_id) {
+            let status = match preview.status {
+                botfather::BotStreamPreviewStatus::Idle => preview.detail,
+                botfather::BotStreamPreviewStatus::Queued => format!("Queued. {}", preview.detail),
+                botfather::BotStreamPreviewStatus::Streaming => {
+                    format!("Streaming {}...", preview.bot_name)
+                }
+                botfather::BotStreamPreviewStatus::Finished => {
+                    format!("Finished. {}", preview.detail)
+                }
+                botfather::BotStreamPreviewStatus::Failed => format!("Failed. {}", preview.detail),
+                botfather::BotStreamPreviewStatus::Cancelled => preview.detail,
+            };
+            self.view
+                .label(ids!(preview_status_label))
+                .set_text(cx, &status);
+            self.view
+                .label(ids!(preview_body_label))
+                .set_text(cx, &preview.text);
+            post_preview_button.set_enabled(cx, preview.can_post);
+            clear_preview_button.set_enabled(
+                cx,
+                !preview.text.trim().is_empty()
+                    || preview.status != botfather::BotStreamPreviewStatus::Idle,
+            );
+        } else {
+            self.clear_preview(cx);
+        }
+    }
+
+    fn clear_preview(&mut self, cx: &mut Cx) {
+        self.view
+            .label(ids!(preview_status_label))
+            .set_text(cx, "No streamed preview yet.");
+        self.view.label(ids!(preview_body_label)).set_text(cx, "");
+        self.view.button(ids!(post_preview_button)).set_enabled(cx, false);
+        self.view.button(ids!(clear_preview_button)).set_enabled(cx, false);
+    }
+
+    fn apply_preview_visibility(&mut self, cx: &mut Cx) {
+        let visible = botfather::room_stream_preview_enabled();
+        self.view.view(ids!(preview_card)).set_visible(cx, visible);
+        if !visible {
+            self.clear_preview(cx);
+        }
     }
 }
 

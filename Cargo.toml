@@ -86,7 +86,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "http2",
     "macos-system-configuration",
 ] }
-robrix-botfather = { path = "../robrix-botfather" }
+robrix-botfather = { git = "https://github.com/Project-Robius-China/robrix-botfather.git" }
 
 ## Dependencies for SSE support.
 axum = "0.7"

@@ -5015,6 +5015,7 @@ dependencies = [
 [[package]]
 name = "robrix-botfather"
 version = "0.1.0"
+source = "git+https://github.com/Project-Robius-China/robrix-botfather.git#9b2810cb2b95972d2703cf88c9966a4df353df76"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -5031,6 +5032,7 @@ dependencies = [
 [[package]]
 name = "robrix-crew-channel"
 version = "0.1.0"
+source = "git+ssh://git@github.com/Project-Robius-China/robrix-crew-channel.git#3710f04e31d74323752a9857a595c6cfd1a6e1ff"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -5046,6 +5048,7 @@ dependencies = [
 [[package]]
 name = "robrix-openclaw-channel"
 version = "0.1.0"
+source = "git+ssh://git@github.com/Project-Robius-China/robrix-openclaw-channel.git#7146a751676f9104b6826c39cc87ae025244791b"
 dependencies = [
  "async-stream",
  "async-trait",

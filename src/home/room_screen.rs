@@ -8,12 +8,12 @@ use hashbrown::{HashMap, HashSet};
 use imbl::Vector;
 use makepad_widgets::{image_cache::ImageBuffer, *};
 use matrix_sdk::{
-    OwnedServerName, RoomDisplayName, media::{MediaFormat, MediaRequestParameters}, room::RoomMember, ruma::{
+    OwnedServerName, RoomDisplayName, media::{MediaFormat, MediaRequestParameters}, room::{RoomMember, reply::{EnforceThread, Reply}}, ruma::{
         EventId, MatrixToUri, MatrixUri, OwnedEventId, OwnedMxcUri, OwnedRoomId, UserId, events::{
             receipt::Receipt,
             room::{
                 ImageInfo, MediaSource, message::{
-                    AudioMessageEventContent, EmoteMessageEventContent, FileMessageEventContent, FormattedBody, ImageMessageEventContent, KeyVerificationRequestEventContent, LocationMessageEventContent, MessageFormat, MessageType, NoticeMessageEventContent, TextMessageEventContent, VideoMessageEventContent
+                    AudioMessageEventContent, EmoteMessageEventContent, FileMessageEventContent, FormattedBody, ImageMessageEventContent, KeyVerificationRequestEventContent, LocationMessageEventContent, MessageFormat, MessageType, NoticeMessageEventContent, ReplyWithinThread, RoomMessageEventContent, TextMessageEventContent, VideoMessageEventContent
                 }
             },
             sticker::{StickerEventContent, StickerMediaSource},
@@ -26,7 +26,7 @@ use matrix_sdk_ui::timeline::{
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
 use crate::{
-    app::{AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, botfather::BotfatherAction, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
+    app::{AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, botfather::{self, BotfatherAction}, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
@@ -36,7 +36,7 @@ use crate::{
     },
     sliding_sync::{BackwardsPaginateUntilEventRequest, MatrixRequest, PaginationDirection, TimelineEndpoints, TimelineKind, TimelineRequestSender, UserPowerLevels, get_client, spawn_on_tokio, submit_async_request, take_timeline_endpoints}, utils::{self, ImageFormat, MEDIA_THUMBNAIL_FORMAT, RoomNameId, unix_time_millis_to_datetime}
 };
-use crate::home::event_reaction_list::ReactionListWidgetRefExt;
+use crate::home::event_reaction_list::{ReactionListAction, ReactionListWidgetRefExt};
 use crate::home::room_read_receipt::AvatarRowWidgetRefExt;
 use crate::room::room_input_bar::RoomInputBarWidgetExt;
 use crate::shared::mentionable_text_input::MentionableTextInputAction;
@@ -57,6 +57,7 @@ const BLURHASH_IMAGE_MAX_SIZE: u32 = 500;
 
 static UNNAMED_ROOM: &str = "Unnamed Room";
 const CREW_THINKING_REACTION: &str = "🤔";
+const STALE_BOT_PLACEHOLDER_AGE_MILLIS: u64 = 120_000;
 
 /// #FFF4E5
 const COLOR_THREAD_SUMMARY_BG: Vec4 = vec4(1.0, 0.957, 0.898, 1.0);
@@ -726,6 +727,85 @@ impl Widget for RoomScreen {
                     );
                 }
 
+                if let ReactionListAction::InterruptBotThinking { timeline_kind, .. } =
+                    actions.find_widget_action(reaction_list.widget_uid()).cast()
+                {
+                    let interrupt_result = botfather::interrupt_active_scope(
+                        timeline_kind.room_id().as_str(),
+                        timeline_kind.thread_root_event_id().map(|event_id| event_id.as_str()),
+                    );
+                    if interrupt_result.interrupted {
+                        let notice = if interrupt_result.queued_remaining_in_scope {
+                            "Bot run interrupted by user. Continuing with the next queued request."
+                        } else {
+                            "Bot run interrupted by user."
+                        };
+                        match botfather::cancel_direct_stream_message(
+                            timeline_kind.room_id().as_str(),
+                            timeline_kind.thread_root_event_id().map(|event_id| event_id.as_str()),
+                            Some(notice.to_string()),
+                        ) {
+                            botfather::DirectStreamHandleState::Ready(send_handle) => {
+                                let notice_text = notice.to_string();
+                                spawn_on_tokio(async move {
+                                    match send_handle.abort().await {
+                                        Ok(true) => {}
+                                        Ok(false) => {
+                                            if let Err(error) = send_handle
+                                                .edit(RoomMessageEventContent::text_markdown(notice_text).into())
+                                                .await
+                                            {
+                                                enqueue_popup_notification(
+                                                    format!("Failed to update interrupted bot stream message: {error}"),
+                                                    PopupKind::Error,
+                                                    Some(5.0),
+                                                );
+                                            }
+                                        }
+                                        Err(error) => enqueue_popup_notification(
+                                            format!("Failed to interrupt bot stream placeholder: {error}"),
+                                            PopupKind::Error,
+                                            Some(5.0),
+                                        ),
+                                    }
+                                });
+                            }
+                            botfather::DirectStreamHandleState::Pending => {}
+                            botfather::DirectStreamHandleState::Missing => {
+                                let replied_to = timeline_kind.thread_root_event_id().map(|thread_root_event_id| Reply {
+                                    event_id: thread_root_event_id.clone(),
+                                    enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
+                                });
+                                submit_async_request(MatrixRequest::SendMessage {
+                                    timeline_kind: timeline_kind.clone(),
+                                    message: RoomMessageEventContent::text_markdown(notice),
+                                    replied_to,
+                                    bot_prompt: None,
+                                    bot_dispatch_context: None,
+                                    bot_stream_placeholder_context: None,
+                                    #[cfg(feature = "tsp")]
+                                    sign_with_tsp: false,
+                                });
+                            }
+                        }
+                        enqueue_popup_notification(
+                            if interrupt_result.queued_remaining_in_scope {
+                                "Interrupted the running bot task. The next queued request is starting."
+                            } else {
+                                "Interrupted the running bot task."
+                            },
+                            PopupKind::Success,
+                            Some(4.0),
+                        );
+                    } else {
+                        enqueue_popup_notification(
+                            "No running bot task in this room/thread to interrupt.",
+                            PopupKind::Warning,
+                            Some(4.0),
+                        );
+                    }
+                }
+
                 // Handle a hover-out action on the reaction list or avatar row.
                 let avatar_row_ref = wr.avatar_row(ids!(avatar_row));
                 if reaction_list.hovered_out(actions)
@@ -801,7 +881,20 @@ impl Widget for RoomScreen {
             self.handle_message_actions(cx, actions, &portal_list, &loading_pane);
 
             for action in actions {
-                if let Some(BotfatherAction::StreamStarted { room_id, .. }) =
+                if let Some(BotfatherAction::StreamStarted { room_id, thread_root_event_id, .. }) =
+                    action.downcast_ref()
+                {
+                    if self.room_id().is_some_and(|id| id.as_str() == room_id) {
+                        self.add_bot_thinking_reaction();
+                    }
+                    self.refresh_direct_bot_stream_display(
+                        cx,
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                    );
+                    continue;
+                }
+                if let Some(BotfatherAction::StreamQueued { room_id, .. }) =
                     action.downcast_ref()
                 {
                     if self.room_id().is_some_and(|id| id.as_str() == room_id) {
@@ -809,28 +902,53 @@ impl Widget for RoomScreen {
                     }
                     continue;
                 }
-                if let Some(BotfatherAction::StreamFinished { room_id, .. }) =
+                if let Some(BotfatherAction::StreamFinished { room_id, thread_root_event_id, .. }) =
                     action.downcast_ref()
                 {
                     if self.room_id().is_some_and(|id| id.as_str() == room_id) {
                         self.clear_bot_thinking_reaction();
                     }
+                    self.refresh_direct_bot_stream_display(
+                        cx,
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                    );
                     continue;
                 }
-                if let Some(BotfatherAction::StreamFailed { room_id, .. }) =
+                if let Some(BotfatherAction::StreamFailed { room_id, thread_root_event_id, .. }) =
                     action.downcast_ref()
                 {
                     if self.room_id().is_some_and(|id| id.as_str() == room_id) {
                         self.clear_bot_thinking_reaction();
                     }
+                    self.refresh_direct_bot_stream_display(
+                        cx,
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                    );
                     continue;
                 }
-                if let Some(BotfatherAction::StreamCancelled { room_id }) =
+                if let Some(BotfatherAction::StreamCancelled { room_id, thread_root_event_id }) =
                     action.downcast_ref()
                 {
                     if self.room_id().is_some_and(|id| id.as_str() == room_id) {
                         self.clear_bot_thinking_reaction();
                     }
+                    self.refresh_direct_bot_stream_display(
+                        cx,
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                    );
+                    continue;
+                }
+                if let Some(BotfatherAction::StreamDelta { room_id, thread_root_event_id, .. }) =
+                    action.downcast_ref()
+                {
+                    self.refresh_direct_bot_stream_display(
+                        cx,
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                    );
                     continue;
                 }
 
@@ -1449,9 +1567,56 @@ impl RoomScreen {
                     }
                     tl.items = new_items;
 
+                    let own_user_id = get_client().and_then(|client| client.user_id().map(ToOwned::to_owned));
+                    let now_millis: u64 = matrix_sdk::ruma::MilliSecondsSinceUnixEpoch::now()
+                        .get()
+                        .into();
+                    let mut visible_bot_placeholders = Vec::new();
+
                     // Check new items for SSE messages and start fetching if needed
                     for item in tl.items.iter() {
                         if let Some(event_tl_item) = item.as_event() {
+                            if let TimelineItemContent::MsgLike(msg_like_content) = event_tl_item.content() {
+                                if let MsgLikeKind::Message(message) = &msg_like_content.kind {
+                                    if let MessageType::Text(text_content) = message.msgtype() {
+                                        if let Some(bot_stream_thread_root_event_id) =
+                                            parse_bot_stream_header(&text_content.body)
+                                        {
+                                            visible_bot_placeholders
+                                                .push(bot_stream_thread_root_event_id.clone());
+                                            let is_live_placeholder = botfather::has_live_direct_stream_message(
+                                                tl.kind.room_id().as_str(),
+                                                bot_stream_thread_root_event_id.as_deref(),
+                                            );
+                                            let placeholder_created_at: u64 =
+                                                event_tl_item.timestamp().get().into();
+                                            let is_stale_placeholder = now_millis
+                                                .saturating_sub(placeholder_created_at)
+                                                >= STALE_BOT_PLACEHOLDER_AGE_MILLIS;
+                                            if !is_live_placeholder && is_stale_placeholder {
+                                                if let Some(send_handle) = event_tl_item.local_echo_send_handle() {
+                                                    spawn_on_tokio(async move {
+                                                        let _ = send_handle.abort().await;
+                                                    });
+                                                } else if let (Some(own_user_id), Some(event_id)) =
+                                                    (own_user_id.as_ref(), event_tl_item.event_id())
+                                                {
+                                                    if event_tl_item.sender() == own_user_id
+                                                        && tl.pending_bot_placeholder_cleanup.insert(event_id.to_owned())
+                                                    {
+                                                        submit_async_request(MatrixRequest::RedactMessage {
+                                                            timeline_kind: tl.kind.clone(),
+                                                            timeline_event_id: TimelineEventItemId::EventId(event_id.to_owned()),
+                                                            reason: Some("Remove stale bot placeholder message".into()),
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             if let Some(event_id) = event_tl_item.event_id() {
                                 // Check if this message contains an SSE header
                                 if let TimelineItemContent::MsgLike(msg_like_content) = event_tl_item.content() {
@@ -1484,6 +1649,11 @@ impl RoomScreen {
                             }
                         }
                     }
+
+                    let _ = botfather::prune_terminal_direct_stream_messages(
+                        tl.kind.room_id().as_str(),
+                        &visible_bot_placeholders,
+                    );
 
                     done_loading = true;
                 }
@@ -2431,6 +2601,7 @@ impl RoomScreen {
                 link_preview_cache: LinkPreviewCache::new(Some(update_sender)),
                 fetched_thread_summaries: HashMap::new(),
                 pending_thread_summary_fetches: HashSet::new(),
+                pending_bot_placeholder_cleanup: HashSet::new(),
                 saved_state: SavedState::default(),
                 message_highlight_animation_state: MessageHighlightAnimationState::default(),
                 last_scrolled_index: usize::MAX,
@@ -2610,7 +2781,11 @@ impl RoomScreen {
         let Some(own_user_id) = get_client().and_then(|client| client.user_id().map(ToOwned::to_owned)) else {
             return;
         };
-        let Some(queued_target) = self.bot_thinking_targets.pop() else { return };
+        let Some(queued_target) = (!self.bot_thinking_targets.is_empty())
+            .then(|| self.bot_thinking_targets.remove(0))
+        else {
+            return;
+        };
         let timeline_event_id = Self::resolve_bot_thinking_target_id(tl, &own_user_id, &queued_target)
             .or_else(|| Self::find_latest_own_message_with_bot_thinking_reaction_id(tl, &own_user_id))
             .unwrap_or(queued_target);
@@ -2717,6 +2892,30 @@ impl RoomScreen {
             .event_id()
             .map(|event_id| TimelineEventItemId::EventId(event_id.to_owned()))
             .unwrap_or_else(|| event.identifier())
+    }
+
+    fn refresh_direct_bot_stream_display(
+        &mut self,
+        cx: &mut Cx,
+        room_id: &str,
+        thread_root_event_id: Option<&str>,
+    ) {
+        if botfather::room_stream_preview_enabled() {
+            return;
+        }
+
+        let Some(tl) = self.tl_state.as_mut() else {
+            return;
+        };
+        if tl.kind.room_id().as_str() != room_id {
+            return;
+        }
+        if tl.kind.thread_root_event_id().map(|id| id.as_str()) != thread_root_event_id {
+            return;
+        }
+
+        tl.content_drawn_since_last_update.clear();
+        self.redraw(cx);
     }
 
     /// Restores the previously-saved visual UI state of this room.
@@ -3172,6 +3371,9 @@ struct TimelineUiState {
     /// are contained within. If `None`, the room has not been tombstoned.
     tombstone_info: Option<SuccessorRoomDetails>,
 
+    /// Tracks stale bot placeholder event IDs currently being cleaned up.
+    pending_bot_placeholder_cleanup: HashSet<OwnedEventId>,
+
     /// Tracks active SSE streams by event ID.
     /// Maps event_id to (accumulated_content, is_fetching).
     sse_streams: HashMap<OwnedEventId, SseStreamState>,
@@ -3376,28 +3578,60 @@ fn populate_message_view(
                     } else {
                         // Check for SSE pattern in the message and display SSE content if available.
                         // Note: SSE fetch is triggered in process_timeline_updates when NewItems arrive.
-                        let (display_body, display_formatted) = if parse_sse_header(body).is_some() {
-                            // Check if we have SSE state for this event
-                            if let Some(event_id) = event_tl_item.event_id() {
-                                if let Some(sse_state) = sse_streams.get(event_id) {
-                                    // Display accumulated content or loading message
-                                    if sse_state.accumulated_content.is_empty() {
-                                        (format!("Loading SSE from {}...", sse_state.url), None)
-                                    } else if sse_state.is_complete {
-                                        (format!("SSE Complete:\n\n{}", sse_state.accumulated_content), None)
+                        let (display_body, display_formatted) =
+                            if let Some(bot_stream_thread_root_event_id) =
+                                parse_bot_stream_header(body)
+                            {
+                                if !botfather::has_live_direct_stream_message(
+                                    timeline_kind.room_id().as_str(),
+                                    bot_stream_thread_root_event_id.as_deref(),
+                                ) {
+                                    (String::new(), None)
+                                } else {
+                                let preview = botfather::room_stream_preview(
+                                    timeline_kind.room_id().as_str(),
+                                    bot_stream_thread_root_event_id.as_deref(),
+                                );
+                                let display_body = match preview {
+                                    Some(preview) if !preview.text.trim().is_empty() => preview.text,
+                                    Some(preview) => match preview.status {
+                                        botfather::BotStreamPreviewStatus::Queued => {
+                                            format!("{} is queued...", preview.bot_name)
+                                        }
+                                        botfather::BotStreamPreviewStatus::Failed => {
+                                            format!("Bot request failed: {}", preview.detail)
+                                        }
+                                        botfather::BotStreamPreviewStatus::Cancelled => {
+                                            "Bot request cancelled.".into()
+                                        }
+                                        _ => format!("{} is thinking...", preview.bot_name),
+                                    },
+                                    None => "Bot is thinking...".into(),
+                                };
+                                (display_body, None)
+                                }
+                            } else if parse_sse_header(body).is_some() {
+                                // Check if we have SSE state for this event
+                                if let Some(event_id) = event_tl_item.event_id() {
+                                    if let Some(sse_state) = sse_streams.get(event_id) {
+                                        // Display accumulated content or loading message
+                                        if sse_state.accumulated_content.is_empty() {
+                                            (format!("Loading SSE from {}...", sse_state.url), None)
+                                        } else if sse_state.is_complete {
+                                            (format!("SSE Complete:\n\n{}", sse_state.accumulated_content), None)
+                                        } else {
+                                            (format!("SSE Streaming...\n\n{}", sse_state.accumulated_content), None)
+                                        }
                                     } else {
-                                        (format!("SSE Streaming...\n\n{}", sse_state.accumulated_content), None)
+                                        // SSE state not yet created (shouldn't happen normally)
+                                        (body.to_string(), formatted.clone())
                                     }
                                 } else {
-                                    // SSE state not yet created (shouldn't happen normally)
                                     (body.to_string(), formatted.clone())
                                 }
                             } else {
                                 (body.to_string(), formatted.clone())
-                            }
-                        } else {
-                            (body.to_string(), formatted.clone())
-                        };
+                            };
 
                         new_drawn_status.content_drawn = populate_text_message_content(
                             cx,
@@ -5151,6 +5385,21 @@ pub fn clear_timeline_states(_cx: &mut Cx) {
 /// For example: `!SSE|http://127.0.0.1:3000/events|`
 ///
 /// Returns the URL if the pattern matches, otherwise None.
+fn parse_bot_stream_header(body: &str) -> Option<Option<String>> {
+    let trimmed = body.trim();
+    if !trimmed.starts_with("!BOT_STREAM|") {
+        return None;
+    }
+
+    let end_idx = trimmed[12..].find('|')?;
+    let scope = &trimmed[12..12 + end_idx];
+    if scope.is_empty() || scope == "main" {
+        Some(None)
+    } else {
+        Some(Some(scope.to_string()))
+    }
+}
+
 fn parse_sse_header(body: &str) -> Option<String> {
     let trimmed = body.trim();
     if trimmed.starts_with("!SSE|") {

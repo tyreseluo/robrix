@@ -124,6 +124,14 @@ live_design! {
                 }
                 text: "Workspace"
             }
+
+            diagnostics_section_button = <SectionButton> {
+                draw_icon: {
+                    svg_file: (ICON_INFO)
+                    color: (COLOR_TEXT)
+                }
+                text: "Diagnostics"
+            }
         }
 
         runtimes_section = <View> {
@@ -186,6 +194,28 @@ live_design! {
                 bots_summary_label = <SummaryLabel> {}
             }
 
+            room_stream_mode_card = <SettingsCard> {
+                <SubsectionLabel> {
+                    text: "Room Stream Mode"
+                }
+
+                room_stream_mode_summary_label = <SummaryLabel> {}
+
+                room_stream_mode_toggle = <RobrixIconButton> {
+                    width: Fit
+                    padding: 12
+                    draw_bg: {
+                        color: (COLOR_BG_PREVIEW)
+                    }
+                    draw_icon: {
+                        svg_file: (ICON_LINK)
+                        color: (COLOR_TEXT)
+                    }
+                    icon_walk: { width: 14, height: 14 }
+                    text: "Enable Preview"
+                }
+            }
+
             bot_commands_card = <SettingsCard> {
                 <SubsectionLabel> {
                     text: "Slash Commands"
@@ -212,6 +242,21 @@ live_design! {
                     width: Fill, height: Fit
                     empty_text: "/path/to/workspace (optional)"
                 }
+            }
+        }
+
+        diagnostics_section = <View> {
+            visible: false
+            width: Fill, height: Fit
+            flow: Down
+            spacing: 12
+
+            diagnostics_card = <SettingsCard> {
+                <SubsectionLabel> {
+                    text: "State Diagnostics"
+                }
+
+                diagnostics_summary_label = <SummaryLabel> {}
             }
         }
 
@@ -268,6 +313,7 @@ enum BotfatherSettingsSection {
     Runtimes,
     Bots,
     Workspace,
+    Diagnostics,
 }
 
 #[derive(Live, LiveHook, Widget)]
@@ -294,8 +340,10 @@ impl Widget for BotfatherSettings {
             let runtimes_section_button = self.view.button(ids!(runtimes_section_button));
             let bots_section_button = self.view.button(ids!(bots_section_button));
             let workspace_section_button = self.view.button(ids!(workspace_section_button));
+            let diagnostics_section_button = self.view.button(ids!(diagnostics_section_button));
             let refresh_inventory_button = self.view.button(ids!(refresh_inventory_button));
             let save_defaults_button = self.view.button(ids!(save_defaults_button));
+            let room_stream_mode_toggle = self.view.button(ids!(room_stream_mode_toggle));
             let crew_runtime_toggle = self.view.button(ids!(crew_runtime_toggle));
             let openclaw_runtime_toggle = self.view.button(ids!(openclaw_runtime_toggle));
             let crew_endpoint_input = self.view.text_input(ids!(crew_endpoint_input));
@@ -314,6 +362,9 @@ impl Widget for BotfatherSettings {
             if workspace_section_button.clicked(actions) {
                 self.set_section(cx, BotfatherSettingsSection::Workspace);
             }
+            if diagnostics_section_button.clicked(actions) {
+                self.set_section(cx, BotfatherSettingsSection::Diagnostics);
+            }
             if crew_runtime_toggle.clicked(actions) {
                 self.crew_runtime_expanded = !self.crew_runtime_expanded;
                 self.apply_runtime_cards_state(cx);
@@ -321,6 +372,16 @@ impl Widget for BotfatherSettings {
             if openclaw_runtime_toggle.clicked(actions) {
                 self.openclaw_runtime_expanded = !self.openclaw_runtime_expanded;
                 self.apply_runtime_cards_state(cx);
+            }
+            if room_stream_mode_toggle.clicked(actions) {
+                let enable_preview = !botfather::room_stream_preview_enabled();
+                match botfather::set_room_stream_preview_enabled(enable_preview) {
+                    Ok(message) => {
+                        self.populate(cx, None);
+                        self.set_status(cx, &message);
+                    }
+                    Err(error) => self.set_status(cx, &error),
+                }
             }
 
             if refresh_inventory_button.clicked(actions) {
@@ -410,8 +471,19 @@ impl BotfatherSettings {
         self.view
             .label(ids!(bots_summary_label))
             .set_text(cx, &botfather::bots_overview());
+        let preview_enabled = botfather::room_stream_preview_enabled();
+        self.view
+            .label(ids!(room_stream_mode_summary_label))
+            .set_text(
+                cx,
+                if preview_enabled {
+                    "Preview mode is on. Bot output stays in the room panel until you click Post Preview."
+                } else {
+                    "Preview mode is off. Finished bot output is sent back to Matrix automatically."
+                },
+            );
         let command_help = format!(
-            "{}\n\nexamples\n/bot create reviewer\n/bot bind reviewer\n/bot status\n\nplanned next\n/bot set-model <bot> <model>",
+            "{}\n\nexamples\n/bot create reviewer\n/bot bind reviewer\n/bot set-model reviewer deepseek-chat\n/bot set-prompt reviewer You are my reviewer\n/bot diagnostics",
             help_text()
         );
         self.view
@@ -420,6 +492,14 @@ impl BotfatherSettings {
         self.view
             .label(ids!(workspace_summary_label))
             .set_text(cx, &botfather::workspace_overview());
+        self.view
+            .label(ids!(diagnostics_summary_label))
+            .set_text(cx, &botfather::diagnostics_overview());
+        apply_preview_toggle_style(
+            &self.view.button(ids!(room_stream_mode_toggle)),
+            cx,
+            preview_enabled,
+        );
 
         self.apply_section_state(cx);
     }
@@ -439,8 +519,10 @@ impl BotfatherSettings {
             ids!(crew_runtime_summary_label),
             ids!(openclaw_runtime_summary_label),
             ids!(bots_summary_label),
+            ids!(room_stream_mode_summary_label),
             ids!(command_hint_label),
             ids!(workspace_summary_label),
+            ids!(diagnostics_summary_label),
             ids!(status_label),
         ] {
             self.view.label(label).set_text(cx, "");
@@ -460,6 +542,7 @@ impl BotfatherSettings {
         let runtimes_active = self.selected_section == BotfatherSettingsSection::Runtimes;
         let bots_active = self.selected_section == BotfatherSettingsSection::Bots;
         let workspace_active = self.selected_section == BotfatherSettingsSection::Workspace;
+        let diagnostics_active = self.selected_section == BotfatherSettingsSection::Diagnostics;
 
         self.view
             .view(ids!(runtimes_section))
@@ -470,6 +553,9 @@ impl BotfatherSettings {
         self.view
             .view(ids!(workspace_section))
             .set_visible(cx, workspace_active);
+        self.view
+            .view(ids!(diagnostics_section))
+            .set_visible(cx, diagnostics_active);
 
         apply_section_button_style(
             &self.view.button(ids!(runtimes_section_button)),
@@ -485,6 +571,11 @@ impl BotfatherSettings {
             &self.view.button(ids!(workspace_section_button)),
             cx,
             workspace_active,
+        );
+        apply_section_button_style(
+            &self.view.button(ids!(diagnostics_section_button)),
+            cx,
+            diagnostics_active,
         );
         self.apply_runtime_cards_state(cx);
     }
@@ -561,6 +652,37 @@ fn apply_runtime_toggle_style(button: &ButtonRef, cx: &mut Cx, expanded: bool) {
             draw_icon: {
                 color: (fg_color)
                 rotation_angle: (rotation_angle)
+            }
+            draw_text: {
+                color: (fg_color)
+            }
+        },
+    );
+}
+
+fn apply_preview_toggle_style(button: &ButtonRef, cx: &mut Cx, enabled: bool) {
+    let (bg_color, fg_color, text) = if enabled {
+        (
+            crate::shared::styles::COLOR_ACTIVE_PRIMARY,
+            crate::shared::styles::COLOR_PRIMARY,
+            "Disable Preview",
+        )
+    } else {
+        (
+            crate::shared::styles::COLOR_BG_PREVIEW,
+            vec4(0.109, 0.153, 0.298, 1.0),
+            "Enable Preview",
+        )
+    };
+    button.set_text(cx, text);
+    button.apply_over(
+        cx,
+        live! {
+            draw_bg: {
+                color: (bg_color)
+            }
+            draw_icon: {
+                color: (fg_color)
             }
             draw_text: {
                 color: (fg_color)

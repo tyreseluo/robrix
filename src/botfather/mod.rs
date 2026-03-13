@@ -1,15 +1,18 @@
 use std::{
+    collections::VecDeque,
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
 use futures_util::StreamExt;
-use makepad_widgets::Cx;
+use makepad_widgets::{Cx, error};
+use matrix_sdk::send_queue::SendHandle;
 use robrix_botfather::{
-    BindingSource, BotBinding, BotDefinition, BotEvent, BotRuntime, BotfatherDefaults,
-    BotfatherManager, BotfatherState, DeliveryTarget, InventorySnapshot, OpenClawRuntimeConfig,
-    PermissionPolicy, ResolveError, RoomInventory, RuntimeConfig, RuntimeKind, RuntimeProfile,
-    SpaceInventory, StateStore, TriggerMode, TriggerPolicy, UserSnapshot, Workspace,
+    BindingSource, BotBinding, BotDefinition, BotEvent, BotRuntime, BotRuntimeOverride,
+    BotfatherDefaults, BotfatherManager, BotfatherState, DeliveryTarget, DispatchPolicy,
+    InventorySnapshot, OpenClawRuntimeConfig, PermissionPolicy, ResolveError, RoomInventory,
+    RuntimeConfig, RuntimeKind, RuntimeProfile, SpaceInventory, StateStore, TriggerMode,
+    TriggerPolicy, UserSnapshot, Workspace,
     resolve_room_bot, resolve_room_bots, runtime_feature_enabled,
 };
 
@@ -31,6 +34,9 @@ const DEFAULT_OPENCLAW_BOT_ID: &str = "default-openclaw-bot";
 
 static BRIDGE_CONTEXT: Mutex<Option<BridgeContext>> = Mutex::new(None);
 static ACTIVE_STREAMS: Mutex<Vec<ActiveBotStream>> = Mutex::new(Vec::new());
+static QUEUED_STREAMS: Mutex<VecDeque<QueuedBotStream>> = Mutex::new(VecDeque::new());
+static STREAM_PREVIEWS: Mutex<Vec<StreamPreviewState>> = Mutex::new(Vec::new());
+static DIRECT_STREAM_MESSAGES: Mutex<Vec<DirectStreamMessageState>> = Mutex::new(Vec::new());
 
 struct BridgeContext {
     user_id: String,
@@ -40,8 +46,59 @@ struct BridgeContext {
 
 struct ActiveBotStream {
     room_id: String,
+    thread_root_event_id: Option<String>,
+    runtime_profile_id: String,
     local_created_at: u64,
     task: JoinHandle<()>,
+}
+
+struct QueuedBotStream {
+    room_id: String,
+    thread_root_event_id: Option<String>,
+    reply_root_event_id: Option<String>,
+    runtime_profile_id: String,
+    runtime_kind: RuntimeKind,
+    profile_name: String,
+    dispatch_policy: DispatchPolicy,
+    local_created_at: u64,
+    runtime: robrix_botfather::RuntimeAdapter,
+    request: robrix_botfather::BotRequest,
+}
+
+struct PreparedBotStream {
+    room_id: String,
+    thread_root_event_id: Option<String>,
+    reply_root_event_id: Option<String>,
+    runtime_profile_id: String,
+    runtime_kind: RuntimeKind,
+    profile_name: String,
+    dispatch_policy: DispatchPolicy,
+    runtime: robrix_botfather::RuntimeAdapter,
+    request: robrix_botfather::BotRequest,
+}
+
+struct StreamPreviewState {
+    room_id: String,
+    thread_root_event_id: Option<String>,
+    runtime_kind: RuntimeKind,
+    bot_name: String,
+    status: BotStreamPreviewStatus,
+    text: String,
+    detail: String,
+    can_post: bool,
+}
+
+struct DirectStreamMessageState {
+    room_id: String,
+    thread_root_event_id: Option<String>,
+    send_handle: Option<SendHandle>,
+    pending_action: Option<DirectStreamPendingAction>,
+}
+
+#[derive(Clone)]
+enum DirectStreamPendingAction {
+    Finalize(String),
+    Cancel(Option<String>),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -60,6 +117,46 @@ pub struct RoomBotOption {
     pub runtime_kind: RuntimeKind,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BotDispatchContext {
+    pub thread_root_event_id: Option<String>,
+    pub reply_root_event_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BotStreamPreviewStatus {
+    #[default]
+    Idle,
+    Queued,
+    Streaming,
+    Finished,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BotStreamPreviewSnapshot {
+    pub room_id: String,
+    pub thread_root_event_id: Option<String>,
+    pub runtime_kind: Option<RuntimeKind>,
+    pub bot_name: String,
+    pub status: BotStreamPreviewStatus,
+    pub text: String,
+    pub detail: String,
+    pub can_post: bool,
+}
+
+pub enum DirectStreamHandleState {
+    Ready(SendHandle),
+    Pending,
+    Missing,
+}
+
+pub struct InterruptScopeResult {
+    pub interrupted: bool,
+    pub queued_remaining_in_scope: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum BotfatherAction {
     StateChanged,
@@ -73,29 +170,43 @@ pub enum BotfatherAction {
         room_id: String,
         result: Result<String, String>,
     },
+    StreamQueued {
+        room_id: String,
+        thread_root_event_id: Option<String>,
+        profile_name: String,
+        position: usize,
+    },
     StreamStarted {
         room_id: String,
+        thread_root_event_id: Option<String>,
         profile_name: String,
     },
     StreamDelta {
         room_id: String,
+        thread_root_event_id: Option<String>,
         text: String,
     },
     StreamFinished {
         room_id: String,
+        thread_root_event_id: Option<String>,
         text: String,
     },
     StreamFailed {
         room_id: String,
+        thread_root_event_id: Option<String>,
         error: String,
     },
     StreamCancelled {
         room_id: String,
+        thread_root_event_id: Option<String>,
     },
 }
 
 pub fn clear_loaded_state() {
     abort_all_active_streams();
+    clear_all_stream_queues();
+    clear_all_stream_previews();
+    clear_all_direct_stream_messages();
     *BRIDGE_CONTEXT.lock().unwrap() = None;
 }
 
@@ -134,6 +245,7 @@ pub fn default_config_form() -> DefaultConfigForm {
             Some(RuntimeConfig::Crew {
                 base_url,
                 api_key_env,
+                ..
             }) => (base_url.clone(), api_key_env.clone().unwrap_or_default()),
             _ => (String::new(), String::new()),
         };
@@ -284,9 +396,12 @@ pub fn save_default_profiles(
                     name: "Crew Runtime".into(),
                     workspace_id: workspace_id.clone(),
                     description: Some("Default Crew SSE runtime used by Robrix.".into()),
+                    dispatch_policy: DispatchPolicy::default(),
                     config: RuntimeConfig::Crew {
                         base_url: crew_endpoint.to_string(),
                         api_key_env: non_empty(crew_auth_token_env),
+                        model: None,
+                        system_prompt: None,
                     },
                 },
             );
@@ -307,6 +422,8 @@ pub fn save_default_profiles(
                     },
                     default_delivery: DeliveryTarget::CurrentRoom,
                     permissions: PermissionPolicy::default(),
+                    runtime_override: BotRuntimeOverride::default(),
+                    dispatch_policy_override: None,
                     description: Some("Default Crew bot.".into()),
                 },
             );
@@ -322,6 +439,7 @@ pub fn save_default_profiles(
                     name: "OpenClaw Runtime".into(),
                     workspace_id: workspace_id.clone(),
                     description: Some("Default OpenClaw gateway runtime used by Robrix.".into()),
+                    dispatch_policy: DispatchPolicy::default(),
                     config: RuntimeConfig::OpenClaw(OpenClawRuntimeConfig {
                         gateway_url: openclaw_gateway_url.to_string(),
                         auth_token_env: non_empty(openclaw_auth_token_env),
@@ -346,6 +464,8 @@ pub fn save_default_profiles(
                     },
                     default_delivery: DeliveryTarget::CurrentRoom,
                     permissions: PermissionPolicy::default(),
+                    runtime_override: BotRuntimeOverride::default(),
+                    dispatch_policy_override: None,
                     description: Some("Default OpenClaw bot.".into()),
                 },
             );
@@ -353,6 +473,7 @@ pub fn save_default_profiles(
 
         ctx.state.defaults = BotfatherDefaults {
             bot_ids: default_bot_ids(&ctx.state),
+            room_stream_preview_enabled: ctx.state.defaults.room_stream_preview_enabled,
         };
         cleanup_orphan_bindings(&mut ctx.state);
         ctx.store
@@ -380,13 +501,23 @@ pub fn runtime_summary(runtime_kind: RuntimeKind) -> String {
         RuntimeConfig::Crew {
             base_url,
             api_key_env,
+            model,
+            system_prompt,
         } => (
-            base_url.as_str(),
-            api_key_env.as_deref().unwrap_or("(none)"),
+            format!(
+                "{}\nmodel: {}\nsystem prompt: {}",
+                base_url,
+                model.as_deref().unwrap_or("(default)"),
+                system_prompt
+                    .as_ref()
+                    .map(|prompt| if prompt.is_empty() { "(cleared)" } else { "(custom)" })
+                    .unwrap_or("(default)")
+            ),
+            api_key_env.as_deref().unwrap_or("(none)").to_string(),
         ),
         RuntimeConfig::OpenClaw(config) => (
-            config.gateway_url.as_str(),
-            config.auth_token_env.as_deref().unwrap_or("(none)"),
+            format!("{}\nagent: {}", config.gateway_url, config.agent_id),
+            config.auth_token_env.as_deref().unwrap_or("(none)").to_string(),
         ),
     };
     let workspace = profile
@@ -402,8 +533,15 @@ pub fn runtime_summary(runtime_kind: RuntimeKind) -> String {
         .count();
 
     format!(
-        "profile: {}\nendpoint: {}\nauth env: {}\nworkspace: {}\nactive bots: {}",
-        profile.name, endpoint, auth_env, workspace, bot_count,
+        "profile: {}\nendpoint: {}\nauth env: {}\nworkspace: {}\npolicy: room {}, runtime {}, queue {}\nactive bots: {}",
+        profile.name,
+        endpoint,
+        auth_env,
+        workspace,
+        profile.dispatch_policy.max_parallel_per_room,
+        profile.dispatch_policy.max_parallel_per_runtime,
+        profile.dispatch_policy.queue_limit,
+        bot_count,
     )
 }
 
@@ -429,8 +567,12 @@ pub fn bots_overview() -> String {
             .filter(|bindings| bindings.iter().any(|binding| binding.bot_id == bot.id))
             .count();
         lines.push(format!(
-            "- {} [{}] -> {} | rooms: {}",
-            bot.id, runtime_label, bot.runtime_profile_id, room_bindings,
+            "- {} [{}] -> {} | rooms: {} | override: {}",
+            bot.id,
+            runtime_label,
+            bot.runtime_profile_id,
+            room_bindings,
+            bot_override_summary(&bot.runtime_override),
         ));
     }
     lines.join("\n")
@@ -464,6 +606,8 @@ pub fn status_overview(room_id: Option<&str>) -> String {
         format!("bots: {}", state.bots.len()),
         format!("runtime profiles: {}", state.runtime_profiles.len()),
         format!("room overrides: {}", state.room_bindings.len()),
+        format!("active bot streams: {}", ACTIVE_STREAMS.lock().unwrap().len()),
+        format!("queued bot streams: {}", QUEUED_STREAMS.lock().unwrap().len()),
     ];
 
     if let Some(room_id) = room_id {
@@ -478,6 +622,289 @@ pub fn status_overview(room_id: Option<&str>) -> String {
     }
 
     lines.join("\n")
+}
+
+pub fn diagnostics_overview() -> String {
+    let Some(state) = snapshot() else {
+        return "BotFather state is not loaded.".into();
+    };
+
+    let state_path = BRIDGE_CONTEXT
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|ctx| ctx.store.path().display().to_string())
+        .unwrap_or_else(|| "(unavailable)".into());
+    let preview_count = STREAM_PREVIEWS.lock().unwrap().len();
+    let queue_len = QUEUED_STREAMS.lock().unwrap().len();
+    let active_len = ACTIVE_STREAMS.lock().unwrap().len();
+
+    format!(
+        "state file: {}\nstate version: {}\nrooms: {}\nspaces: {}\nactive sessions: {}\nactive streams: {}\nqueued streams: {}\npreview buffers: {}\npreview mode: {}\ndefault bots: {}",
+        state_path,
+        state.version,
+        state.inventory.rooms.len(),
+        state.inventory.spaces.len(),
+        state.runtime.active_sessions.len(),
+        active_len,
+        queue_len,
+        preview_count,
+        if state.defaults.room_stream_preview_enabled {
+            "manual-post"
+        } else {
+            "auto-send"
+        },
+        state.defaults.bot_ids.join(", "),
+    )
+}
+
+pub fn room_stream_preview_enabled() -> bool {
+    snapshot()
+        .map(|state| state.defaults.room_stream_preview_enabled)
+        .unwrap_or(false)
+}
+
+pub fn direct_stream_message_body(thread_root_event_id: Option<&str>) -> String {
+    format!(
+        "!BOT_STREAM|{}|",
+        thread_root_event_id.unwrap_or("main"),
+    )
+}
+
+pub fn request_direct_stream_message(room_id: &str, thread_root_event_id: Option<&str>) -> bool {
+    let mut messages = DIRECT_STREAM_MESSAGES.lock().unwrap();
+    if messages
+        .iter()
+        .any(|message| direct_stream_scope_matches(message, room_id, thread_root_event_id))
+    {
+        return false;
+    }
+
+    messages.push(DirectStreamMessageState {
+        room_id: room_id.to_string(),
+        thread_root_event_id: thread_root_event_id.map(ToOwned::to_owned),
+        send_handle: None,
+        pending_action: None,
+    });
+    true
+}
+
+pub fn attach_direct_stream_message_handle(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+    send_handle: SendHandle,
+) {
+    let mut messages = DIRECT_STREAM_MESSAGES.lock().unwrap();
+    let Some(index) = messages
+        .iter()
+        .position(|message| direct_stream_scope_matches(message, room_id, thread_root_event_id))
+    else {
+        return;
+    };
+
+    let pending_action = messages[index].pending_action.clone();
+    messages[index].send_handle = Some(send_handle.clone());
+    if let Some(pending_action) = pending_action {
+        resolve_direct_stream_pending_action(send_handle, pending_action);
+    }
+}
+
+pub fn has_live_direct_stream_message(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> bool {
+    DIRECT_STREAM_MESSAGES.lock().unwrap().iter().any(|message| {
+        direct_stream_scope_matches(message, room_id, thread_root_event_id)
+    })
+}
+
+pub fn finalize_direct_stream_message(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+    text: String,
+) -> DirectStreamHandleState {
+    update_direct_stream_message_state(
+        room_id,
+        thread_root_event_id,
+        DirectStreamPendingAction::Finalize(text),
+    )
+}
+
+pub fn cancel_direct_stream_message(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+    fallback_text: Option<String>,
+) -> DirectStreamHandleState {
+    update_direct_stream_message_state(
+        room_id,
+        thread_root_event_id,
+        DirectStreamPendingAction::Cancel(fallback_text),
+    )
+}
+
+pub fn clear_direct_stream_message(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> bool {
+    let mut messages = DIRECT_STREAM_MESSAGES.lock().unwrap();
+    let Some(index) = messages
+        .iter()
+        .position(|message| direct_stream_scope_matches(message, room_id, thread_root_event_id))
+    else {
+        return false;
+    };
+    messages.swap_remove(index);
+    true
+}
+
+pub fn prune_terminal_direct_stream_messages(
+    room_id: &str,
+    present_thread_root_event_ids: &[Option<String>],
+) -> usize {
+    let mut messages = DIRECT_STREAM_MESSAGES.lock().unwrap();
+    let original_len = messages.len();
+    messages.retain(|message| {
+        if message.room_id != room_id {
+            return true;
+        }
+
+        if message.send_handle.is_none() || message.pending_action.is_none() {
+            return true;
+        }
+
+        present_thread_root_event_ids.iter().any(|thread_root_event_id| {
+            thread_root_event_id.as_deref() == message.thread_root_event_id.as_deref()
+        })
+    });
+    original_len.saturating_sub(messages.len())
+}
+
+fn update_direct_stream_message_state(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+    pending_action: DirectStreamPendingAction,
+) -> DirectStreamHandleState {
+    let mut messages = DIRECT_STREAM_MESSAGES.lock().unwrap();
+    let Some(index) = messages
+        .iter()
+        .position(|message| direct_stream_scope_matches(message, room_id, thread_root_event_id))
+    else {
+        return DirectStreamHandleState::Missing;
+    };
+
+    messages[index].pending_action = Some(pending_action);
+    messages[index]
+        .send_handle
+        .clone()
+        .map_or(DirectStreamHandleState::Pending, DirectStreamHandleState::Ready)
+}
+
+fn resolve_direct_stream_pending_action(
+    send_handle: SendHandle,
+    pending_action: DirectStreamPendingAction,
+) {
+    spawn_on_tokio(async move {
+        match pending_action {
+            DirectStreamPendingAction::Finalize(text) => {
+                if let Err(error) = send_handle
+                    .edit(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_markdown(text).into())
+                    .await
+                {
+                    error!("Failed to finalize delayed direct bot stream message: {error}");
+                }
+            }
+            DirectStreamPendingAction::Cancel(fallback_text) => match send_handle.abort().await {
+                Ok(true) => {}
+                Ok(false) => {
+                    if let Some(text) = fallback_text {
+                        if let Err(error) = send_handle
+                            .edit(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_markdown(text).into())
+                            .await
+                        {
+                            error!("Failed to update delayed cancelled bot stream message: {error}");
+                        }
+                    }
+                }
+                Err(error) => {
+                    error!("Failed to stop delayed direct bot stream placeholder: {error}");
+                }
+            },
+        }
+    });
+}
+
+fn direct_stream_scope_matches(
+    message: &DirectStreamMessageState,
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> bool {
+    message.room_id == room_id
+        && message.thread_root_event_id.as_deref() == thread_root_event_id
+}
+
+pub fn set_room_stream_preview_enabled(enabled: bool) -> Result<String, String> {
+    ensure_loaded_for_current_user()?;
+    with_context_mut(|ctx| {
+        ctx.state.defaults.room_stream_preview_enabled = enabled;
+        ctx.store
+            .save(&ctx.state)
+            .map_err(|error| error.to_string())
+    })?;
+    Cx::post_action(BotfatherAction::StateChanged);
+    Ok(if enabled {
+        "Bot stream preview is enabled. Room panel will keep the streamed output until you post it."
+            .into()
+    } else {
+        "Bot stream preview is disabled. Finished bot output will be sent back to Matrix automatically."
+            .into()
+    })
+}
+
+pub fn room_stream_preview(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> Option<BotStreamPreviewSnapshot> {
+    STREAM_PREVIEWS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|preview| {
+            preview.room_id == room_id
+                && preview.thread_root_event_id.as_deref() == thread_root_event_id
+        })
+        .map(|preview| BotStreamPreviewSnapshot {
+            room_id: preview.room_id.clone(),
+            thread_root_event_id: preview.thread_root_event_id.clone(),
+            runtime_kind: Some(preview.runtime_kind),
+            bot_name: preview.bot_name.clone(),
+            status: preview.status,
+            text: preview.text.clone(),
+            detail: preview.detail.clone(),
+            can_post: preview.can_post,
+        })
+}
+
+pub fn clear_room_stream_preview(room_id: &str, thread_root_event_id: Option<&str>) {
+    let _ = remove_stream_preview(room_id, thread_root_event_id);
+}
+
+pub fn take_room_stream_preview_text(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> Option<String> {
+    let mut previews = STREAM_PREVIEWS.lock().unwrap();
+    let preview = previews.iter_mut().find(|preview| {
+        preview.room_id == room_id && preview.thread_root_event_id.as_deref() == thread_root_event_id
+    })?;
+    if !preview.can_post || preview.text.trim().is_empty() {
+        return None;
+    }
+
+    preview.can_post = false;
+    preview.status = BotStreamPreviewStatus::Idle;
+    let text = std::mem::take(&mut preview.text);
+    preview.detail = "Preview posted to Matrix.".into();
+    Some(text)
 }
 
 pub fn bind_room_to_bot(room_id: &str, bot_selector: &str) -> Result<String, String> {
@@ -584,6 +1011,8 @@ pub fn create_bot(
                 },
                 default_delivery: DeliveryTarget::CurrentRoom,
                 permissions: PermissionPolicy::default(),
+                runtime_override: BotRuntimeOverride::default(),
+                dispatch_policy_override: None,
                 description: Some("User-defined bot created from Robrix.".into()),
             },
         );
@@ -655,6 +1084,57 @@ pub fn set_bot_runtime_profile(
 
     Cx::post_action(BotfatherAction::StateChanged);
     Ok(message)
+}
+
+pub fn set_bot_model(bot_selector: &str, model: &str) -> Result<String, String> {
+    set_bot_override(bot_selector, "model", model, |bot, profile, value| {
+        if profile.kind() != RuntimeKind::Crew {
+            return Err("`/bot set-model` is currently only available for Crew-backed bots.".into());
+        }
+        bot.runtime_override.model = value;
+        Ok(format!(
+            "Bot \"{}\" will use Crew model `{}` on the next run.",
+            bot.name,
+            bot.runtime_override
+                .model
+                .as_deref()
+                .unwrap_or("(runtime default)")
+        ))
+    })
+}
+
+pub fn set_bot_system_prompt(bot_selector: &str, prompt: &str) -> Result<String, String> {
+    set_bot_override(bot_selector, "prompt", prompt, |bot, profile, value| {
+        if profile.kind() != RuntimeKind::Crew {
+            return Err(
+                "`/bot set-prompt` is currently only available for Crew-backed bots.".into(),
+            );
+        }
+        bot.runtime_override.system_prompt = value;
+        Ok(format!(
+            "Bot \"{}\" updated its Crew system prompt override.",
+            bot.name
+        ))
+    })
+}
+
+pub fn set_bot_agent(bot_selector: &str, agent: &str) -> Result<String, String> {
+    set_bot_override(bot_selector, "agent", agent, |bot, profile, value| {
+        if profile.kind() != RuntimeKind::OpenClaw {
+            return Err(
+                "`/bot set-agent` is currently only available for OpenClaw-backed bots.".into(),
+            );
+        }
+        bot.runtime_override.agent_id = value;
+        Ok(format!(
+            "Bot \"{}\" will use OpenClaw agent `{}` on the next run.",
+            bot.name,
+            bot.runtime_override
+                .agent_id
+                .as_deref()
+                .unwrap_or("(runtime default)")
+        ))
+    })
 }
 
 pub fn bind_room_to_default(room_id: &str) -> Result<(), String> {
@@ -811,11 +1291,12 @@ pub fn describe_room_binding(room_id: &str) -> String {
                 .join(", ");
 
             format!(
-                "main bot: {} ({:?})\nsource: {source}\nruntime: {}\nworkspace: {}\navailable: {}",
+                "main bot: {} ({:?})\nsource: {source}\nruntime: {}\nworkspace: {}\noverride: {}\navailable: {}",
                 primary.bot.name,
                 primary.runtime_kind(),
                 runtime_endpoint,
                 workspace,
+                bot_override_summary(&primary.runtime_override),
                 available,
             )
         }
@@ -903,6 +1384,7 @@ pub fn stream_room_prompt(room_id: String, prompt: String) -> Result<(), String>
     stream_room_prompt_for_local_echo(
         room_id,
         prompt,
+        BotDispatchContext::default(),
         matrix_sdk::ruma::MilliSecondsSinceUnixEpoch::now()
             .get()
             .into(),
@@ -912,35 +1394,146 @@ pub fn stream_room_prompt(room_id: String, prompt: String) -> Result<(), String>
 pub fn stream_room_prompt_for_local_echo(
     room_id: String,
     prompt: String,
+    dispatch_context: BotDispatchContext,
     local_created_at: u64,
 ) -> Result<(), String> {
-    let (bot_name, runtime, request) = with_context_mut(|ctx| {
+    let prepared = with_context_mut(|ctx| {
         let mut manager = BotfatherManager::from_parts(ctx.store.clone(), ctx.state.clone());
         let (resolved, runtime, request) = manager
-            .prepare_dispatch(&room_id, None, prompt, None)
+            .prepare_dispatch(
+                &room_id,
+                dispatch_context.thread_root_event_id.as_deref(),
+                dispatch_context.reply_root_event_id.as_deref(),
+                prompt,
+                None,
+            )
             .map_err(|error| error.to_string())?;
         ctx.state = manager.state().clone();
         ctx.store
             .save(&ctx.state)
             .map_err(|error| error.to_string())?;
-        Ok((resolved.bot.name, runtime, request))
+        Ok(PreparedBotStream {
+            room_id: room_id.clone(),
+            thread_root_event_id: request.thread_root_event_id.clone(),
+            reply_root_event_id: request.reply_root_event_id.clone(),
+            runtime_profile_id: resolved.runtime_profile.id.clone(),
+            runtime_kind: resolved.runtime_kind(),
+            profile_name: resolved.bot.name.clone(),
+            dispatch_policy: resolved.dispatch_policy.clone(),
+            runtime,
+            request,
+        })
     })?;
 
-    let tracked_room_id = room_id.clone();
-    let task = spawn_on_tokio_with_handle(async move {
-        Cx::post_action(BotfatherAction::StreamStarted {
-            room_id: room_id.clone(),
-            profile_name: bot_name,
-        });
+    update_stream_preview(
+        &prepared.room_id,
+        prepared.thread_root_event_id.as_deref(),
+        prepared.runtime_kind,
+        &prepared.profile_name,
+        BotStreamPreviewStatus::Idle,
+        "Ready to dispatch.".into(),
+        String::new(),
+        false,
+    );
 
+    if can_start_stream(&prepared.room_id, &prepared.runtime_profile_id, &prepared.dispatch_policy) {
+        start_prepared_stream(prepared, local_created_at);
+        return Ok(());
+    }
+
+    enqueue_stream(prepared, local_created_at)?;
+    Ok(())
+}
+
+pub fn cancel_stream_for_local_echo(room_id: &str, local_created_at: u64) -> bool {
+    if let Some(active_stream) = take_active_stream(room_id, local_created_at) {
+        active_stream.task.abort();
+        mark_stream_cancelled(room_id, active_stream.thread_root_event_id.as_deref());
+        Cx::post_action(BotfatherAction::StreamCancelled {
+            room_id: room_id.to_string(),
+            thread_root_event_id: active_stream.thread_root_event_id,
+        });
+        drain_stream_queue();
+        return true;
+    }
+
+    if let Some(queued_stream) = take_queued_stream(room_id, local_created_at) {
+        mark_stream_cancelled(room_id, queued_stream.thread_root_event_id.as_deref());
+        Cx::post_action(BotfatherAction::StreamCancelled {
+            room_id: room_id.to_string(),
+            thread_root_event_id: queued_stream.thread_root_event_id,
+        });
+        return true;
+    }
+
+    false
+}
+
+pub fn interrupt_active_scope(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> InterruptScopeResult {
+    let Some(active_stream) = take_active_stream_for_scope(room_id, thread_root_event_id) else {
+        return InterruptScopeResult {
+            interrupted: false,
+            queued_remaining_in_scope: has_queued_stream_for_scope(room_id, thread_root_event_id),
+        };
+    };
+
+    let queued_remaining_in_scope = has_queued_stream_for_scope(room_id, thread_root_event_id);
+    active_stream.task.abort();
+    mark_stream_cancelled(room_id, active_stream.thread_root_event_id.as_deref());
+    Cx::post_action(BotfatherAction::StreamCancelled {
+        room_id: room_id.to_string(),
+        thread_root_event_id: active_stream.thread_root_event_id,
+    });
+    drain_stream_queue();
+    InterruptScopeResult {
+        interrupted: true,
+        queued_remaining_in_scope,
+    }
+}
+
+fn start_prepared_stream(prepared: PreparedBotStream, local_created_at: u64) {
+    let room_id = prepared.room_id.clone();
+    let thread_root_event_id = prepared.thread_root_event_id.clone();
+    let runtime_profile_id = prepared.runtime_profile_id.clone();
+    let profile_name = prepared.profile_name.clone();
+    let runtime_kind = prepared.runtime_kind;
+    let task_room_id = room_id.clone();
+    let task_thread_root_event_id = thread_root_event_id.clone();
+
+    update_stream_preview(
+        &room_id,
+        thread_root_event_id.as_deref(),
+        runtime_kind,
+        &profile_name,
+        BotStreamPreviewStatus::Streaming,
+        "Streaming bot response...".into(),
+        String::new(),
+        false,
+    );
+    Cx::post_action(BotfatherAction::StreamStarted {
+        room_id: room_id.clone(),
+        thread_root_event_id: thread_root_event_id.clone(),
+        profile_name,
+    });
+
+    let task = spawn_on_tokio_with_handle(async move {
         let mut accumulated = String::new();
-        let stream_result = runtime.dispatch_stream(request).await;
+        let stream_result = prepared.runtime.dispatch_stream(prepared.request).await;
         let mut stream = match stream_result {
             Ok(stream) => stream,
             Err(error) => {
-                clear_active_stream(&room_id, local_created_at);
+                release_stream_slot(&task_room_id, local_created_at);
+                mark_stream_failed(
+                    &task_room_id,
+                    task_thread_root_event_id.as_deref(),
+                    &error.to_string(),
+                );
                 Cx::post_action(BotfatherAction::StreamFailed {
-                    room_id: room_id.clone(),
+                    room_id: task_room_id.clone(),
+                    thread_root_event_id: task_thread_root_event_id.clone(),
                     error: error.to_string(),
                 });
                 return;
@@ -951,8 +1544,14 @@ pub fn stream_room_prompt_for_local_echo(
             match event_result {
                 Ok(BotEvent::TextDelta { text }) => {
                     accumulated.push_str(&text);
+                    append_stream_preview(
+                        &task_room_id,
+                        task_thread_root_event_id.as_deref(),
+                        &text,
+                    );
                     Cx::post_action(BotfatherAction::StreamDelta {
-                        room_id: room_id.clone(),
+                        room_id: task_room_id.clone(),
+                        thread_root_event_id: task_thread_root_event_id.clone(),
                         text,
                     });
                 }
@@ -960,26 +1559,40 @@ pub fn stream_room_prompt_for_local_echo(
                     if accumulated.is_empty() {
                         accumulated = content;
                     }
-                    clear_active_stream(&room_id, local_created_at);
+                    release_stream_slot(&task_room_id, local_created_at);
+                    mark_stream_finished(
+                        &task_room_id,
+                        task_thread_root_event_id.as_deref(),
+                        &accumulated,
+                    );
                     Cx::post_action(BotfatherAction::StreamFinished {
-                        room_id: room_id.clone(),
+                        room_id: task_room_id.clone(),
+                        thread_root_event_id: task_thread_root_event_id.clone(),
                         text: accumulated,
                     });
                     return;
                 }
                 Ok(BotEvent::Error { message }) => {
-                    clear_active_stream(&room_id, local_created_at);
+                    release_stream_slot(&task_room_id, local_created_at);
+                    mark_stream_failed(&task_room_id, task_thread_root_event_id.as_deref(), &message);
                     Cx::post_action(BotfatherAction::StreamFailed {
-                        room_id: room_id.clone(),
+                        room_id: task_room_id.clone(),
+                        thread_root_event_id: task_thread_root_event_id.clone(),
                         error: message,
                     });
                     return;
                 }
                 Ok(_) => {}
                 Err(error) => {
-                    clear_active_stream(&room_id, local_created_at);
+                    release_stream_slot(&task_room_id, local_created_at);
+                    mark_stream_failed(
+                        &task_room_id,
+                        task_thread_root_event_id.as_deref(),
+                        &error.to_string(),
+                    );
                     Cx::post_action(BotfatherAction::StreamFailed {
-                        room_id: room_id.clone(),
+                        room_id: task_room_id.clone(),
+                        thread_root_event_id: task_thread_root_event_id.clone(),
                         error: error.to_string(),
                     });
                     return;
@@ -987,26 +1600,73 @@ pub fn stream_room_prompt_for_local_echo(
             }
         }
 
-        clear_active_stream(&room_id, local_created_at);
+        release_stream_slot(&task_room_id, local_created_at);
+        mark_stream_finished(
+            &task_room_id,
+            task_thread_root_event_id.as_deref(),
+            &accumulated,
+        );
         Cx::post_action(BotfatherAction::StreamFinished {
-            room_id,
+            room_id: task_room_id,
+            thread_root_event_id: task_thread_root_event_id,
             text: accumulated,
         });
     });
-    register_active_stream(tracked_room_id, local_created_at, task);
-    Ok(())
+
+    register_active_stream(
+        room_id,
+        thread_root_event_id,
+        runtime_profile_id,
+        local_created_at,
+        task,
+    );
 }
 
-pub fn cancel_stream_for_local_echo(room_id: &str, local_created_at: u64) -> bool {
-    let Some(task) = take_active_stream(room_id, local_created_at) else {
-        return false;
-    };
+fn enqueue_stream(prepared: PreparedBotStream, local_created_at: u64) -> Result<usize, String> {
+    let mut queued_streams = QUEUED_STREAMS.lock().unwrap();
+    let queued_for_runtime = queued_streams
+        .iter()
+        .filter(|item| item.runtime_profile_id == prepared.runtime_profile_id)
+        .count();
+    if queued_for_runtime >= prepared.dispatch_policy.queue_limit {
+        return Err(format!(
+            "Bot queue is full for runtime `{}` (limit {}).",
+            prepared.profile_name, prepared.dispatch_policy.queue_limit
+        ));
+    }
 
-    task.abort();
-    Cx::post_action(BotfatherAction::StreamCancelled {
-        room_id: room_id.to_string(),
+    queued_streams.push_back(QueuedBotStream {
+        room_id: prepared.room_id.clone(),
+        thread_root_event_id: prepared.thread_root_event_id.clone(),
+        reply_root_event_id: prepared.reply_root_event_id.clone(),
+        runtime_profile_id: prepared.runtime_profile_id.clone(),
+        runtime_kind: prepared.runtime_kind,
+        profile_name: prepared.profile_name.clone(),
+        dispatch_policy: prepared.dispatch_policy.clone(),
+        local_created_at,
+        runtime: prepared.runtime,
+        request: prepared.request,
     });
-    true
+    let position = queued_streams.len();
+    drop(queued_streams);
+
+    update_stream_preview(
+        &prepared.room_id,
+        prepared.thread_root_event_id.as_deref(),
+        prepared.runtime_kind,
+        &prepared.profile_name,
+        BotStreamPreviewStatus::Queued,
+        format!("Queued at position {position}."),
+        String::new(),
+        false,
+    );
+    Cx::post_action(BotfatherAction::StreamQueued {
+        room_id: prepared.room_id,
+        thread_root_event_id: prepared.thread_root_event_id,
+        profile_name: prepared.profile_name,
+        position,
+    });
+    Ok(position)
 }
 
 fn snapshot() -> Option<BotfatherState> {
@@ -1029,7 +1689,13 @@ fn current_user_snapshot(user_id: &matrix_sdk::ruma::OwnedUserId) -> UserSnapsho
     }
 }
 
-fn register_active_stream(room_id: String, local_created_at: u64, task: JoinHandle<()>) {
+fn register_active_stream(
+    room_id: String,
+    thread_root_event_id: Option<String>,
+    runtime_profile_id: String,
+    local_created_at: u64,
+    task: JoinHandle<()>,
+) {
     if task.is_finished() {
         return;
     }
@@ -1042,17 +1708,33 @@ fn register_active_stream(room_id: String, local_created_at: u64, task: JoinHand
     }
     active_streams.push(ActiveBotStream {
         room_id,
+        thread_root_event_id,
+        runtime_profile_id,
         local_created_at,
         task,
     });
 }
 
-fn take_active_stream(room_id: &str, local_created_at: u64) -> Option<JoinHandle<()>> {
+fn take_active_stream(room_id: &str, local_created_at: u64) -> Option<ActiveBotStream> {
     let mut active_streams = ACTIVE_STREAMS.lock().unwrap();
     active_streams
         .iter()
         .position(|stream| stream.room_id == room_id && stream.local_created_at == local_created_at)
-        .map(|index| active_streams.swap_remove(index).task)
+        .map(|index| active_streams.swap_remove(index))
+}
+
+fn take_active_stream_for_scope(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> Option<ActiveBotStream> {
+    let mut active_streams = ACTIVE_STREAMS.lock().unwrap();
+    active_streams
+        .iter()
+        .position(|stream| {
+            stream.room_id == room_id
+                && stream.thread_root_event_id.as_deref() == thread_root_event_id
+        })
+        .map(|index| active_streams.swap_remove(index))
 }
 
 fn clear_active_stream(room_id: &str, local_created_at: u64) {
@@ -1064,6 +1746,198 @@ fn abort_all_active_streams() {
     for active_stream in active_streams.drain(..) {
         active_stream.task.abort();
     }
+}
+
+fn can_start_stream(room_id: &str, runtime_profile_id: &str, dispatch_policy: &DispatchPolicy) -> bool {
+    let active_streams = ACTIVE_STREAMS.lock().unwrap();
+    let room_count = active_streams
+        .iter()
+        .filter(|stream| stream.room_id == room_id)
+        .count();
+    let runtime_count = active_streams
+        .iter()
+        .filter(|stream| stream.runtime_profile_id == runtime_profile_id)
+        .count();
+    room_count < dispatch_policy.max_parallel_per_room
+        && runtime_count < dispatch_policy.max_parallel_per_runtime
+}
+
+fn release_stream_slot(room_id: &str, local_created_at: u64) {
+    clear_active_stream(room_id, local_created_at);
+    drain_stream_queue();
+}
+
+fn drain_stream_queue() {
+    loop {
+        let maybe_prepared = {
+            let active_streams = ACTIVE_STREAMS.lock().unwrap();
+            let mut queued_streams = QUEUED_STREAMS.lock().unwrap();
+            let next_index = queued_streams.iter().position(|queued| {
+                let room_count = active_streams
+                    .iter()
+                    .filter(|stream| stream.room_id == queued.room_id)
+                    .count();
+                let runtime_count = active_streams
+                    .iter()
+                    .filter(|stream| stream.runtime_profile_id == queued.runtime_profile_id)
+                    .count();
+                room_count < queued.dispatch_policy.max_parallel_per_room
+                    && runtime_count < queued.dispatch_policy.max_parallel_per_runtime
+            });
+            next_index.and_then(|index| queued_streams.remove(index))
+        };
+
+        let Some(queued) = maybe_prepared else {
+            break;
+        };
+
+        start_prepared_stream(
+            PreparedBotStream {
+                room_id: queued.room_id,
+                thread_root_event_id: queued.thread_root_event_id,
+                reply_root_event_id: queued.reply_root_event_id,
+                runtime_profile_id: queued.runtime_profile_id,
+                runtime_kind: queued.runtime_kind,
+                profile_name: queued.profile_name,
+                dispatch_policy: queued.dispatch_policy,
+                runtime: queued.runtime,
+                request: queued.request,
+            },
+            queued.local_created_at,
+        );
+    }
+}
+
+fn take_queued_stream(room_id: &str, local_created_at: u64) -> Option<QueuedBotStream> {
+    let mut queued_streams = QUEUED_STREAMS.lock().unwrap();
+    queued_streams
+        .iter()
+        .position(|stream| stream.room_id == room_id && stream.local_created_at == local_created_at)
+        .and_then(|index| queued_streams.remove(index))
+}
+
+fn has_queued_stream_for_scope(room_id: &str, thread_root_event_id: Option<&str>) -> bool {
+    QUEUED_STREAMS.lock().unwrap().iter().any(|stream| {
+        stream.room_id == room_id
+            && stream.thread_root_event_id.as_deref() == thread_root_event_id
+    })
+}
+
+fn clear_all_stream_queues() {
+    QUEUED_STREAMS.lock().unwrap().clear();
+}
+
+fn clear_all_stream_previews() {
+    STREAM_PREVIEWS.lock().unwrap().clear();
+}
+
+fn clear_all_direct_stream_messages() {
+    DIRECT_STREAM_MESSAGES.lock().unwrap().clear();
+}
+
+fn update_stream_preview(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+    runtime_kind: RuntimeKind,
+    bot_name: &str,
+    status: BotStreamPreviewStatus,
+    detail: String,
+    text: String,
+    can_post: bool,
+) {
+    let mut previews = STREAM_PREVIEWS.lock().unwrap();
+    if let Some(preview) = previews.iter_mut().find(|preview| {
+        preview.room_id == room_id && preview.thread_root_event_id.as_deref() == thread_root_event_id
+    }) {
+        preview.runtime_kind = runtime_kind;
+        preview.bot_name = bot_name.to_string();
+        preview.status = status;
+        preview.detail = detail;
+        preview.text = text;
+        preview.can_post = can_post;
+        return;
+    }
+
+    previews.push(StreamPreviewState {
+        room_id: room_id.to_string(),
+        thread_root_event_id: thread_root_event_id.map(ToOwned::to_owned),
+        runtime_kind,
+        bot_name: bot_name.to_string(),
+        status,
+        text,
+        detail,
+        can_post,
+    });
+}
+
+fn append_stream_preview(room_id: &str, thread_root_event_id: Option<&str>, delta: &str) {
+    let mut previews = STREAM_PREVIEWS.lock().unwrap();
+    let Some(preview) = previews.iter_mut().find(|preview| {
+        preview.room_id == room_id && preview.thread_root_event_id.as_deref() == thread_root_event_id
+    }) else {
+        return;
+    };
+    preview.status = BotStreamPreviewStatus::Streaming;
+    preview.detail = "Streaming bot response...".into();
+    preview.text.push_str(delta);
+}
+
+fn mark_stream_finished(room_id: &str, thread_root_event_id: Option<&str>, text: &str) {
+    let mut previews = STREAM_PREVIEWS.lock().unwrap();
+    let Some(preview) = previews.iter_mut().find(|preview| {
+        preview.room_id == room_id && preview.thread_root_event_id.as_deref() == thread_root_event_id
+    }) else {
+        return;
+    };
+    preview.status = BotStreamPreviewStatus::Finished;
+    preview.text = text.to_string();
+    preview.detail = "Bot stream finished. Review and post when ready.".into();
+    preview.can_post = !text.trim().is_empty();
+}
+
+fn mark_stream_failed(room_id: &str, thread_root_event_id: Option<&str>, error: &str) {
+    let mut previews = STREAM_PREVIEWS.lock().unwrap();
+    let Some(preview) = previews.iter_mut().find(|preview| {
+        preview.room_id == room_id && preview.thread_root_event_id.as_deref() == thread_root_event_id
+    }) else {
+        return;
+    };
+    preview.status = BotStreamPreviewStatus::Failed;
+    preview.detail = error.to_string();
+    preview.can_post = false;
+}
+
+fn mark_stream_cancelled(room_id: &str, thread_root_event_id: Option<&str>) {
+    let mut previews = STREAM_PREVIEWS.lock().unwrap();
+    let Some(preview) = previews.iter_mut().find(|preview| {
+        preview.room_id == room_id && preview.thread_root_event_id.as_deref() == thread_root_event_id
+    }) else {
+        return;
+    };
+    preview.status = BotStreamPreviewStatus::Cancelled;
+    preview.detail = "Bot stream cancelled.".into();
+    preview.can_post = false;
+}
+
+fn remove_stream_preview(
+    room_id: &str,
+    thread_root_event_id: Option<&str>,
+) -> Option<BotStreamPreviewSnapshot> {
+    let mut previews = STREAM_PREVIEWS.lock().unwrap();
+    let index = previews.iter().position(|preview| {
+        preview.room_id == room_id && preview.thread_root_event_id.as_deref() == thread_root_event_id
+    })?;
+    let preview = previews.swap_remove(index);
+    Some(BotStreamPreviewSnapshot {
+        room_id: preview.room_id,
+        thread_root_event_id: preview.thread_root_event_id,
+        runtime_kind: Some(preview.runtime_kind),
+        bot_name: preview.bot_name,
+        status: preview.status,
+        text: preview.text,
+        detail: preview.detail,
+        can_post: preview.can_post,
+    })
 }
 
 fn default_bot_ids(state: &BotfatherState) -> Vec<String> {
@@ -1196,6 +2070,24 @@ fn runtime_kind_label(kind: RuntimeKind) -> &'static str {
     }
 }
 
+fn bot_override_summary(runtime_override: &BotRuntimeOverride) -> String {
+    let mut parts = Vec::new();
+    if let Some(model) = runtime_override.model.as_deref() {
+        parts.push(format!("model={model}"));
+    }
+    if runtime_override.system_prompt.is_some() {
+        parts.push("prompt=custom".into());
+    }
+    if let Some(agent_id) = runtime_override.agent_id.as_deref() {
+        parts.push(format!("agent={agent_id}"));
+    }
+    if parts.is_empty() {
+        "(none)".into()
+    } else {
+        parts.join(", ")
+    }
+}
+
 fn room_bot_runtime_priority(kind: RuntimeKind) -> i32 {
     match kind {
         RuntimeKind::Crew => 2,
@@ -1222,6 +2114,51 @@ fn display_name_from_identifier(identifier: &str) -> String {
         .join(" ")
 }
 
+fn set_bot_override(
+    bot_selector: &str,
+    field_name: &str,
+    raw_value: &str,
+    mut apply: impl FnMut(&mut BotDefinition, &RuntimeProfile, Option<String>) -> Result<String, String>,
+) -> Result<String, String> {
+    ensure_loaded_for_current_user()?;
+    let selector = bot_selector.trim();
+    if selector.is_empty() {
+        return Err(format!("Usage: /bot set-{field_name} <bot-id> <value>"));
+    }
+
+    let value = normalize_override_value(raw_value);
+    let message = with_context_mut(|ctx| {
+        let bot_id = resolve_bot_id_selector(&ctx.state, selector)
+            .ok_or_else(|| format!("Bot selector `{selector}` did not match any bot."))?;
+        let runtime_profile_id = ctx
+            .state
+            .bots
+            .get(&bot_id)
+            .ok_or_else(|| format!("Bot {bot_id} is missing from the state file."))?
+            .runtime_profile_id
+            .clone();
+        let profile = ctx
+            .state
+            .runtime_profiles
+            .get(&runtime_profile_id)
+            .cloned()
+            .ok_or_else(|| format!("Runtime profile {runtime_profile_id} is missing."))?;
+        let bot = ctx
+            .state
+            .bots
+            .get_mut(&bot_id)
+            .ok_or_else(|| format!("Bot {bot_id} is missing from the state file."))?;
+        let message = apply(bot, &profile, value)?;
+        ctx.store
+            .save(&ctx.state)
+            .map_err(|error| error.to_string())?;
+        Ok(message)
+    })?;
+
+    Cx::post_action(BotfatherAction::StateChanged);
+    Ok(message)
+}
+
 fn normalize_identifier(value: &str) -> Result<String, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -1234,6 +2171,17 @@ fn normalize_identifier(value: &str) -> Result<String, String> {
         return Err("Identifier may only contain ASCII letters, digits, '-' and '_'.".into());
     }
     Ok(trimmed.to_ascii_lowercase())
+}
+
+fn normalize_override_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "-" | "default" | "inherit" | "none" => None,
+        _ => Some(trimmed.to_string()),
+    }
 }
 
 fn is_system_bot_id(bot_id: &str) -> bool {

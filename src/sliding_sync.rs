@@ -624,6 +624,8 @@ pub enum MatrixRequest {
         message: RoomMessageEventContent,
         replied_to: Option<Reply>,
         bot_prompt: Option<String>,
+        bot_dispatch_context: Option<crate::botfather::BotDispatchContext>,
+        bot_stream_placeholder_context: Option<crate::botfather::BotDispatchContext>,
         #[cfg(feature = "tsp")]
         sign_with_tsp: bool,
     },
@@ -1821,6 +1823,8 @@ async fn matrix_worker_task(
                 message,
                 replied_to,
                 bot_prompt,
+                bot_dispatch_context,
+                bot_stream_placeholder_context,
                 #[cfg(feature = "tsp")]
                 sign_with_tsp,
             } => {
@@ -1898,10 +1902,18 @@ async fn matrix_worker_task(
                         match timeline.send(reply_content.into()).await {
                             Ok(send_handle) => {
                                 log!("Sent reply message to {timeline_kind}.");
+                                if let Some(context) = bot_stream_placeholder_context.clone() {
+                                    crate::botfather::attach_direct_stream_message_handle(
+                                        &room_id_for_bot_stream,
+                                        context.thread_root_event_id.as_deref(),
+                                        send_handle.clone(),
+                                    );
+                                }
                                 if let Some(prompt) = bot_prompt {
                                     if let Err(error) = crate::botfather::stream_room_prompt_for_local_echo(
                                         room_id_for_bot_stream,
                                         prompt,
+                                        bot_dispatch_context.clone().unwrap_or_default(),
                                         send_handle.created_at.get().into(),
                                     ) {
                                         enqueue_popup_notification(
@@ -1913,6 +1925,12 @@ async fn matrix_worker_task(
                                 }
                             }
                             Err(_e) => {
+                                if let Some(context) = bot_stream_placeholder_context.clone() {
+                                    crate::botfather::clear_direct_stream_message(
+                                        &room_id_for_bot_stream,
+                                        context.thread_root_event_id.as_deref(),
+                                    );
+                                }
                                 error!("Failed to send reply message to {timeline_kind}: {_e:?}");
                                 enqueue_popup_notification(format!("Failed to send reply: {_e}"), PopupKind::Error, None);
                             }
@@ -1921,10 +1939,18 @@ async fn matrix_worker_task(
                         match timeline.send(message.into()).await {
                             Ok(send_handle) => {
                                 log!("Sent message to {timeline_kind}.");
+                                if let Some(context) = bot_stream_placeholder_context.clone() {
+                                    crate::botfather::attach_direct_stream_message_handle(
+                                        &room_id_for_bot_stream,
+                                        context.thread_root_event_id.as_deref(),
+                                        send_handle.clone(),
+                                    );
+                                }
                                 if let Some(prompt) = bot_prompt {
                                     if let Err(error) = crate::botfather::stream_room_prompt_for_local_echo(
                                         room_id_for_bot_stream,
                                         prompt,
+                                        bot_dispatch_context.clone().unwrap_or_default(),
                                         send_handle.created_at.get().into(),
                                     ) {
                                         enqueue_popup_notification(
@@ -1936,6 +1962,12 @@ async fn matrix_worker_task(
                                 }
                             }
                             Err(_e) => {
+                                if let Some(context) = bot_stream_placeholder_context {
+                                    crate::botfather::clear_direct_stream_message(
+                                        &room_id_for_bot_stream,
+                                        context.thread_root_event_id.as_deref(),
+                                    );
+                                }
                                 error!("Failed to send message to {timeline_kind}: {_e:?}");
                                 enqueue_popup_notification(format!("Failed to send message: {_e}"), PopupKind::Error, None);
                             }

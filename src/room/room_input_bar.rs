@@ -41,7 +41,7 @@ use crate::{
         popup_list::{enqueue_popup_notification, PopupKind},
         styles::*,
     },
-    sliding_sync::{submit_async_request, MatrixRequest, TimelineKind, UserPowerLevels},
+    sliding_sync::{spawn_on_tokio, submit_async_request, MatrixRequest, TimelineKind, UserPowerLevels},
     utils,
 };
 
@@ -338,30 +338,238 @@ impl RoomInputBar {
                 enqueue_popup_notification(message.clone(), kind.clone(), *auto_dismissal_duration);
             }
 
-            if let Some(BotfatherAction::StreamFinished { room_id, text }) = action.downcast_ref() {
+            if let Some(BotfatherAction::StreamDelta { room_id, thread_root_event_id, .. }) = action.downcast_ref() {
+                let current_thread_root_event_id = room_screen_props
+                    .timeline_kind
+                    .thread_root_event_id()
+                    .map(|event_id| event_id.to_string());
+                let same_scope = current_thread_root_event_id.as_ref() == thread_root_event_id.as_ref();
                 if room_screen_props.timeline_kind.room_id().as_str() == room_id
-                    && !text.trim().is_empty()
+                    && same_scope
+                    && !botfather::room_stream_preview_enabled()
+                    && botfather::request_direct_stream_message(room_id, thread_root_event_id.as_deref())
                 {
-                    submit_async_request(MatrixRequest::SendMessage {
-                        timeline_kind: TimelineKind::MainRoom {
-                            room_id: room_screen_props.timeline_kind.room_id().to_owned(),
+                    let replied_to = room_screen_props.timeline_kind.thread_root_event_id().map(
+                        |thread_root_event_id| Reply {
+                            event_id: thread_root_event_id.clone(),
+                            enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
                         },
-                        message: RoomMessageEventContent::text_markdown(text),
-                        replied_to: None,
+                    );
+                    submit_async_request(MatrixRequest::SendMessage {
+                        timeline_kind: room_screen_props.timeline_kind.clone(),
+                        message: RoomMessageEventContent::text_markdown(
+                            botfather::direct_stream_message_body(
+                                thread_root_event_id.as_deref(),
+                            ),
+                        ),
+                        replied_to,
                         bot_prompt: None,
+                        bot_dispatch_context: None,
+                        bot_stream_placeholder_context: Some(botfather::BotDispatchContext {
+                            thread_root_event_id: current_thread_root_event_id,
+                            reply_root_event_id: None,
+                        }),
                         #[cfg(feature = "tsp")]
                         sign_with_tsp: false,
                     });
                 }
             }
 
-            if let Some(BotfatherAction::StreamFailed { room_id, error }) = action.downcast_ref() {
-                if room_screen_props.timeline_kind.room_id().as_str() == room_id {
+            if let Some(BotfatherAction::StreamFinished { room_id, text, thread_root_event_id }) = action.downcast_ref() {
+                let current_thread_root_event_id = room_screen_props
+                    .timeline_kind
+                    .thread_root_event_id()
+                    .map(|event_id| event_id.to_string());
+                let same_scope = current_thread_root_event_id.as_ref() == thread_root_event_id.as_ref();
+                if room_screen_props.timeline_kind.room_id().as_str() == room_id
+                    && same_scope
+                    && !botfather::room_stream_preview_enabled()
+                {
+                    if text.trim().is_empty() {
+                        match botfather::cancel_direct_stream_message(
+                            room_id,
+                            thread_root_event_id.as_deref(),
+                            None,
+                        ) {
+                            botfather::DirectStreamHandleState::Ready(send_handle) => {
+                                spawn_on_tokio(async move {
+                                    if let Err(error) = send_handle.abort().await {
+                                        enqueue_popup_notification(
+                                            format!("Failed to clear empty bot stream message: {error}"),
+                                            PopupKind::Error,
+                                            Some(5.0),
+                                        );
+                                    }
+                                });
+                            }
+                            botfather::DirectStreamHandleState::Pending => {}
+                            botfather::DirectStreamHandleState::Missing => {}
+                        }
+                    } else {
+                        match botfather::finalize_direct_stream_message(
+                            room_id,
+                            thread_root_event_id.as_deref(),
+                            text.clone(),
+                        ) {
+                            botfather::DirectStreamHandleState::Ready(send_handle) => {
+                                let final_text = text.clone();
+                                spawn_on_tokio(async move {
+                                    if let Err(error) = send_handle
+                                        .edit(RoomMessageEventContent::text_markdown(final_text).into())
+                                        .await
+                                    {
+                                        enqueue_popup_notification(
+                                            format!("Failed to finalize bot stream message: {error}"),
+                                            PopupKind::Error,
+                                            Some(5.0),
+                                        );
+                                    }
+                                });
+                            }
+                            botfather::DirectStreamHandleState::Pending => {}
+                            botfather::DirectStreamHandleState::Missing => {
+                                let replied_to = room_screen_props.timeline_kind.thread_root_event_id().map(
+                                    |thread_root_event_id| Reply {
+                                        event_id: thread_root_event_id.clone(),
+                                        enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
+                                    },
+                                );
+                                submit_async_request(MatrixRequest::SendMessage {
+                                    timeline_kind: room_screen_props.timeline_kind.clone(),
+                                    message: RoomMessageEventContent::text_markdown(text),
+                                    replied_to,
+                                    bot_prompt: None,
+                                    bot_dispatch_context: None,
+                                    bot_stream_placeholder_context: None,
+                                    #[cfg(feature = "tsp")]
+                                    sign_with_tsp: false,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(BotfatherAction::StreamFailed { room_id, error, thread_root_event_id }) = action.downcast_ref() {
+                let current_thread_root_event_id = room_screen_props
+                    .timeline_kind
+                    .thread_root_event_id()
+                    .map(|event_id| event_id.to_string());
+                let same_scope = current_thread_root_event_id.as_ref() == thread_root_event_id.as_ref();
+                if room_screen_props.timeline_kind.room_id().as_str() == room_id && same_scope {
+                    let fallback_text = botfather::room_stream_preview(
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                    )
+                    .map(|preview| preview.text)
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| format!("{text}\n\nBot request failed: {error}"))
+                    .or_else(|| Some(format!("Bot request failed: {error}")));
+                    match botfather::cancel_direct_stream_message(
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                        fallback_text,
+                    ) {
+                        botfather::DirectStreamHandleState::Ready(send_handle) => {
+                            let fallback_text = botfather::room_stream_preview(
+                            room_id,
+                            thread_root_event_id.as_deref(),
+                        )
+                        .map(|preview| preview.text)
+                        .filter(|text| !text.trim().is_empty())
+                        .map(|text| format!("{text}\n\nBot request failed: {error}"))
+                        .unwrap_or_else(|| format!("Bot request failed: {error}"));
+                            let error_message = error.clone();
+                            spawn_on_tokio(async move {
+                                match send_handle.abort().await {
+                                    Ok(true) => {}
+                                    Ok(false) => {
+                                        if let Err(edit_error) = send_handle
+                                            .edit(RoomMessageEventContent::text_markdown(fallback_text).into())
+                                            .await
+                                        {
+                                            enqueue_popup_notification(
+                                                format!("Failed to update bot stream failure state: {edit_error}"),
+                                                PopupKind::Error,
+                                                Some(5.0),
+                                            );
+                                        }
+                                    }
+                                    Err(abort_error) => enqueue_popup_notification(
+                                        format!(
+                                            "Failed to stop bot stream placeholder for error `{error_message}`: {abort_error}"
+                                        ),
+                                        PopupKind::Error,
+                                        Some(5.0),
+                                    ),
+                                }
+                            });
+                        }
+                        botfather::DirectStreamHandleState::Pending => {}
+                        botfather::DirectStreamHandleState::Missing => {}
+                    }
                     enqueue_popup_notification(
                         format!("Bot request failed: {error}"),
                         PopupKind::Error,
                         Some(5.0),
                     );
+                }
+            }
+
+            if let Some(BotfatherAction::StreamCancelled { room_id, thread_root_event_id }) = action.downcast_ref() {
+                let current_thread_root_event_id = room_screen_props
+                    .timeline_kind
+                    .thread_root_event_id()
+                    .map(|event_id| event_id.to_string());
+                let same_scope = current_thread_root_event_id.as_ref() == thread_root_event_id.as_ref();
+                if room_screen_props.timeline_kind.room_id().as_str() == room_id && same_scope {
+                    let fallback_text = botfather::room_stream_preview(
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                    )
+                    .map(|preview| preview.text)
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| format!("{text}\n\nBot request cancelled."));
+                    match botfather::cancel_direct_stream_message(
+                        room_id,
+                        thread_root_event_id.as_deref(),
+                        fallback_text,
+                    ) {
+                        botfather::DirectStreamHandleState::Ready(send_handle) => {
+                            let fallback_text = botfather::room_stream_preview(
+                            room_id,
+                            thread_root_event_id.as_deref(),
+                        )
+                        .map(|preview| preview.text)
+                        .filter(|text| !text.trim().is_empty())
+                        .map(|text| format!("{text}\n\nBot request cancelled."))
+                        .unwrap_or_else(|| "Bot request cancelled.".into());
+                            spawn_on_tokio(async move {
+                                match send_handle.abort().await {
+                                    Ok(true) => {}
+                                    Ok(false) => {
+                                        if let Err(error) = send_handle
+                                            .edit(RoomMessageEventContent::text_markdown(fallback_text).into())
+                                            .await
+                                        {
+                                            enqueue_popup_notification(
+                                                format!("Failed to update cancelled bot stream message: {error}"),
+                                                PopupKind::Error,
+                                                Some(5.0),
+                                            );
+                                        }
+                                    }
+                                    Err(error) => enqueue_popup_notification(
+                                        format!("Failed to cancel bot stream placeholder: {error}"),
+                                        PopupKind::Error,
+                                        Some(5.0),
+                                    ),
+                                }
+                            });
+                        }
+                        botfather::DirectStreamHandleState::Pending => {}
+                        botfather::DirectStreamHandleState::Missing => {}
+                    }
                 }
             }
         }
@@ -415,6 +623,8 @@ impl RoomInputBar {
                     message,
                     replied_to,
                     bot_prompt: None,
+                    bot_dispatch_context: None,
+                    bot_stream_placeholder_context: None,
                     #[cfg(feature = "tsp")]
                     sign_with_tsp: self.is_tsp_signing_enabled(cx),
                 });
@@ -453,6 +663,23 @@ impl RoomInputBar {
                 }
 
                 let message = mentionable_text_input.create_message_with_mentions(&entered_text);
+                let bot_dispatch_context = botfather::BotDispatchContext {
+                    thread_root_event_id: room_screen_props
+                        .timeline_kind
+                        .thread_root_event_id()
+                        .map(|event_id| event_id.to_string()),
+                    reply_root_event_id: if room_screen_props
+                        .timeline_kind
+                        .thread_root_event_id()
+                        .is_none()
+                    {
+                        self.replying_to.as_ref().and_then(|(event_tl_item, _)| {
+                            event_tl_item.event_id().map(|event_id| event_id.to_string())
+                        })
+                    } else {
+                        None
+                    },
+                };
                 let replied_to = self
                     .replying_to
                     .take()
@@ -486,6 +713,8 @@ impl RoomInputBar {
                     message,
                     replied_to,
                     bot_prompt: Some(entered_text.clone()),
+                    bot_dispatch_context: Some(bot_dispatch_context),
+                    bot_stream_placeholder_context: None,
                     #[cfg(feature = "tsp")]
                     sign_with_tsp: self.is_tsp_signing_enabled(cx),
                 });

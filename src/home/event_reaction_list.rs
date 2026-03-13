@@ -32,6 +32,8 @@ const EMOJI_BG_COLOR_NOT_INCLUDE_SELF: Vec4 = Vec4 {
     w: 1.0,
 }; // LightGrey
 
+const BOT_THINKING_REACTION: &str = "🤔";
+
 live_design! {
     use link::theme::*;
     use link::shaders::*;
@@ -112,6 +114,16 @@ pub struct ReactionData {
     pub room_id: OwnedRoomId,
 }
 
+#[derive(Clone, Debug, Default)]
+pub enum ReactionListAction {
+    #[default]
+    None,
+    InterruptBotThinking {
+        timeline_kind: TimelineKind,
+        timeline_event_id: TimelineEventItemId,
+    },
+}
+
 #[derive(Live, LiveHook, Widget)]
 pub struct ReactionList {
     #[redraw] #[rust] area: Area,
@@ -167,6 +179,20 @@ impl Widget for ReactionList {
                         let Some(timeline_event_id) = &self.timeline_event_id else {
                             return;
                         };
+                        if reaction_data.includes_user
+                            && reaction_data.reaction == BOT_THINKING_REACTION
+                        {
+                            cx.widget_action(
+                                self.widget_uid(),
+                                &scope.path,
+                                ReactionListAction::InterruptBotThinking {
+                                    timeline_kind: kind.clone(),
+                                    timeline_event_id: timeline_event_id.clone(),
+                                },
+                            );
+                            self.do_hover_out(cx, scope, button_ref);
+                            break;
+                        }
                         submit_async_request(MatrixRequest::ToggleReaction {
                             timeline_kind: kind.clone(),
                             timeline_event_id: timeline_event_id.clone(),
