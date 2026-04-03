@@ -26,7 +26,7 @@ use matrix_sdk_ui::timeline::{
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
 use crate::{
-    app::{AppState, AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{create_bot_modal::{CreateBotModalAction, CreateBotModalWidgetExt}, delete_bot_modal::{DeleteBotModalAction, DeleteBotModalWidgetExt}, edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
+    app::{AppState, AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{create_bot_modal::{CreateBotModalAction, CreateBotModalWidgetExt}, delete_bot_modal::{DeleteBotModalAction, DeleteBotModalWidgetExt}, edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, i18n::{AppLanguage, tr_fmt, tr_key}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
@@ -34,7 +34,7 @@ use crate::{
     shared::{
         avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::ConfirmationModalContent, html_or_plaintext::{HtmlOrPlaintextRef, HtmlOrPlaintextWidgetRefExt, RobrixHtmlLinkAction}, image_viewer::{ImageViewerAction, ImageViewerMetaData, LoadState}, jump_to_bottom_button::{JumpToBottomButtonWidgetExt, UnreadMessageCount}, popup_list::{PopupKind, enqueue_popup_notification}, restore_status_view::RestoreStatusViewWidgetExt, styles::*, text_or_image::{TextOrImageAction, TextOrImageRef, TextOrImageWidgetRefExt}, timestamp::TimestampWidgetRefExt
     },
-    sliding_sync::{BackwardsPaginateUntilEventRequest, MatrixRequest, PaginationDirection, TimelineEndpoints, TimelineKind, TimelineRequestSender, UserPowerLevels, current_user_id, get_client, submit_async_request, take_timeline_endpoints}, utils::{self, ImageFormat, MEDIA_THUMBNAIL_FORMAT, RoomNameId, unix_time_millis_to_datetime}
+    sliding_sync::{BackwardsPaginateUntilEventRequest, FetchedRoomThread, MatrixRequest, PaginationDirection, RoomThreadsAction, TimelineEndpoints, TimelineKind, TimelineRequestSender, UserPowerLevels, current_user_id, get_client, submit_async_request, take_timeline_endpoints}, utils::{self, ImageFormat, MEDIA_THUMBNAIL_FORMAT, RoomNameId, unix_time_millis_to_datetime}
 };
 use crate::home::event_reaction_list::ReactionListWidgetRefExt;
 use crate::home::room_read_receipt::AvatarRowWidgetRefExt;
@@ -54,7 +54,11 @@ const MAX_ITEMS_TO_SEARCH_THROUGH: usize = 100;
 
 /// The max size (width or height) of a blurhash image to decode.
 const BLURHASH_IMAGE_MAX_SIZE: u32 = 500;
-static UNNAMED_ROOM: &str = "Unnamed Room";
+
+/// Use a larger batch when we are trying to fill the initial viewport,
+/// otherwise many short messages can trigger a long chain of tiny paginations.
+const VIEWPORT_FILL_PAGINATION_SIZE: u16 = 150;
+
 
 /// #FFF4E5
 const COLOR_THREAD_SUMMARY_BG: Vec4 = vec4(1.0, 0.957, 0.898, 1.0);
@@ -215,10 +219,11 @@ fn format_delete_bot_command(matrix_user_id: &UserId) -> String {
 fn resolve_delete_bot_user_id(
     user_id_or_localpart: &str,
     current_user_id: Option<&UserId>,
+    app_language: AppLanguage,
 ) -> Result<OwnedUserId, String> {
     let raw = user_id_or_localpart.trim();
     if raw.is_empty() {
-        return Err("Please enter the bot Matrix user ID to delete.".into());
+        return Err(tr_key(app_language, "room_screen.bot.delete.error.empty_user_id").into());
     }
 
     if raw.starts_with('@') || raw.contains(':') {
@@ -229,19 +234,23 @@ fn resolve_delete_bot_user_id(
         };
         return UserId::parse(&full_user_id)
             .map(|user_id| user_id.to_owned())
-            .map_err(|_| format!("Invalid Matrix user ID: {full_user_id}"));
+            .map_err(|_| tr_fmt(app_language, "room_screen.bot.delete.error.invalid_user_id", &[
+                ("full_user_id", full_user_id.as_str()),
+            ]));
     }
 
     let Some(current_user_id) = current_user_id else {
         return Err(
-            "Current user ID is unavailable, so the bot homeserver cannot be resolved.".into(),
+            tr_key(app_language, "room_screen.bot.delete.error.current_user_unavailable").into(),
         );
     };
 
     let full_user_id = format!("@{raw}:{}", current_user_id.server_name());
     UserId::parse(&full_user_id)
         .map(|user_id| user_id.to_owned())
-        .map_err(|_| format!("Invalid Matrix user ID: {full_user_id}"))
+        .map_err(|_| tr_fmt(app_language, "room_screen.bot.delete.error.invalid_user_id", &[
+            ("full_user_id", full_user_id.as_str()),
+        ]))
 }
 
 fn detected_bot_binding_for_members(
@@ -264,6 +273,38 @@ fn detected_bot_binding_for_members(
         .iter()
         .any(|room_member| room_member.user_id() == bot_user_id)
         .then_some(bot_user_id)
+}
+
+fn is_likely_bot_user_id(
+    user_id: &UserId,
+    resolved_parent_bot_user_id: Option<&UserId>,
+) -> bool {
+    if resolved_parent_bot_user_id.is_some_and(|parent| parent == user_id) {
+        return true;
+    }
+
+    let localpart = user_id.localpart().to_ascii_lowercase();
+    localpart == "bot"
+        || localpart.starts_with("bot_")
+        || localpart.ends_with("_bot")
+        || (localpart.ends_with("bot") && localpart.len() > 3)
+}
+
+fn is_likely_bot_member(
+    room_member: &RoomMember,
+    resolved_parent_bot_user_id: Option<&UserId>,
+) -> bool {
+    if is_likely_bot_user_id(room_member.user_id(), resolved_parent_bot_user_id) {
+        return true;
+    }
+
+    room_member.display_name().is_some_and(|display_name| {
+        let display_name = display_name.trim().to_ascii_lowercase();
+        display_name == "bot"
+            || display_name.starts_with("bot ")
+            || display_name.ends_with(" bot")
+            || display_name.contains(" bot ")
+    })
 }
 
 script_mod! {
@@ -459,7 +500,7 @@ script_mod! {
                             text_style: USERNAME_TEXT_STYLE {},
                             color: (USERNAME_TEXT_COLOR)
                         }
-                        text: "<Username not available>"
+                        text: ""
                     }
                 }
 
@@ -619,7 +660,7 @@ script_mod! {
                 draw_icon.svg: (ICON_ADD_USER)
                 draw_text.text_style: SMALL_STATE_TEXT_STYLE {}
                 icon_walk: Walk{width: 15, height: Fit, margin: Inset{right: -4}}
-                text: "Invite to Room"
+                text: ""
             }
 
             content := Label {
@@ -659,7 +700,7 @@ script_mod! {
                 text_style: TEXT_SUB {},
                 color: (COLOR_DIVIDER_DARK)
             }
-            text: "<date>"
+            text: ""
         }
 
         right_line := LineH { }
@@ -674,7 +715,7 @@ script_mod! {
 
         date := Label {
             draw_text.color: (mod.widgets.COLOR_READ_MARKER)
-            text: "New Messages"
+            text: ""
         }
 
         right_line := LineH {
@@ -703,7 +744,219 @@ script_mod! {
                 text_style: MESSAGE_TEXT_STYLE { font_size: 10 },
                 color: (TIMESTAMP_TEXT_COLOR)
             }
-            text: "Loading earlier messages..."
+            text: ""
+        }
+    }
+
+    mod.widgets.ThreadsPaneEntry = #(ThreadsPaneEntry::register_widget(vm)) {
+        ..mod.widgets.RoundedView
+
+        width: Fill
+        height: Fit
+        flow: Down
+        spacing: 5
+        padding: Inset{top: 12, right: 12, bottom: 12, left: 12}
+        margin: Inset{left: 12, right: 12, top: 6, bottom: 0}
+        cursor: MouseCursor.Hand
+
+        show_bg: true
+        draw_bg +: {
+            color: #F8FAFD
+            border_radius: 4.0
+            border_size: 1.0
+            border_color: #D8E0EA
+        }
+
+        title_row := View {
+            width: Fill
+            height: Fit
+            flow: Right
+            spacing: 8
+
+            title := Label {
+                width: Fill
+                height: Fit
+                flow: Flow.Right{wrap: true}
+                draw_text +: {
+                    text_style: USERNAME_TEXT_STYLE { font_size: 10.8 }
+                    color: #1F1F1F
+                }
+                text: ""
+            }
+
+            time := Label {
+                width: Fit
+                height: Fit
+                draw_text +: {
+                    text_style: TIMESTAMP_TEXT_STYLE { font_size: 7.5 }
+                    color: (TIMESTAMP_TEXT_COLOR)
+                }
+                text: ""
+            }
+        }
+
+        subtitle := Label {
+            width: Fill
+            height: Fit
+            flow: Flow.Right{wrap: true}
+            draw_text +: {
+                text_style: MESSAGE_TEXT_STYLE { font_size: 9.8 }
+                color: #7B7B7B
+            }
+            text: ""
+        }
+
+        preview := Label {
+            width: Fill
+            height: Fit
+            flow: Flow.Right{wrap: true}
+            draw_text +: {
+                text_style: MESSAGE_TEXT_STYLE { font_size: 10.0 }
+                color: (COLOR_TEXT)
+            }
+            text: ""
+        }
+    }
+
+    mod.widgets.ThreadsSlidingPane = #(ThreadsSlidingPane::register_widget(vm)) {
+        visible: false,
+        flow: Overlay,
+        width: Fill,
+        height: Fill,
+        align: Align{x: 1.0, y: 0}
+
+        bg_view := SolidView {
+            width: Fill
+            height: Fill
+            visible: false,
+            show_bg: true
+            draw_bg.color: #000000BB
+        }
+
+        main_content := SolidView {
+            width: 320,
+            height: Fill
+            flow: Down,
+            align: Align{x: 1.0}
+
+            show_bg: true,
+            draw_bg.color: (COLOR_PRIMARY)
+
+            header := View {
+                width: Fill
+                height: Fit
+                flow: Right
+                align: Align{y: 0.5}
+                padding: Inset{top: 12, right: 10, bottom: 12, left: 15}
+
+                title := Label {
+                    width: Fit
+                    height: Fit
+                    draw_text +: {
+                        text_style: USERNAME_TEXT_STYLE { font_size: 12.5 }
+                        color: #000
+                    }
+                    text: "Threads"
+                }
+
+                spacer := View {
+                    width: Fill
+                    height: Fit
+                }
+
+                close_button := RobrixNeutralIconButton {
+                    width: Fit,
+                    height: Fit,
+                    spacing: 0,
+                    padding: 15,
+                    draw_icon.svg: (ICON_CLOSE)
+                    icon_walk: Walk{width: 14, height: 14}
+                    text: ""
+                }
+            }
+
+            room_name := Label {
+                width: Fill
+                height: Fit
+                flow: Flow.Right{wrap: true}
+                padding: Inset{left: 15, right: 15, bottom: 10}
+                draw_text +: {
+                    text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                    color: #6E6E6E
+                }
+                text: ""
+            }
+
+            loading_indicator := View {
+                visible: false
+                width: Fill
+                height: Fit
+                flow: Right
+                align: Align{y: 0.5}
+                spacing: 8
+                padding: Inset{left: 15, right: 15, top: 6, bottom: 10}
+
+                spinner := LoadingSpinner {
+                    width: 18
+                    height: 18
+                }
+
+                loading_label := Label {
+                    width: Fit
+                    height: Fit
+                    draw_text +: {
+                        text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                        color: #7B7B7B
+                    }
+                    text: "Loading threads..."
+                }
+            }
+
+            empty_state := Label {
+                visible: false
+                width: Fill
+                height: Fit
+                flow: Flow.Right{wrap: true}
+                padding: Inset{left: 15, right: 15, top: 20, bottom: 20}
+                draw_text +: {
+                    text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                    color: #7B7B7B
+                }
+                text: "No threads yet."
+            }
+
+            threads_list := PortalList {
+                width: Fill
+                height: Fill
+                flow: Down
+                max_pull_down: 0.0
+
+                ThreadEntry := mod.widgets.ThreadsPaneEntry {}
+            }
+        }
+
+        slide: 1.0,
+
+        animator: Animator {
+            panel: {
+                default: @hide
+                show: AnimatorState{
+                    redraw: true,
+                    from: {all: Forward {duration: 0.5}}
+                    ease: Ease.ExpDecay {d1: 0.80, d2: 0.97}
+                    apply: {
+                        slide: 0.0
+                    }
+                }
+                hide: AnimatorState{
+                    redraw: true,
+                    from: {all: Forward {duration: 0.5}}
+                    ease: Ease.ExpDecay {d1: 0.80, d2: 0.97}
+                    apply: {
+                        slide: 1.0
+                    }
+                }
+            }
         }
     }
 
@@ -728,7 +981,7 @@ script_mod! {
                     text_style: USERNAME_TEXT_STYLE { font_size: 10.8 }
                     color: (COLOR_ACTIVE_PRIMARY)
                 }
-                text: "BotFather"
+                text: ""
             }
 
             sender_tag := Label {
@@ -738,7 +991,7 @@ script_mod! {
                     text_style: REGULAR_TEXT { font_size: 9.5 }
                     color: #8A8A8A
                 }
-                text: "bot"
+                text: ""
             }
         }
 
@@ -770,7 +1023,7 @@ script_mod! {
                         text_style: USERNAME_TEXT_STYLE { font_size: 11.2 }
                         color: #1F1F1F
                     }
-                    text: "App Service Actions"
+                    text: ""
                 }
 
                 spacer := View {
@@ -796,9 +1049,8 @@ script_mod! {
                 draw_text +: {
                     text_style: REGULAR_TEXT { font_size: 10.5 }
                     color: (COLOR_TEXT)
-                    wrap: Word
                 }
-                text: "Create a bot through BotFather. Robrix only sends the matching slash command."
+                text: ""
             }
 
             footer := View {
@@ -814,7 +1066,7 @@ script_mod! {
                         text_style: REGULAR_TEXT { font_size: 8.8 }
                         color: #9A9A9A
                     }
-                    text: "now"
+                    text: ""
                 }
             }
         }
@@ -837,7 +1089,7 @@ script_mod! {
                     padding: 10
                     draw_icon.svg: (ICON_CHECKMARK)
                     icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1}}
-                    text: "Create Bot"
+                    text: ""
                 }
 
                 list_button := RobrixNeutralIconButton {
@@ -846,7 +1098,7 @@ script_mod! {
                     padding: 10
                     draw_icon.svg: (ICON_SEARCH)
                     icon_walk: Walk{width: 14, height: 14, margin: Inset{left: -2, right: -1}}
-                    text: "List Bots"
+                    text: ""
                 }
             }
 
@@ -862,7 +1114,7 @@ script_mod! {
                     padding: 10
                     draw_icon.svg: (ICON_CLOSE)
                     icon_walk: Walk{width: 14, height: 14, margin: Inset{left: -2, right: -1}}
-                    text: "Delete Bot"
+                    text: ""
                 }
 
                 help_button := RobrixNeutralIconButton {
@@ -871,7 +1123,7 @@ script_mod! {
                     padding: 10
                     draw_icon.svg: (ICON_INFO)
                     icon_walk: Walk{width: 14, height: 14, margin: Inset{left: -2, right: -1}}
-                    text: "Bot Help"
+                    text: ""
                 }
             }
 
@@ -881,13 +1133,22 @@ script_mod! {
                 flow: Right
                 spacing: 8
 
+                view_bound_button := RobrixNeutralIconButton {
+                    width: 156
+                    height: 46
+                    padding: 10
+                    draw_icon.svg: (ICON_SEARCH)
+                    icon_walk: Walk{width: 14, height: 14, margin: Inset{left: -2, right: -1}}
+                    text: "View Bound Bots"
+                }
+
                 unbind_button := RobrixNeutralIconButton {
                     width: 156
                     height: 46
                     padding: 10
                     draw_icon.svg: (ICON_CLOSE)
                     icon_walk: Walk{width: 14, height: 14, margin: Inset{left: -2, right: -1}}
-                    text: "Unbind"
+                    text: ""
                 }
             }
         }
@@ -968,6 +1229,8 @@ script_mod! {
             // (on top of all other views that are always visible).
             user_profile_sliding_pane := mod.widgets.UserProfileSlidingPane { }
 
+            threads_sliding_pane := mod.widgets.ThreadsSlidingPane { }
+
             // The loading pane appears while the user is waiting for something in the room screen
             // to finish loading, e.g., when loading an older replied-to message.
             loading_pane := LoadingPane { }
@@ -1007,6 +1270,258 @@ script_mod! {
     }
 }
 
+#[derive(Clone, Default, Debug)]
+pub enum ThreadsPaneAction {
+    OpenThread(OwnedEventId),
+    LoadMoreRequested,
+    #[default]
+    None,
+}
+
+impl ActionDefaultRef for ThreadsPaneAction {
+    fn default_ref() -> &'static Self {
+        static DEFAULT: ThreadsPaneAction = ThreadsPaneAction::None;
+        &DEFAULT
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ThreadsPaneEntryInfo {
+    thread_root_event_id: OwnedEventId,
+    title: String,
+    subtitle: String,
+    time: String,
+    preview: String,
+}
+
+#[derive(Clone, Debug)]
+struct ThreadsPaneInfo {
+    room_name: String,
+    entries: Vec<ThreadsPaneEntryInfo>,
+    status_text: String,
+    show_entries: bool,
+    loading_text: String,
+    show_loading: bool,
+}
+
+#[derive(Default)]
+struct ThreadsPaneState {
+    room_id: Option<OwnedRoomId>,
+    entries: Vec<FetchedRoomThread>,
+    prev_batch_token: Option<String>,
+    is_loading: bool,
+    initialized: bool,
+    status_text: String,
+}
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct ThreadsPaneEntry {
+    #[source] source: ScriptObjectRef,
+    #[deref] view: View,
+
+    #[rust] thread_root_event_id: Option<OwnedEventId>,
+}
+
+impl Widget for ThreadsPaneEntry {
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+
+        let Some(thread_root_event_id) = self.thread_root_event_id.clone() else { return };
+        match event.hits(cx, self.view.area()) {
+            Hit::FingerUp(fe) if fe.is_over && fe.is_primary_hit() && fe.was_tap() => {
+                cx.widget_action(
+                    self.widget_uid(),
+                    ThreadsPaneAction::OpenThread(thread_root_event_id),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        self.view.draw_walk(cx, scope, walk)
+    }
+}
+
+impl ThreadsPaneEntry {
+    fn set_entry(&mut self, cx: &mut Cx, entry: &ThreadsPaneEntryInfo) {
+        self.thread_root_event_id = Some(entry.thread_root_event_id.clone());
+        self.label(cx, ids!(title)).set_text(cx, &entry.title);
+        self.label(cx, ids!(time)).set_text(cx, &entry.time);
+        self.label(cx, ids!(subtitle)).set_text(cx, &entry.subtitle);
+        self.label(cx, ids!(preview)).set_text(cx, &entry.preview);
+    }
+}
+
+impl ThreadsPaneEntryRef {
+    fn set_entry(&self, cx: &mut Cx, entry: &ThreadsPaneEntryInfo) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        inner.set_entry(cx, entry);
+    }
+}
+
+#[derive(Script, ScriptHook, Widget, Animator)]
+pub struct ThreadsSlidingPane {
+    #[source] source: ScriptObjectRef,
+    #[deref] view: View,
+    #[apply_default] animator: Animator,
+    #[live] slide: f32,
+
+    #[rust] info: Option<ThreadsPaneInfo>,
+    #[rust] is_animating_out: bool,
+}
+
+impl Widget for ThreadsSlidingPane {
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+
+        if !self.visible { return; }
+
+        let animator_action = self.animator_handle_event(cx, event);
+        if animator_action.must_redraw() {
+            self.redraw(cx);
+        }
+
+        if self.is_animating_out && !self.animator.is_track_animating(id!(panel)) {
+            self.visible = false;
+            self.is_animating_out = false;
+            cx.revert_key_focus();
+            self.view(cx, ids!(bg_view)).set_visible(cx, false);
+            self.redraw(cx);
+            return;
+        }
+
+        let area = self.view.area();
+        let close_pane = {
+            matches!(
+                event,
+                Event::Actions(actions) if self.button(cx, ids!(close_button)).clicked(actions)
+            )
+            || event.back_pressed()
+            || match event.hits_with_capture_overload(cx, area, true) {
+                Hit::KeyUp(key) => key.key_code == KeyCode::Escape,
+                Hit::FingerDown(_fde) => {
+                    cx.set_key_focus(area);
+                    false
+                }
+                Hit::FingerUp(fue) if fue.is_over => {
+                    fue.mouse_button().is_some_and(|b| b.is_back())
+                    || !self.view(cx, ids!(main_content)).area().rect(cx).contains(fue.abs)
+                }
+                _ => false,
+            }
+        };
+        if close_pane {
+            self.hide(cx);
+        }
+
+        if let Event::Actions(actions) = event {
+            let threads_list = self.portal_list(cx, ids!(threads_list));
+            if threads_list.scrolled(actions)
+                && threads_list.first_id() == 0
+                && threads_list.scroll_position() >= -0.5
+            {
+                cx.widget_action(
+                    self.widget_uid(),
+                    ThreadsPaneAction::LoadMoreRequested,
+                );
+            }
+        }
+    }
+
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let Some(info) = self.info.as_ref() else {
+            self.visible = false;
+            return self.view.draw_walk(cx, scope, walk);
+        };
+
+        let panel_width = 320.0;
+        let right_margin = -(self.slide * panel_width);
+        let mut main_content = self.view(cx, ids!(main_content));
+        script_apply_eval!(cx, main_content, {
+            margin.right: #(right_margin)
+        });
+        let bg_alpha = (1.0 - self.slide) * 0.733;
+        let bg_color = vec4(0.0, 0.0, 0.0, bg_alpha);
+        let mut bg_view = self.view(cx, ids!(bg_view));
+        script_apply_eval!(cx, bg_view, {
+            draw_bg +: { color: #(bg_color) }
+        });
+
+        self.label(cx, ids!(room_name)).set_text(cx, &info.room_name);
+        self.label(cx, ids!(loading_label)).set_text(cx, &info.loading_text);
+        self.view(cx, ids!(loading_indicator)).set_visible(cx, info.show_loading);
+        self.label(cx, ids!(empty_state)).set_text(cx, &info.status_text);
+        self.view(cx, ids!(empty_state)).set_visible(cx, !info.show_entries && !info.show_loading);
+        self.view(cx, ids!(threads_list)).set_visible(cx, info.show_entries);
+
+        while let Some(widget) = self.view.draw_walk(cx, scope, walk).step() {
+            let portal_list_ref = widget.as_portal_list();
+            let Some(mut list) = portal_list_ref.borrow_mut() else { continue };
+
+            list.set_item_range(cx, 0, info.entries.len());
+            while let Some(item_id) = list.next_visible_item(cx) {
+                let Some(entry) = info.entries.get(item_id) else { continue };
+                let item = list.item(cx, item_id, id!(ThreadEntry));
+                item.as_threads_pane_entry().set_entry(cx, entry);
+                item.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+}
+
+impl ThreadsSlidingPane {
+    pub fn is_currently_shown(&self, _cx: &mut Cx) -> bool {
+        self.visible
+    }
+
+    fn set_info(&mut self, _cx: &mut Cx, info: ThreadsPaneInfo) {
+        self.info = Some(info);
+    }
+
+    pub fn show(&mut self, cx: &mut Cx) {
+        self.visible = true;
+        self.is_animating_out = false;
+        cx.set_key_focus(self.view.area());
+        self.animator_play(cx, ids!(panel.show));
+        self.view(cx, ids!(bg_view)).set_visible(cx, true);
+        self.view.button(cx, ids!(close_button)).reset_hover(cx);
+        self.redraw(cx);
+    }
+
+    pub fn hide(&mut self, cx: &mut Cx) {
+        if !self.visible {
+            return;
+        }
+        self.is_animating_out = true;
+        self.animator_play(cx, ids!(panel.hide));
+        self.redraw(cx);
+    }
+}
+
+impl ThreadsSlidingPaneRef {
+    pub fn is_currently_shown(&self, cx: &mut Cx) -> bool {
+        let Some(inner) = self.borrow() else { return false };
+        inner.is_currently_shown(cx)
+    }
+
+    fn set_info(&self, cx: &mut Cx, info: ThreadsPaneInfo) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        inner.set_info(cx, info);
+    }
+
+    pub fn show(&self, cx: &mut Cx) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        inner.show(cx);
+    }
+
+    pub fn hide(&self, cx: &mut Cx) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        inner.hide(cx);
+    }
+}
+
 /// The main widget that displays a single Matrix room.
 #[derive(Script, Widget)]
 pub struct RoomScreen {
@@ -1034,6 +1549,9 @@ pub struct RoomScreen {
     streaming_timeout_timer: Timer,
     /// Whether the in-room app service quick actions card is currently visible.
     #[rust] show_app_service_actions: bool,
+    #[rust] threads_pane_state: ThreadsPaneState,
+    #[rust] app_language: AppLanguage,
+    #[rust] app_language_initialized: bool,
 }
 
 impl Drop for RoomScreen {
@@ -1063,9 +1581,16 @@ impl ScriptHook for RoomScreen {
 impl Widget for RoomScreen {
     // Handle events and actions for the RoomScreen widget and its inner Timeline view.
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        let app_language = scope.data.get::<AppState>()
+            .map(|app_state| app_state.app_language)
+            .unwrap_or_default();
+        if !self.app_language_initialized || self.app_language != app_language {
+            self.set_app_language(cx, app_language);
+        }
         let room_screen_widget_uid = self.widget_uid();
         let portal_list = self.portal_list(cx, ids!(timeline.list));
         let user_profile_sliding_pane = self.user_profile_sliding_pane(cx, ids!(user_profile_sliding_pane));
+        let threads_sliding_pane = self.threads_sliding_pane(cx, ids!(threads_sliding_pane));
         let loading_pane = self.loading_pane(cx, ids!(loading_pane));
 
         // Streaming animation frame handler
@@ -1189,7 +1714,9 @@ impl Widget for RoomScreen {
                         .collect();
 
                     let mut tooltip_text = utils::human_readable_list(&tooltip_text_arr, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT);
-                    tooltip_text.push_str(&format!(" reacted with: {}", reaction_data.reaction));
+                    tooltip_text.push_str(&tr_fmt(self.app_language, "room_screen.tooltip.reacted_with_suffix", &[
+                        ("reaction", reaction_data.reaction.as_str()),
+                    ]));
                     cx.widget_action(
                         room_screen_widget_uid, 
                         TooltipAction::HoverIn {
@@ -1258,10 +1785,11 @@ impl Widget for RoomScreen {
                             user_id.as_str()
                         };
                         let room_id = tl.kind.room_id().clone();
+                        let app_language = self.app_language;
                         let content = ConfirmationModalContent {
-                            title_text: "Send Invitation".into(),
-                            body_text: format!("Are you sure you want to invite {username} to this room?").into(),
-                            accept_button_text: Some("Invite".into()),
+                            title_text: tr_key(app_language, "room_screen.modal.invite.title").into(),
+                            body_text: tr_fmt(app_language, "room_screen.modal.invite.body", &[("username", username)]).into(),
+                            accept_button_text: Some(tr_key(app_language, "room_screen.modal.invite.accept").into()),
                             on_accept_clicked: Some(Box::new(move |_cx| {
                                 submit_async_request(MatrixRequest::InviteUser { room_id, user_id });
                             })),
@@ -1292,7 +1820,7 @@ impl Widget for RoomScreen {
                     // Only handle if this is for the current room.
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
                         enqueue_popup_notification(
-                            "Sent invite successfully.",
+                            tr_key(self.app_language, "room_screen.popup.invite.sent_success"),
                             PopupKind::Success,
                             Some(4.0),
                         );
@@ -1301,11 +1829,48 @@ impl Widget for RoomScreen {
                 if let Some(InviteResultAction::Failed { room_id, error, .. }) = action.downcast_ref() {
                     // Only handle if this is for the current room.
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
+                        let error_text = error.to_string();
                         enqueue_popup_notification(
-                            format!("Failed to send invite.\n\nError: {error}"),
+                            tr_fmt(self.app_language, "room_screen.popup.invite.failed", &[
+                                ("error", error_text.as_str()),
+                            ]),
                             PopupKind::Error,
                             None,
                         );
+                    }
+                }
+
+                match action.as_widget_action().cast_ref() {
+                    ThreadsPaneAction::OpenThread(thread_root_event_id) => {
+                        let Some(room_name_id) = self.room_name_id.as_ref().cloned() else { continue };
+                        threads_sliding_pane.hide(cx);
+                        cx.widget_action(
+                            room_screen_widget_uid,
+                            RoomsListAction::Selected(SelectedRoom::Thread {
+                                room_name_id,
+                                thread_root_event_id: thread_root_event_id.clone(),
+                            }),
+                        );
+                    }
+                    ThreadsPaneAction::LoadMoreRequested => {
+                        self.request_more_threads(cx, true);
+                    }
+                    ThreadsPaneAction::None => {}
+                }
+
+                if let Some(RoomThreadsAction::Loaded { room_id, from, threads, prev_batch_token }) = action.downcast_ref() {
+                    if self.threads_pane_state.room_id.as_ref().is_some_and(|current| current == room_id) {
+                        self.on_threads_loaded(
+                            cx,
+                            from.as_ref(),
+                            threads,
+                            prev_batch_token.clone(),
+                        );
+                    }
+                }
+                if let Some(RoomThreadsAction::Failed { room_id, from: _, error }) = action.downcast_ref() {
+                    if self.threads_pane_state.room_id.as_ref().is_some_and(|current| current == room_id) {
+                        self.on_threads_failed(cx, error);
                     }
                 }
 
@@ -1373,6 +1938,9 @@ impl Widget for RoomScreen {
             }
 
             self.process_timeline_updates(cx, &portal_list, scope.data.get::<AppState>());
+            if threads_sliding_pane.is_currently_shown(cx) {
+                self.refresh_threads_pane(cx);
+            }
 
             // Ideally we would do this elsewhere on the main thread, because it's not room-specific,
             // but it doesn't hurt to do it here.
@@ -1396,6 +1964,12 @@ impl Widget for RoomScreen {
                 loading_pane.handle_event(cx, event, scope);
             }
         }
+        else if threads_sliding_pane.is_currently_shown(cx) {
+            is_pane_shown = true;
+            if is_interactive_hit {
+                threads_sliding_pane.handle_event(cx, event, scope);
+            }
+        }
         else if user_profile_sliding_pane.is_currently_shown(cx) {
             is_pane_shown = true;
             if is_interactive_hit {
@@ -1417,16 +1991,24 @@ impl Widget for RoomScreen {
             let room_props = if let Some(tl) = self.tl_state.as_ref() {
                 let room_id = tl.kind.room_id().clone();
                 let room_members = tl.room_members.clone();
-                let (app_service_enabled, app_service_room_bound) = scope
+                let (app_service_enabled, app_service_room_bound, bound_bot_user_id) = scope
                     .data
                     .get::<AppState>()
                     .map(|app_state| {
+                        let app_service_enabled = app_state.bot_settings.enabled;
+                        let app_service_room_bound = self.is_app_service_room_bound(app_state, &room_id);
+                        let bound_bot_user_id = if app_service_enabled && app_service_room_bound {
+                            app_state.bot_settings.bound_bot_user_id(&room_id).map(ToOwned::to_owned)
+                        } else {
+                            None
+                        };
                         (
-                            app_state.bot_settings.enabled,
-                            self.is_app_service_room_bound(app_state, &room_id),
+                            app_service_enabled,
+                            app_service_room_bound,
+                            bound_bot_user_id,
                         )
                     })
-                    .unwrap_or((false, false));
+                    .unwrap_or((false, false, None));
 
                 RoomScreenProps {
                     room_screen_widget_uid,
@@ -1436,6 +2018,7 @@ impl Widget for RoomScreen {
                     room_avatar_url: self.room_avatar_url.clone(),
                     app_service_enabled,
                     app_service_room_bound,
+                    bound_bot_user_id,
                 }
             } else if let Some(room_name) = &self.room_name_id {
                 // Fallback case: we have a room_name but no tl_state yet
@@ -1448,6 +2031,7 @@ impl Widget for RoomScreen {
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
+                    bound_bot_user_id: None,
                 }
             } else {
                 // No room selected yet, skip event handling that requires room context
@@ -1465,6 +2049,7 @@ impl Widget for RoomScreen {
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
+                    bound_bot_user_id: None,
                 }
             };
             let mut room_scope = Scope::with_props(&room_props);
@@ -1495,27 +2080,21 @@ impl Widget for RoomScreen {
                     AppServicePanelAction::OpenCreateBotModal => {
                         if let Some(app_state) = scope.data.get::<AppState>() {
                             if !app_state.bot_settings.enabled {
-                                enqueue_popup_notification(
-                                    "Enable App Service before creating bots in a room.",
-                                    PopupKind::Warning,
-                                    Some(4.0),
+                                self.send_app_service_feedback_message(
+                                    tr_key(self.app_language, "room_screen.popup.app_service.enable_before_create"),
                                 );
                                 self.set_app_service_actions_visible(cx, false);
                             } else if !room_props.app_service_room_bound {
-                                enqueue_popup_notification(
-                                    "Bind BotFather to this room before creating a bot.",
-                                    PopupKind::Warning,
-                                    Some(4.0),
+                                self.send_app_service_feedback_message(
+                                    tr_key(self.app_language, "room_screen.popup.app_service.bind_before_create"),
                                 );
                                 self.set_app_service_actions_visible(cx, false);
                             } else {
                                 self.open_create_bot_modal(cx);
                             }
                         } else {
-                            enqueue_popup_notification(
-                                "App state is unavailable, so bot creation is temporarily unavailable.",
-                                PopupKind::Error,
-                                Some(4.0),
+                            self.send_app_service_feedback_message(
+                                tr_key(self.app_language, "room_screen.popup.app_service.state_unavailable_create"),
                             );
                             self.set_app_service_actions_visible(cx, false);
                         }
@@ -1524,27 +2103,21 @@ impl Widget for RoomScreen {
                     AppServicePanelAction::OpenDeleteBotModal => {
                         if let Some(app_state) = scope.data.get::<AppState>() {
                             if !app_state.bot_settings.enabled {
-                                enqueue_popup_notification(
-                                    "Enable App Service before deleting bots in a room.",
-                                    PopupKind::Warning,
-                                    Some(4.0),
+                                self.send_app_service_feedback_message(
+                                    tr_key(self.app_language, "room_screen.popup.app_service.enable_before_delete"),
                                 );
                                 self.set_app_service_actions_visible(cx, false);
                             } else if !room_props.app_service_room_bound {
-                                enqueue_popup_notification(
-                                    "Bind BotFather to this room before deleting a bot.",
-                                    PopupKind::Warning,
-                                    Some(4.0),
+                                self.send_app_service_feedback_message(
+                                    tr_key(self.app_language, "room_screen.popup.app_service.bind_before_delete"),
                                 );
                                 self.set_app_service_actions_visible(cx, false);
                             } else {
                                 self.open_delete_bot_modal(cx);
                             }
                         } else {
-                            enqueue_popup_notification(
-                                "App state is unavailable, so bot deletion is temporarily unavailable.",
-                                PopupKind::Error,
-                                Some(4.0),
+                            self.send_app_service_feedback_message(
+                                tr_key(self.app_language, "room_screen.popup.app_service.state_unavailable_delete"),
                             );
                             self.set_app_service_actions_visible(cx, false);
                         }
@@ -1556,7 +2129,7 @@ impl Widget for RoomScreen {
                                 cx,
                                 app_state,
                                 "/listbots",
-                                "Sent `/listbots` to BotFather.",
+                                tr_key(self.app_language, "room_screen.popup.bot.sent_listbots").to_string(),
                             );
                         }
                         return false;
@@ -1567,18 +2140,78 @@ impl Widget for RoomScreen {
                                 cx,
                                 app_state,
                                 "/bothelp",
-                                "Sent `/bothelp` to BotFather.",
+                                tr_key(self.app_language, "room_screen.popup.bot.sent_bothelp").to_string(),
                             );
+                        }
+                        return false;
+                    }
+                    AppServicePanelAction::ShowBoundBots => {
+                        let room_id = room_props.room_name_id.room_id();
+                        let own_user_id = current_user_id();
+                        let mut bound_bots = Vec::<OwnedUserId>::new();
+                        let mut push_unique_bot = |bot_user_id: OwnedUserId| {
+                            if !bound_bots.iter().any(|existing| existing == &bot_user_id) {
+                                bound_bots.push(bot_user_id);
+                            }
+                        };
+
+                        if let Some(bound_bot_user_id) = room_props.bound_bot_user_id.as_ref() {
+                            push_unique_bot(bound_bot_user_id.clone());
+                        }
+
+                        let mut resolved_parent_bot_user_id: Option<OwnedUserId> = None;
+                        if let Some(app_state) = scope.data.get::<AppState>() {
+                            for room_binding in &app_state.bot_settings.room_bindings {
+                                if &room_binding.room_id == room_id {
+                                    push_unique_bot(room_binding.bot_user_id.clone());
+                                }
+                            }
+
+                            resolved_parent_bot_user_id = app_state
+                                .bot_settings
+                                .resolved_bot_user_id_for_room(room_id, current_user_id().as_deref())
+                                .ok();
+                            if let Some(bot_user_id) = resolved_parent_bot_user_id.as_ref() {
+                                push_unique_bot(bot_user_id.clone());
+                            }
+                        }
+
+                        if let Some(room_members) = room_props.room_members.as_ref() {
+                            for room_member in room_members.iter() {
+                                if own_user_id
+                                    .as_deref()
+                                    .is_some_and(|own_user_id| own_user_id == room_member.user_id())
+                                {
+                                    continue;
+                                }
+                                if is_likely_bot_member(
+                                    room_member,
+                                    resolved_parent_bot_user_id.as_deref(),
+                                ) {
+                                    push_unique_bot(room_member.user_id().to_owned());
+                                }
+                            }
+                        }
+
+                        if bound_bots.is_empty() {
+                            self.send_app_service_feedback_message(
+                                "No bots are currently bound to this room.",
+                            );
+                        } else {
+                            let mut message = String::from("Bots bound to this room:");
+                            for bot_user_id in &bound_bots {
+                                message.push('\n');
+                                message.push_str(bot_user_id.as_str());
+                            }
+                            self.send_app_service_feedback_message(message);
                         }
                         return false;
                     }
                     AppServicePanelAction::Unbind => {
                         if let Some(app_state) = scope.data.get::<AppState>() {
                             if !room_props.app_service_room_bound {
-                                enqueue_popup_notification(
-                                    "This room is not currently bound to BotFather.",
-                                    PopupKind::Warning,
-                                    Some(4.0),
+                                self.send_app_service_feedback_message(
+                                    tr_key(self.app_language, "room_screen.popup.app_service.room_not_bound"),
                                 );
                             } else {
                                 match app_state
@@ -1594,28 +2227,22 @@ impl Widget for RoomScreen {
                                             bound: false,
                                             bot_user_id: bot_user_id.clone(),
                                         });
-                                        enqueue_popup_notification(
-                                            format!(
-                                                "Removing BotFather {bot_user_id} from this room..."
-                                            ),
-                                            PopupKind::Info,
-                                            Some(4.0),
+                                        self.send_app_service_feedback_message(
+                                            tr_fmt(self.app_language, "room_screen.popup.app_service.removing_botfather", &[
+                                                ("bot_user_id", bot_user_id.as_str()),
+                                            ]),
                                         );
                                     }
                                     Err(error) => {
-                                        enqueue_popup_notification(
+                                        self.send_app_service_feedback_message(
                                             error,
-                                            PopupKind::Error,
-                                            Some(4.0),
                                         );
                                     }
                                 }
                             }
                         } else {
-                            enqueue_popup_notification(
-                                "App state is unavailable, so BotFather could not be removed from this room.",
-                                PopupKind::Error,
-                                Some(4.0),
+                            self.send_app_service_feedback_message(
+                                tr_key(self.app_language, "room_screen.popup.app_service.state_unavailable_unbind"),
                             );
                         }
                         self.set_app_service_actions_visible(cx, false);
@@ -1631,10 +2258,8 @@ impl Widget for RoomScreen {
                     }
                     Some(CreateBotModalAction::Submit(request)) => {
                         let Some(app_state) = scope.data.get::<AppState>() else {
-                            enqueue_popup_notification(
-                                "App state is unavailable, so the create-bot command was not sent.",
-                                PopupKind::Error,
-                                Some(4.0),
+                            self.send_app_service_feedback_message(
+                                tr_key(self.app_language, "room_screen.popup.bot.state_unavailable_create_command"),
                             );
                             self.close_create_bot_modal(cx);
                             return false;
@@ -1658,10 +2283,8 @@ impl Widget for RoomScreen {
                     }
                     Some(DeleteBotModalAction::Submit(request)) => {
                         let Some(app_state) = scope.data.get::<AppState>() else {
-                            enqueue_popup_notification(
-                                "App state is unavailable, so the delete-bot command was not sent.",
-                                PopupKind::Error,
-                                Some(4.0),
+                            self.send_app_service_feedback_message(
+                                tr_key(self.app_language, "room_screen.popup.bot.state_unavailable_delete_command"),
                             );
                             self.close_delete_bot_modal(cx);
                             return false;
@@ -1678,22 +2301,16 @@ impl Widget for RoomScreen {
                     .cast()
                 {
                     if room_props.timeline_kind.thread_root_event_id().is_some() {
-                        enqueue_popup_notification(
-                            "Bot commands are only supported in the main room timeline.",
-                            PopupKind::Warning,
-                            Some(4.0),
+                        self.send_app_service_feedback_message(
+                            tr_key(self.app_language, "room_screen.popup.bot.main_timeline_only"),
                         );
                     } else if !room_props.app_service_enabled {
-                        enqueue_popup_notification(
-                            "Enable App Service in Settings before using /bot.",
-                            PopupKind::Warning,
-                            Some(4.0),
+                        self.send_app_service_feedback_message(
+                            tr_key(self.app_language, "room_screen.popup.bot.enable_in_settings_before_bot"),
                         );
                     } else if !room_props.app_service_room_bound {
-                        enqueue_popup_notification(
-                            "Bind BotFather to this room before using /bot.",
-                            PopupKind::Warning,
-                            Some(4.0),
+                        self.send_app_service_feedback_message(
+                            tr_key(self.app_language, "room_screen.popup.bot.bind_before_bot"),
                         );
                     } else {
                         self.toggle_app_service_actions(cx);
@@ -1709,7 +2326,7 @@ impl Widget for RoomScreen {
                         UserProfilePaneInfo {
                             profile_and_room_id,
                             room_name: self.room_name_id.as_ref().map_or_else(
-                                || UNNAMED_ROOM.to_string(),
+                                || tr_key(self.app_language, "room_screen.fallback.unnamed_room").to_string(),
                                 |r| r.to_string(),
                             ),
                             room_member: None,
@@ -1764,6 +2381,12 @@ impl Widget for RoomScreen {
 
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let app_language = scope.data.get::<AppState>()
+            .map(|app_state| app_state.app_language)
+            .unwrap_or_default();
+        if !self.app_language_initialized || self.app_language != app_language {
+            self.set_app_language(cx, app_language);
+        }
         // If the room isn't loaded yet, we show the restore status label only.
         if !self.is_loaded {
             let Some(room_name) = &self.room_name_id else {
@@ -1785,10 +2408,7 @@ impl Widget for RoomScreen {
         while let Some(subview) = self.view.draw_walk(cx, scope, walk).step() {
             // Here, we only need to handle drawing the portal list.
             let portal_list_ref = subview.as_portal_list();
-            let Some(mut list_ref) = portal_list_ref.borrow_mut() else {
-                error!("!!! RoomScreen::draw_walk(): BUG: expected a PortalList widget, but got something else");
-                continue;
-            };
+            let Some(mut list_ref) = portal_list_ref.borrow_mut() else { continue };
             let Some(tl_state) = self.tl_state.as_mut() else {
                 return DrawStep::done();
             };
@@ -1839,6 +2459,7 @@ impl Widget for RoomScreen {
                                                 list,
                                                 item_id,
                                                 &tl_state.kind,
+                                                self.app_language,
                                                 event_tl_item,
                                                 msg_like_content,
                                                 prev_event,
@@ -1859,6 +2480,7 @@ impl Widget for RoomScreen {
                                             list,
                                             item_id,
                                             &tl_state.kind,
+                                            self.app_language,
                                             event_tl_item,
                                             poll_state,
                                             item_drawn_status,
@@ -1868,6 +2490,7 @@ impl Widget for RoomScreen {
                                             list,
                                             item_id,
                                             &tl_state.kind,
+                                            self.app_language,
                                             event_tl_item,
                                             utd,
                                             item_drawn_status,
@@ -1877,6 +2500,7 @@ impl Widget for RoomScreen {
                                             list,
                                             item_id,
                                             &tl_state.kind,
+                                            self.app_language,
                                             event_tl_item,
                                             other,
                                             item_drawn_status,
@@ -1889,6 +2513,7 @@ impl Widget for RoomScreen {
                                 list,
                                 item_id,
                                 &tl_state.kind,
+                                self.app_language,
                                 event_tl_item,
                                 membership_change,
                                 item_drawn_status,
@@ -1898,6 +2523,7 @@ impl Widget for RoomScreen {
                                 list,
                                 item_id,
                                 &tl_state.kind,
+                                self.app_language,
                                 event_tl_item,
                                 profile_change,
                                 item_drawn_status,
@@ -1907,13 +2533,17 @@ impl Widget for RoomScreen {
                                 list,
                                 item_id,
                                 &tl_state.kind,
+                                self.app_language,
                                 event_tl_item,
                                 other,
                                 item_drawn_status,
                             ),
                             unhandled => {
                                 let item = list.item(cx, item_id, id!(SmallStateEvent));
-                                item.label(cx, ids!(content)).set_text(cx, &format!("[Unsupported] {:?}", unhandled));
+                                item.label(cx, ids!(content)).set_text(
+                                    cx,
+                                    &format!("{} {:?}", tr_key(self.app_language, "room_screen.unsupported.prefix"), unhandled),
+                                );
                                 (item, ItemDrawnStatus::both_drawn())
                             }
                         }
@@ -1928,6 +2558,10 @@ impl Widget for RoomScreen {
                         }
                         TimelineItemKind::Virtual(VirtualTimelineItem::ReadMarker) => {
                             let item = list.item(cx, item_id, id!(ReadMarker));
+                            item.label(cx, ids!(date)).set_text(
+                                cx,
+                                tr_key(self.app_language, "room_screen.read_marker.new_messages"),
+                            );
                             (item, ItemDrawnStatus::both_drawn())
                         }
                         TimelineItemKind::Virtual(VirtualTimelineItem::TimelineStart) => {
@@ -1951,11 +2585,16 @@ impl Widget for RoomScreen {
 
             // If the list is not filling the viewport, we need to back paginate the timeline
             // until we have enough events items to fill the viewport.
-            if !tl_state.fully_paginated && !list.is_filling_viewport() {
+            if tl_state.kind.thread_root_event_id().is_none()
+                && !tl_state.fully_paginated
+                && !tl_state.backwards_pagination_in_flight
+                && !list.is_filling_viewport()
+            {
+                tl_state.backwards_pagination_in_flight = true;
                 log!("Automatically paginating timeline to fill viewport for room {:?}", self.room_name_id);
                 submit_async_request(MatrixRequest::PaginateTimeline {
                     timeline_kind: tl_state.kind.clone(),
-                    num_events: 50,
+                    num_events: VIEWPORT_FILL_PAGINATION_SIZE,
                     direction: PaginationDirection::Backwards,
                 });
             }
@@ -1965,6 +2604,19 @@ impl Widget for RoomScreen {
 }
 
 impl RoomScreen {
+    fn set_app_language(&mut self, cx: &mut Cx, app_language: AppLanguage) {
+        self.app_language = app_language;
+        self.app_language_initialized = true;
+        self.sync_app_language(cx);
+    }
+
+    fn sync_app_language(&mut self, cx: &mut Cx) {
+        self.view
+            .label(cx, ids!(top_space.label))
+            .set_text(cx, tr_key(self.app_language, "room_screen.top_space.loading_earlier"));
+        self.view.redraw(cx);
+    }
+
     fn room_id(&self) -> Option<&OwnedRoomId> {
         self.room_name_id.as_ref().map(|r| r.room_id())
     }
@@ -2037,21 +2689,34 @@ impl RoomScreen {
         app_state.bot_settings.is_room_bound(room_id)
     }
 
+    fn send_app_service_feedback_message(&self, message: impl Into<String>) {
+        let Some(room_id) = self.room_id().cloned() else {
+            return;
+        };
+        let message = format!("[App Service] {}", message.into());
+        submit_async_request(MatrixRequest::SendMessage {
+            timeline_kind: TimelineKind::MainRoom { room_id },
+            message: RoomMessageEventContent::notice_plain(message),
+            replied_to: None,
+            target_user_id: None,
+            #[cfg(feature = "tsp")]
+            sign_with_tsp: false,
+        });
+    }
+
     fn send_botfather_command(
         &mut self,
         cx: &mut Cx,
         app_state: &AppState,
         command: &str,
-        success_message: &str,
+        success_message: String,
     ) -> bool {
         let Some(timeline_kind) = self.timeline_kind.clone() else {
             return false;
         };
         if timeline_kind.thread_root_event_id().is_some() {
-            enqueue_popup_notification(
-                "Bot commands are only supported in the main room timeline.",
-                PopupKind::Warning,
-                Some(4.0),
+            self.send_app_service_feedback_message(
+                tr_key(self.app_language, "room_screen.popup.bot.main_timeline_only"),
             );
             return false;
         }
@@ -2060,18 +2725,14 @@ impl RoomScreen {
             return false;
         };
         if !app_state.bot_settings.enabled {
-            enqueue_popup_notification(
-                "Enable App Service before using BotFather commands in a room.",
-                PopupKind::Warning,
-                Some(4.0),
+            self.send_app_service_feedback_message(
+                tr_key(self.app_language, "room_screen.popup.bot.enable_before_commands"),
             );
             return false;
         }
         if !self.is_app_service_room_bound(app_state, &room_id) {
-            enqueue_popup_notification(
-                "Bind BotFather to this room before using BotFather commands.",
-                PopupKind::Warning,
-                Some(4.0),
+            self.send_app_service_feedback_message(
+                tr_key(self.app_language, "room_screen.popup.bot.bind_before_commands"),
             );
             return false;
         }
@@ -2080,11 +2741,15 @@ impl RoomScreen {
             timeline_kind,
             message: RoomMessageEventContent::text_plain(command),
             replied_to: None,
+            target_user_id: app_state
+                .bot_settings
+                .bound_bot_user_id(room_id.as_ref())
+                .map(ToOwned::to_owned),
             #[cfg(feature = "tsp")]
             sign_with_tsp: false,
         });
 
-        enqueue_popup_notification(success_message.to_string(), PopupKind::Info, Some(4.0));
+        self.send_app_service_feedback_message(success_message);
         self.set_app_service_actions_visible(cx, false);
         true
     }
@@ -2101,10 +2766,8 @@ impl RoomScreen {
             return;
         };
         if timeline_kind.thread_root_event_id().is_some() {
-            enqueue_popup_notification(
-                "Bot creation commands are only supported in the main room timeline.",
-                PopupKind::Warning,
-                Some(4.0),
+            self.send_app_service_feedback_message(
+                tr_key(self.app_language, "room_screen.popup.bot.creation_main_timeline_only"),
             );
             return;
         }
@@ -2113,18 +2776,14 @@ impl RoomScreen {
             return;
         };
         if !app_state.bot_settings.enabled {
-            enqueue_popup_notification(
-                "Enable App Service before creating bots in a room.",
-                PopupKind::Warning,
-                Some(4.0),
+            self.send_app_service_feedback_message(
+                tr_key(self.app_language, "room_screen.popup.app_service.enable_before_create"),
             );
             return;
         }
         if !self.is_app_service_room_bound(app_state, &room_id) {
-            enqueue_popup_notification(
-                "Bind BotFather to this room before creating a bot.",
-                PopupKind::Warning,
-                Some(4.0),
+            self.send_app_service_feedback_message(
+                tr_key(self.app_language, "room_screen.popup.app_service.bind_before_create"),
             );
             return;
         }
@@ -2134,7 +2793,7 @@ impl RoomScreen {
             cx,
             app_state,
             &command,
-            &format!("Sent `/createbot` for `{username}` to BotFather."),
+            tr_fmt(self.app_language, "room_screen.popup.bot.sent_createbot", &[("username", username)]),
         ) {
             self.close_create_bot_modal(cx);
         }
@@ -2147,10 +2806,10 @@ impl RoomScreen {
         user_id_or_localpart: &str,
     ) {
         let matrix_user_id =
-            match resolve_delete_bot_user_id(user_id_or_localpart, current_user_id().as_deref()) {
+            match resolve_delete_bot_user_id(user_id_or_localpart, current_user_id().as_deref(), self.app_language) {
                 Ok(user_id) => user_id,
                 Err(error) => {
-                    enqueue_popup_notification(error, PopupKind::Error, Some(4.0));
+                    self.send_app_service_feedback_message(error);
                     return;
                 }
             };
@@ -2160,7 +2819,7 @@ impl RoomScreen {
             cx,
             app_state,
             &command,
-            &format!("Sent `/deletebot` for {matrix_user_id} to BotFather."),
+            tr_fmt(self.app_language, "room_screen.popup.bot.sent_deletebot", &[("matrix_user_id", matrix_user_id.as_str())]),
         ) {
             self.close_delete_bot_modal(cx);
         }
@@ -2419,7 +3078,7 @@ impl RoomScreen {
                     if is_valid {
                         // We successfully found the target event, so we can close the loading pane,
                         // reset the loading panestate to `None`, and stop issuing backwards pagination requests.
-                        loading_pane.set_status(cx, "Successfully found replied-to message!");
+                        loading_pane.set_status(cx, tr_key(self.app_language, "room_screen.loading.found_related_message"));
                         loading_pane.set_state(cx, LoadingPaneState::None);
 
                         // NOTE: this code was copied from the `MessageAction::JumpToRelated` handler;
@@ -2442,7 +3101,7 @@ impl RoomScreen {
                         error!("Target event index {index} of {} is out of bounds for room {}", tl.items.len(), tl.kind.room_id());
                         // Show this error in the loading pane, which should already be open.
                         loading_pane.set_state(cx, LoadingPaneState::Error(
-                            String::from("Unable to find related message; it may have been deleted.")
+                            tr_key(self.app_language, "room_screen.loading.related_message_not_found").to_string()
                         ));
                     }
 
@@ -2453,6 +3112,7 @@ impl RoomScreen {
                 }
                 TimelineUpdate::PaginationRunning(direction) => {
                     if direction == PaginationDirection::Backwards {
+                        tl.backwards_pagination_in_flight = true;
                         top_space.set_visible(cx, true);
                         done_loading = false;
                     } else {
@@ -2460,10 +3120,18 @@ impl RoomScreen {
                     }
                 }
                 TimelineUpdate::PaginationError { error, direction } => {
+                    if direction == PaginationDirection::Backwards {
+                        tl.backwards_pagination_in_flight = false;
+                    }
                     error!("Pagination error ({direction}) in {:?}: {error:?}", self.room_name_id);
                     let room_name = self.room_name_id.as_ref().map(|r| r.to_string());
                     enqueue_popup_notification(
-                        utils::stringify_pagination_error(&error, room_name.as_deref().unwrap_or(UNNAMED_ROOM)),
+                        utils::stringify_pagination_error(
+                            &error,
+                            room_name
+                                .as_deref()
+                                .unwrap_or(tr_key(self.app_language, "room_screen.fallback.unnamed_room")),
+                        ),
                         PopupKind::Error,
                         Some(10.0),
                     );
@@ -2471,6 +3139,7 @@ impl RoomScreen {
                 }
                 TimelineUpdate::PaginationIdle { fully_paginated, direction } => {
                     if direction == PaginationDirection::Backwards {
+                        tl.backwards_pagination_in_flight = false;
                         // Don't set `done_loading` to `true` here, because we want to keep the top space visible
                         // (with the "loading" message) until the corresponding `NewItems` update is received.
                         tl.fully_paginated = fully_paginated;
@@ -2552,17 +3221,29 @@ impl RoomScreen {
                 TimelineUpdate::PinResult { result, pin, .. } => {
                     let (message, auto_dismissal_duration, kind) = match &result {
                         Ok(true) => (
-                            format!("Successfully {} event.", if pin { "pinned" } else { "unpinned" }),
+                            if pin {
+                                tr_key(self.app_language, "room_screen.popup.pin.pinned_success").to_string()
+                            } else {
+                                tr_key(self.app_language, "room_screen.popup.pin.unpinned_success").to_string()
+                            },
                             Some(4.0),
                             PopupKind::Success
                         ),
                         Ok(false) => (
-                            format!("Message was already {}.", if pin { "pinned" } else { "unpinned" }),
+                            if pin {
+                                tr_key(self.app_language, "room_screen.popup.pin.already_pinned").to_string()
+                            } else {
+                                tr_key(self.app_language, "room_screen.popup.pin.already_unpinned").to_string()
+                            },
                             Some(4.0),
                             PopupKind::Info
                         ),
                         Err(e) => (
-                            format!("Failed to {} event. Error: {e}", if pin { "pin" } else { "unpin" }),
+                            tr_fmt(self.app_language, if pin {
+                                "room_screen.popup.pin.pin_failed"
+                            } else {
+                                "room_screen.popup.pin.unpin_failed"
+                            }, &[("error", &e.to_string())]),
                             None,
                             PopupKind::Error
                         ),
@@ -2614,9 +3295,10 @@ impl RoomScreen {
         }
 
         if should_continue_backwards_pagination {
+            tl.backwards_pagination_in_flight = true;
             submit_async_request(MatrixRequest::PaginateTimeline {
                 timeline_kind: tl.kind.clone(),
-                num_events: 50,
+                num_events: VIEWPORT_FILL_PAGINATION_SIZE,
                 direction: PaginationDirection::Backwards,
             });
         }
@@ -2684,7 +3366,7 @@ impl RoomScreen {
                 MatrixId::Room(room_id) => {
                     if self.room_name_id.as_ref().is_some_and(|r| r.room_id() == room_id) {
                         enqueue_popup_notification(
-                            "You are already viewing that room.",
+                            tr_key(self.app_language, "room_screen.popup.already_viewing_room"),
                             PopupKind::Info,
                             Some(4.0),
                         );
@@ -2734,7 +3416,7 @@ impl RoomScreen {
                 if let Err(e) = robius_open::Uri::new(&url).open() {
                     error!("Failed to open URL {:?}. Error: {:?}", url, e);
                     enqueue_popup_notification(
-                        format!("Could not open URL: {url}"),
+                        tr_fmt(self.app_language, "room_screen.popup.open_url_failed", &[("url", url.as_str())]),
                         PopupKind::Error,
                         Some(10.0),
                     );
@@ -2749,7 +3431,7 @@ impl RoomScreen {
                 if let Err(e) = robius_open::Uri::new(&url).open() {
                     error!("Failed to open URL {:?}. Error: {:?}", url, e);
                     enqueue_popup_notification(
-                        format!("Could not open URL: {url}"),
+                        tr_fmt(self.app_language, "room_screen.popup.open_url_failed", &[("url", url.as_str())]),
                         PopupKind::Error,
                         Some(10.0),
                     );
@@ -2849,7 +3531,7 @@ impl RoomScreen {
                     }
                     else {
                         enqueue_popup_notification(
-                            "Could not find message in timeline to reply to. Please try again.",
+                            tr_key(self.app_language, "room_screen.popup.message.reply_not_found"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -2872,7 +3554,7 @@ impl RoomScreen {
                     }
                     else {
                         enqueue_popup_notification(
-                            "Could not find message in timeline to edit. Please try again.",
+                            tr_key(self.app_language, "room_screen.popup.message.edit_not_found"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -2900,7 +3582,7 @@ impl RoomScreen {
                     }
                     else {
                         enqueue_popup_notification(
-                            "No recent message available to edit. Please manually select a message to edit.",
+                            tr_key(self.app_language, "room_screen.popup.message.no_recent_editable"),
                             PopupKind::Warning,
                             Some(5.0),
                         );
@@ -2916,7 +3598,7 @@ impl RoomScreen {
                         });
                     } else {
                         enqueue_popup_notification(
-                            "This event cannot be pinned.",
+                            tr_key(self.app_language, "room_screen.popup.message.cannot_pin"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -2932,7 +3614,7 @@ impl RoomScreen {
                         });
                     } else {
                         enqueue_popup_notification(
-                            "This event cannot be unpinned.",
+                            tr_key(self.app_language, "room_screen.popup.message.cannot_unpin"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -2945,7 +3627,7 @@ impl RoomScreen {
                     }
                     else {
                         enqueue_popup_notification(
-                            "Could not find message in timeline to copy text from. Please try again.",
+                            tr_key(self.app_language, "room_screen.popup.message.copy_text_not_found"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -2982,7 +3664,7 @@ impl RoomScreen {
                     }
                     if !success {
                         enqueue_popup_notification(
-                            "Could not find message in timeline to copy HTML from. Please try again.",
+                            tr_key(self.app_language, "room_screen.popup.message.copy_html_not_found"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -3000,7 +3682,7 @@ impl RoomScreen {
                         cx.copy_to_clipboard(&matrix_to_uri.to_string());
                     } else {
                         enqueue_popup_notification(
-                            "Couldn't create permalink to message. Please try again.",
+                            tr_key(self.app_language, "room_screen.popup.message.copy_link_failed"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -3015,7 +3697,7 @@ impl RoomScreen {
                     let Some(tl) = self.tl_state.as_ref() else { continue };
                     let Some(event_tl_item) = Self::find_event_in_timeline(&tl.items, details) else {
                         enqueue_popup_notification(
-                            "Could not find message in timeline to view source.",
+                            tr_key(self.app_language, "room_screen.popup.message.view_source_not_found"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -3039,7 +3721,7 @@ impl RoomScreen {
                     let Some(related_event_id) = details.related_event_id.as_ref() else {
                         error!("BUG: MessageAction::JumpToRelated had no related event ID.\n{details:#?}");
                         enqueue_popup_notification(
-                            "Could not find related message or event in timeline.",
+                            tr_key(self.app_language, "room_screen.popup.message.related_not_found"),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -3075,15 +3757,19 @@ impl RoomScreen {
                         }),
                     );
                 }
+                MessageAction::ShowThreadsPane => {
+                    self.show_threads_pane(cx);
+                }
                 MessageAction::Redact { details, reason } => {
                     let Some(tl) = self.tl_state.as_ref() else { return };
                     let timeline_event_id = details.timeline_event_id.clone();
                     let timeline_kind = tl.kind.clone();
                     let reason = reason.clone();
+                    let app_language = self.app_language;
                     let content = ConfirmationModalContent {
-                        title_text: "Delete Message".into(),
-                        body_text: "Are you sure you want to delete this message? This cannot be undone.".into(),
-                        accept_button_text: Some("Delete".into()),
+                        title_text: tr_key(app_language, "room_screen.modal.delete_message.title").into(),
+                        body_text: tr_key(app_language, "room_screen.modal.delete_message.body").into(),
+                        accept_button_text: Some(tr_key(app_language, "room_screen.modal.delete_message.accept").into()),
                         on_accept_clicked: Some(Box::new(move |_cx| {
                             submit_async_request(MatrixRequest::RedactMessage {
                                 timeline_kind,
@@ -3210,6 +3896,123 @@ impl RoomScreen {
         self.redraw(cx);
     }
 
+    fn show_threads_pane(&mut self, cx: &mut Cx) {
+        self.ensure_threads_state_for_current_room();
+        if !self.threads_pane_state.initialized && !self.threads_pane_state.is_loading {
+            self.request_more_threads(cx, false);
+        }
+        self.refresh_threads_pane(cx);
+        self.threads_sliding_pane(cx, ids!(threads_sliding_pane)).show(cx);
+        self.redraw(cx);
+    }
+
+    fn refresh_threads_pane(&mut self, cx: &mut Cx) {
+        let Some(room_name_id) = self.room_name_id.as_ref() else { return };
+        self.threads_sliding_pane(cx, ids!(threads_sliding_pane)).set_info(
+            cx,
+            ThreadsPaneInfo {
+                room_name: room_name_id.to_string(),
+                entries: self.threads_pane_state.entries.iter()
+                    .map(|entry| ThreadsPaneEntryInfo {
+                        thread_root_event_id: entry.thread_root_event_id.clone(),
+                        title: entry.title.clone(),
+                        subtitle: match entry.reply_count {
+                            1 => String::from("1 reply"),
+                            n => format!("{n} replies"),
+                        },
+                        time: utils::relative_format(entry.timestamp)
+                            .unwrap_or_else(|| String::from("")),
+                        preview: entry.latest_reply_preview.clone().unwrap_or_else(|| String::from("Tap to open thread")),
+                    })
+                    .collect(),
+                status_text: self.threads_pane_state.status_text.clone(),
+                show_entries: !self.threads_pane_state.entries.is_empty(),
+                loading_text: if self.threads_pane_state.entries.is_empty() {
+                    String::from("Loading threads...")
+                } else {
+                    String::from("Loading more threads...")
+                },
+                show_loading: self.threads_pane_state.is_loading,
+            },
+        );
+    }
+
+    fn hide_threads_pane(&mut self, cx: &mut Cx) {
+        self.threads_sliding_pane(cx, ids!(threads_sliding_pane)).hide(cx);
+    }
+
+    fn ensure_threads_state_for_current_room(&mut self) {
+        let Some(room_id) = self.room_id().cloned() else { return };
+        if self.threads_pane_state.room_id.as_ref().is_some_and(|current| current == &room_id) {
+            return;
+        }
+        self.threads_pane_state = ThreadsPaneState {
+            room_id: Some(room_id),
+            status_text: String::from("Loading threads..."),
+            ..Default::default()
+        };
+    }
+
+    fn request_more_threads(&mut self, _cx: &mut Cx, load_more: bool) {
+        self.ensure_threads_state_for_current_room();
+        let Some(room_id) = self.threads_pane_state.room_id.clone() else { return };
+        if self.threads_pane_state.is_loading {
+            return;
+        }
+        let from = if load_more {
+            let Some(from) = self.threads_pane_state.prev_batch_token.clone() else { return };
+            Some(from)
+        } else {
+            None
+        };
+        self.threads_pane_state.is_loading = true;
+        if !self.threads_pane_state.initialized {
+            self.threads_pane_state.status_text = String::from("Loading threads...");
+        }
+        submit_async_request(MatrixRequest::ListRoomThreads {
+            room_id,
+            from,
+        });
+    }
+
+    fn on_threads_loaded(
+        &mut self,
+        cx: &mut Cx,
+        _from: Option<&String>,
+        threads: &[FetchedRoomThread],
+        prev_batch_token: Option<String>,
+    ) {
+        self.threads_pane_state.is_loading = false;
+        self.threads_pane_state.initialized = true;
+        self.threads_pane_state.prev_batch_token = prev_batch_token;
+        self.threads_pane_state.entries.extend_from_slice(threads);
+        self.threads_pane_state.entries.sort_by_key(|entry| u64::from(entry.timestamp.0));
+        self.threads_pane_state.entries.dedup_by(|a, b| a.thread_root_event_id == b.thread_root_event_id);
+        self.threads_pane_state.status_text = if self.threads_pane_state.entries.is_empty() {
+            String::from("No threads yet.")
+        } else {
+            String::new()
+        };
+        self.refresh_threads_pane(cx);
+        self.redraw(cx);
+    }
+
+    fn on_threads_failed(&mut self, cx: &mut Cx, error: &str) {
+        self.threads_pane_state.is_loading = false;
+        self.threads_pane_state.initialized = true;
+        if self.threads_pane_state.entries.is_empty() {
+            self.threads_pane_state.status_text = format!("Failed to load threads.\n\nError: {error}");
+        } else {
+            enqueue_popup_notification(
+                format!("Failed to load more threads.\n\nError: {error}"),
+                PopupKind::Error,
+                Some(5.0),
+            );
+        }
+        self.refresh_threads_pane(cx);
+        self.redraw(cx);
+    }
+
     /// Invoke this when this timeline is being shown,
     /// e.g., when the user navigates to this timeline.
     fn show_timeline(&mut self, cx: &mut Cx) {
@@ -3264,6 +4067,7 @@ impl RoomScreen {
                 room_members: None,
                 // We assume timelines being viewed for the first time haven't been fully paginated.
                 fully_paginated: false,
+                backwards_pagination_in_flight: false,
                 items: Vector::new(),
                 content_drawn_since_last_update: RangeSet::new(),
                 profile_drawn_since_last_update: RangeSet::new(),
@@ -3312,10 +4116,11 @@ impl RoomScreen {
         // when they first open the room, and there might not be any messages yet.
         if is_first_time_being_loaded {
             if !tl_state.fully_paginated {
+                tl_state.backwards_pagination_in_flight = true;
                 log!("Sending a first-time backwards pagination request for {}", tl_state.kind);
                 submit_async_request(MatrixRequest::PaginateTimeline {
                     timeline_kind: tl_state.kind.clone(),
-                    num_events: 50,
+                    num_events: VIEWPORT_FILL_PAGINATION_SIZE,
                     direction: PaginationDirection::Backwards,
                 });
             }
@@ -3514,6 +4319,8 @@ impl RoomScreen {
 
         self.hide_timeline();
         self.reset_app_service_ui(cx);
+        self.hide_threads_pane(cx);
+        self.threads_pane_state = Default::default();
         // Reset the the state of the inner loading pane.
         self.loading_pane(cx, ids!(loading_pane)).take_state();
 
@@ -3622,7 +4429,8 @@ impl RoomScreen {
         if !portal_list.scrolled(actions) { return };
 
         let first_index = portal_list.first_id();
-        if first_index == 0 && tl.last_scrolled_index > 0 {
+        if first_index == 0 && tl.last_scrolled_index > 0 && !tl.backwards_pagination_in_flight {
+            tl.backwards_pagination_in_flight = true;
             log!("Scrolled up from item {} --> 0, sending back pagination request for room {}",
                 tl.last_scrolled_index, tl.kind,
             );
@@ -3659,6 +4467,7 @@ pub struct RoomScreenProps {
     pub room_avatar_url: Option<OwnedMxcUri>,
     pub app_service_enabled: bool,
     pub app_service_room_bound: bool,
+    pub bound_bot_user_id: Option<OwnedUserId>,
 }
 
 
@@ -3820,6 +4629,10 @@ struct TimelineUiState {
     ///
     /// This must be reset to `false` whenever the timeline is fully cleared.
     fully_paginated: bool,
+
+    /// Whether a backwards pagination request has already been submitted
+    /// and is still in flight.
+    backwards_pagination_in_flight: bool,
 
     /// The list of items (events) in this room's timeline that our client currently knows about.
     items: Vector<Arc<TimelineItem>>,
@@ -4004,6 +4817,7 @@ struct FetchedThreadSummary {
     num_replies: u32,
     latest_reply_preview_text: Option<String>,
 }
+
 impl ItemDrawnStatus {
     /// Returns a new `ItemDrawnStatus` with both `profile_drawn` and `content_drawn` set to `false`.
     const fn new() -> Self {
@@ -4031,6 +4845,7 @@ fn populate_message_view(
     list: &mut PortalList,
     item_id: usize,
     timeline_kind: &TimelineKind,
+    app_language: AppLanguage,
     event_tl_item: &EventTimelineItem,
     msg_like_content: &MsgLikeContent,
     prev_event: Option<&Arc<TimelineItem>>,
@@ -4104,6 +4919,7 @@ fn populate_message_view(
                             new_drawn_status.content_drawn = populate_text_message_content(
                                 cx,
                                 &html_or_plaintext_ref,
+                                app_language,
                                 body,
                                 formatted.as_ref(),
                                 Some(&mut link_preview_ref),
@@ -4142,6 +4958,7 @@ fn populate_message_view(
                         new_drawn_status.content_drawn = populate_text_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             body,
                             formatted.as_ref(),
                             Some(&mut link_preview_ref),
@@ -4170,14 +4987,16 @@ fn populate_message_view(
                             }
                         });
                         let formatted = format!(
-                            "<b>Server notice:</b> {}\n\n<i>Notice type:</i>: {}{}{}",
+                            "<b>{}</b> {}\n\n<i>{}</i>: {}{}{}",
+                            tr_key(app_language, "room_screen.server_notice.title"),
                             sn.body,
+                            tr_key(app_language, "room_screen.server_notice.notice_type"),
                             sn.server_notice_type.as_str(),
                             sn.limit_type.as_ref()
-                                .map(|l| format!("\n<i>Limit type:</i> {}", l.as_str()))
+                                .map(|l| format!("\n<i>{}</i> {}", tr_key(app_language, "room_screen.server_notice.limit_type"), l.as_str()))
                                 .unwrap_or_default(),
                             sn.admin_contact.as_ref()
-                                .map(|c| format!("\n<i>Admin contact:</i> {}", c))
+                                .map(|c| format!("\n<i>{}</i> {}", tr_key(app_language, "room_screen.server_notice.admin_contact"), c))
                                 .unwrap_or_default(),
                         );
                         let mut link_preview_ref =
@@ -4185,6 +5004,7 @@ fn populate_message_view(
                         new_drawn_status.content_drawn = populate_text_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             &sn.body,
                             Some(&FormattedBody {
                                 format: MessageFormat::Html,
@@ -4239,6 +5059,7 @@ fn populate_message_view(
                         let link_previews_drawn = populate_text_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             &body,
                             formatted.as_ref(),
                             Some(&mut link_preview_ref),
@@ -4267,6 +5088,7 @@ fn populate_message_view(
                         let is_image_fully_drawn = populate_image_message_content(
                             cx,
                             &text_or_image_ref,
+                            app_language,
                             image_info,
                             image.source.clone(),
                             msg.body(),
@@ -4292,6 +5114,7 @@ fn populate_message_view(
                         let is_location_fully_drawn = populate_location_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             location,
                         );
                         new_drawn_status.content_drawn = is_location_fully_drawn;
@@ -4314,6 +5137,7 @@ fn populate_message_view(
                         new_drawn_status.content_drawn = populate_file_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             file_content,
                         );
                         (item, false)
@@ -4335,6 +5159,7 @@ fn populate_message_view(
                         new_drawn_status.content_drawn = populate_audio_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             audio,
                         );
                         (item, false)
@@ -4356,6 +5181,7 @@ fn populate_message_view(
                         new_drawn_status.content_drawn = populate_video_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             video,
                         );
                         (item, false)
@@ -4372,8 +5198,11 @@ fn populate_message_view(
                         let formatted = FormattedBody {
                             format: MessageFormat::Html,
                             body: format!(
-                                "<i>Sent a <b>verification request</b> to {}.<br>(Supported methods: {})</i>",
-                                verification.to,
+                                "<i>{}<b>{}</b>{}<br>({}: {})</i>",
+                                tr_key(app_language, "room_screen.verification.sent_prefix"),
+                                tr_key(app_language, "room_screen.verification.request"),
+                                tr_fmt(app_language, "room_screen.verification.sent_to_suffix", &[("user_id", verification.to.as_str())]),
+                                tr_key(app_language, "room_screen.verification.supported_methods"),
                                 verification.methods
                                     .iter()
                                     .map(|m| m.as_str())
@@ -4389,6 +5218,7 @@ fn populate_message_view(
                         new_drawn_status.content_drawn = populate_text_message_content(
                             cx,
                             &html_or_plaintext_ref,
+                            app_language,
                             &verification.body,
                             Some(&formatted),
                             Some(&mut link_preview_ref),
@@ -4406,7 +5236,7 @@ fn populate_message_view(
                     } else {
                         item.label(cx, ids!(content.message)).set_text(
                             cx,
-                            &format!("[Unsupported {:?}]", msg_like_content.kind),
+                            &format!("{} {:?}", tr_key(app_language, "room_screen.unsupported.prefix"), msg_like_content.kind),
                         );
                         new_drawn_status.content_drawn = true;
                         (item, false)
@@ -4435,6 +5265,7 @@ fn populate_message_view(
                     let is_image_fully_drawn = populate_image_message_content(
                         cx,
                         &text_or_image_ref,
+                        app_language,
                         Some(Box::new(image_info.clone())),
                         MediaSource::Plain(owned_mxc_url.clone()),
                         body,
@@ -4473,6 +5304,7 @@ fn populate_message_view(
                 new_drawn_status.content_drawn = populate_redacted_message_content(
                     cx,
                     &html_or_plaintext_ref,
+                    app_language,
                     event_tl_item,
                     timeline_kind.room_id(),
                 );
@@ -4487,7 +5319,7 @@ fn populate_message_view(
             } else {
                 item.label(cx, ids!(content.message)).set_text(
                     cx,
-                    &format!("[Unsupported {:?}] ", other),
+                    &format!("{} {:?} ", tr_key(app_language, "room_screen.unsupported.prefix"), other),
                 );
                 new_drawn_status.content_drawn = true;
                 (item, false)
@@ -4512,6 +5344,7 @@ fn populate_message_view(
             cx,
             &item.view(cx, ids!(replied_to_message)),
             timeline_kind,
+            app_language,
             msg_like_content.in_reply_to.as_ref(),
             event_tl_item.event_id(),
         );
@@ -4520,6 +5353,7 @@ fn populate_message_view(
             &item,
             item_id,
             timeline_kind,
+            app_language,
             msg_like_content,
             event_tl_item,
             fetched_thread_summaries,
@@ -4593,7 +5427,7 @@ fn populate_message_view(
             // Server notices are drawn with a red color avatar background and username.
             let avatar = item.avatar(cx, ids!(profile.avatar));
             avatar.show_text(cx, Some(COLOR_FG_DANGER_RED), None, "⚠");
-            username_label.set_text(cx, "Server notice");
+            username_label.set_text(cx, tr_key(app_language, "room_screen.server_notice.username"));
             script_apply_eval!(cx, username_label, {
                 draw_text +: {
                     color: (mod.widgets.COLOR_FG_DANGER_RED)
@@ -4663,6 +5497,7 @@ fn populate_message_view(
 fn populate_text_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
+    app_language: AppLanguage,
     body: &str,
     formatted_body: Option<&FormattedBody>,
     link_preview_ref: Option<&mut LinkPreviewRef>,
@@ -4699,7 +5534,17 @@ fn populate_text_message_content(
             &links,
             media_cache,
             link_preview_cache,
-            &populate_image_message_content,
+            &|cx, text_or_image_ref, image_info_source, original_source, body, media_cache| {
+                populate_image_message_content(
+                    cx,
+                    text_or_image_ref,
+                    app_language,
+                    image_info_source,
+                    original_source,
+                    body,
+                    media_cache,
+                )
+            },
         )
     } else {
         true
@@ -4712,6 +5557,7 @@ fn populate_text_message_content(
 fn populate_image_message_content(
     cx: &mut Cx,
     text_or_image_ref: &TextOrImageRef,
+    app_language: AppLanguage,
     image_info_source: Option<Box<ImageInfo>>,
     original_source: MediaSource,
     body: &str,
@@ -4729,7 +5575,7 @@ fn populate_image_message_content(
         if ImageFormat::from_mimetype(mime).is_none() {
             text_or_image_ref.show_text(
                 cx,
-                format!("{body}\n\nUnsupported type {mime:?}"),
+                tr_fmt(app_language, "room_screen.image.unsupported_type", &[("body", body), ("mime", mime)]),
             );
             return true; // consider this as fully drawn
         }
@@ -4747,7 +5593,7 @@ fn populate_image_message_content(
                         .map(|()| img.size_in_pixels(cx).unwrap_or_default())
                 });
                 if let Err(e) = show_image_result {
-                    let err_str = format!("{body}\n\nFailed to display image: {e:?}");
+                    let err_str = tr_fmt(app_language, "room_screen.image.failed_to_display", &[("body", body), ("error", &format!("{e:?}"))]);
                     error!("{err_str}");
                     text_or_image_ref.show_text(cx, &err_str);
                 }
@@ -4795,7 +5641,7 @@ fn populate_image_message_content(
                         }
                     });
                     if let Err(e) = show_image_result {
-                        let err_str = format!("{body}\n\nFailed to display image: {e:?}");
+                        let err_str = tr_fmt(app_language, "room_screen.image.failed_to_display", &[("body", body), ("error", &format!("{e:?}"))]);
                         error!("{err_str}");
                         text_or_image_ref.show_text(cx, &err_str);
                     }
@@ -4808,7 +5654,7 @@ fn populate_image_message_content(
                     return;
                 }
                 text_or_image_ref
-                    .show_text(cx, format!("{body}\n\nFailed to fetch image from {:?}", mxc_uri));
+                    .show_text(cx, tr_fmt(app_language, "room_screen.image.failed_to_fetch", &[("body", body), ("mxc_uri", &format!("{mxc_uri:?}"))]));
                 // For now, we consider this as being "complete". In the future, we could support
                 // retrying to fetch thumbnail of the image on a user click/tap.
                 fully_drawn = true;
@@ -4822,7 +5668,7 @@ fn populate_image_message_content(
                 // We consider this as "fully drawn" since we don't yet support encryption.
                 text_or_image_ref.show_text(
                     cx,
-                    format!("{body}\n\n[TODO] fetch encrypted image at {:?}", encrypted.url)
+                    tr_fmt(app_language, "room_screen.image.encrypted_todo", &[("body", body), ("url", &format!("{:?}", encrypted.url))])
                 );
             },
             MediaSource::Plain(mxc_uri) => {
@@ -4839,7 +5685,7 @@ fn populate_image_message_content(
             fetch_and_show_media_source(cx, media_source, image_info);
         }
         None => {
-            text_or_image_ref.show_text(cx, "{body}\n\nImage message had no source URL.");
+            text_or_image_ref.show_text(cx, tr_fmt(app_language, "room_screen.image.no_source_url", &[("body", body)]));
             fully_drawn = true;
         }
     }
@@ -4854,6 +5700,7 @@ fn populate_image_message_content(
 fn populate_file_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
+    app_language: AppLanguage,
     file_content: &FileMessageEventContent,
 ) -> bool {
     // Display the file name, human-readable size, caption, and a button to download it.
@@ -4873,7 +5720,11 @@ fn populate_file_message_content(
 
     message_content_widget.show_html(
         cx,
-        format!("<b>{filename}</b>{size}{caption}<br> → <i>File download not yet supported.</i>"),
+        tr_fmt(app_language, "room_screen.file.preview_html", &[
+            ("filename", &filename),
+            ("size", size.as_str()),
+            ("caption", caption.as_str()),
+        ]),
     );
     true
 }
@@ -4884,6 +5735,7 @@ fn populate_file_message_content(
 fn populate_audio_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
+    app_language: AppLanguage,
     audio: &AudioMessageEventContent,
 ) -> bool {
     // Display the file name, human-readable size, caption, and a button to download it.
@@ -4913,7 +5765,13 @@ fn populate_audio_message_content(
 
     message_content_widget.show_html(
         cx,
-        format!("Audio: <b>{filename}</b>{mime}{duration}{size}{caption}<br> → <i>Audio playback not yet supported.</i>"),
+        tr_fmt(app_language, "room_screen.audio.preview_html", &[
+            ("filename", &filename),
+            ("mime", mime.as_str()),
+            ("duration", duration.as_str()),
+            ("size", size.as_str()),
+            ("caption", caption.as_str()),
+        ]),
     );
     true
 }
@@ -4925,6 +5783,7 @@ fn populate_audio_message_content(
 fn populate_video_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
+    app_language: AppLanguage,
     video: &VideoMessageEventContent,
 ) -> bool {
     // Display the file name, human-readable size, caption, and a button to download it.
@@ -4957,7 +5816,14 @@ fn populate_video_message_content(
 
     message_content_widget.show_html(
         cx,
-        format!("Video: <b>{filename}</b>{mime}{duration}{size}{dimensions}{caption}<br> → <i>Video playback not yet supported.</i>"),
+        tr_fmt(app_language, "room_screen.video.preview_html", &[
+            ("filename", &filename),
+            ("mime", mime.as_str()),
+            ("duration", duration.as_str()),
+            ("size", size.as_str()),
+            ("dimensions", dimensions.as_str()),
+            ("caption", caption.as_str()),
+        ]),
     );
     true
 }
@@ -4970,6 +5836,7 @@ fn populate_video_message_content(
 fn populate_location_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
+    app_language: AppLanguage,
     location: &LocationMessageEventContent,
 ) -> bool {
     let coords = location.geo_uri
@@ -4991,19 +5858,26 @@ fn populate_location_message_content(
         let safe_short_lat = htmlize::escape_text(short_lat);
         let safe_short_long = htmlize::escape_text(short_long);
         let html_body = format!(
-            "Location: <a href=\"{}\">{safe_short_lat},{safe_short_long}</a><br>\
+            "{} <a href=\"{}\">{safe_short_lat},{safe_short_long}</a><br>\
             <ul>\
-            <li><a href=\"https://www.openstreetmap.org/?mlat={safe_lat}&amp;mlon={safe_long}#map=15/{safe_lat}/{safe_long}\">Open in OpenStreetMap</a></li>\
-            <li><a href=\"https://www.google.com/maps/search/?api=1&amp;query={safe_lat},{safe_long}\">Open in Google Maps</a></li>\
-            <li><a href=\"https://maps.apple.com/?ll={safe_lat},{safe_long}&amp;q={safe_lat},{safe_long}\">Open in Apple Maps</a></li>\
+            <li><a href=\"https://www.openstreetmap.org/?mlat={safe_lat}&amp;mlon={safe_long}#map=15/{safe_lat}/{safe_long}\">{}</a></li>\
+            <li><a href=\"https://www.google.com/maps/search/?api=1&amp;query={safe_lat},{safe_long}\">{}</a></li>\
+            <li><a href=\"https://maps.apple.com/?ll={safe_lat},{safe_long}&amp;q={safe_lat},{safe_long}\">{}</a></li>\
             </ul>",
+            tr_key(app_language, "room_screen.location.label"),
             safe_geo_uri,
+            tr_key(app_language, "room_screen.location.open_osm"),
+            tr_key(app_language, "room_screen.location.open_google_maps"),
+            tr_key(app_language, "room_screen.location.open_apple_maps"),
         );
         message_content_widget.show_html(cx, html_body);
     } else {
+        let escaped_body = htmlize::escape_text(&location.body);
         message_content_widget.show_html(
             cx,
-            format!("<i>[Location invalid]</i> {}", htmlize::escape_text(&location.body))
+            tr_fmt(app_language, "room_screen.location.invalid_html", &[
+                ("body", &escaped_body),
+            ])
         );
     }
 
@@ -5020,6 +5894,7 @@ fn populate_location_message_content(
 fn populate_redacted_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
+    app_language: AppLanguage,
     event_tl_item: &EventTimelineItem,
     room_id: &OwnedRoomId,
 ) -> bool {
@@ -5044,8 +5919,13 @@ fn populate_redacted_message_content(
         if redactor == event_tl_item.sender() {
             fully_drawn = true;
             match reason {
-                Some(r) => format!("⛔ <i>Deleted their own message. Reason: \"{}\".</i>", htmlize::escape_text(r)),
-                None => String::from("⛔ <i>Deleted their own message.</i>"),
+                Some(r) => {
+                    let escaped_reason = htmlize::escape_text(r);
+                    tr_fmt(app_language, "room_screen.redacted.self_with_reason", &[
+                        ("reason", &escaped_reason),
+                    ])
+                }
+                None => tr_key(app_language, "room_screen.redacted.self").to_string(),
             }
         } else {
             // Try to get the displayable name of the user who redacted this message.
@@ -5058,16 +5938,21 @@ fn populate_redacted_message_content(
             fully_drawn = redactor_name.was_found();
             let redactor_name_esc = htmlize::escape_text(redactor_name.as_deref().unwrap_or(redactor.as_str()));
             match reason {
-                Some(r) => format!("⛔ <i>{} deleted this message. Reason: \"{}\".</i>",
-                    redactor_name_esc,
-                    htmlize::escape_text(r),
-                ),
-                None => format!("⛔ <i>{} deleted this message.</i>", redactor_name_esc),
+                Some(r) => {
+                    let escaped_reason = htmlize::escape_text(r);
+                    tr_fmt(app_language, "room_screen.redacted.other_with_reason", &[
+                        ("redactor", &redactor_name_esc),
+                        ("reason", &escaped_reason),
+                    ])
+                }
+                None => tr_fmt(app_language, "room_screen.redacted.other", &[
+                    ("redactor", &redactor_name_esc),
+                ]),
             }
         }
     } else {
         fully_drawn = true;
-        String::from("⛔ <i>Message deleted.</i>")
+        tr_key(app_language, "room_screen.redacted.generic").to_string()
     };
     message_content_widget.show_html(cx, html);
     fully_drawn
@@ -5090,6 +5975,7 @@ fn draw_replied_to_message(
     cx: &mut Cx2d,
     replied_to_message_view: &ViewRef,
     timeline_kind: &TimelineKind,
+    app_language: AppLanguage,
     in_reply_to: Option<&InReplyToDetails>,
     message_event_id: Option<&EventId>,
 ) -> bool {
@@ -5121,6 +6007,7 @@ fn draw_replied_to_message(
                 populate_preview_of_timeline_item(
                     cx,
                     &msg_body,
+                    app_language,
                     &replied_to_event.content,
                     &replied_to_event.sender,
                     &in_reply_to_username,
@@ -5130,26 +6017,26 @@ fn draw_replied_to_message(
                 fully_drawn = true;
                 replied_to_message_view
                     .label(cx, ids!(replied_to_message_content.reply_preview_username))
-                    .set_text(cx, "[Error fetching username]");
+                    .set_text(cx, tr_key(app_language, "room_screen.reply_preview.error_username"));
                 replied_to_message_view
                     .avatar(cx, ids!(replied_to_message_content.reply_preview_avatar))
                     .show_text(cx, None, None, "?");
                 replied_to_message_view
                     .html_or_plaintext(cx, ids!(replied_to_message_content.reply_preview_body))
-                    .show_plaintext(cx, "[Error fetching replied-to event]");
+                    .show_plaintext(cx, tr_key(app_language, "room_screen.reply_preview.error_event"));
             }
             td @ TimelineDetails::Pending | td @ TimelineDetails::Unavailable => {
                 // We don't have the replied-to message yet, so we can't fully draw the preview.
                 fully_drawn = false;
                 replied_to_message_view
                     .label(cx, ids!(replied_to_message_content.reply_preview_username))
-                    .set_text(cx, "[Loading username...]");
+                    .set_text(cx, tr_key(app_language, "room_screen.reply_preview.loading_username"));
                 replied_to_message_view
                     .avatar(cx, ids!(replied_to_message_content.reply_preview_avatar))
                     .show_text(cx, None, None, "?");
                 replied_to_message_view
                     .html_or_plaintext(cx, ids!(replied_to_message_content.reply_preview_body))
-                    .show_plaintext(cx, "[Loading replied-to message...]");
+                    .show_plaintext(cx, tr_key(app_language, "room_screen.reply_preview.loading_event"));
 
                 // Confusingly, we need to fetch the details of the `message` (the event that is the reply),
                 // not the details of the original event that this `message` is replying to.
@@ -5182,6 +6069,7 @@ fn populate_thread_root_summary(
     item: &WidgetRef,
     timeline_item_index: usize,
     timeline_kind: &TimelineKind,
+    app_language: AppLanguage,
     msg_like_content: &MsgLikeContent,
     event_tl_item: &EventTimelineItem,
     fetched_thread_summaries: &HashMap<OwnedEventId, FetchedThreadSummary>,
@@ -5251,18 +6139,18 @@ fn populate_thread_root_summary(
                 }
             }
             fetched_summary.and_then(|fs| fs.latest_reply_preview_text.as_deref())
-                .unwrap_or("<i>Loading latest reply...</i>")
+                .unwrap_or(tr_key(app_language, "room_screen.thread_summary.loading_latest_reply"))
                 .into()
         }
         TimelineDetails::Error(_) => {
             fully_drawn = true; // consider this fully drawn since there's no point retrying.
-            "<i>Unable to load latest reply</i>".into()
+            tr_key(app_language, "room_screen.thread_summary.error_latest_reply").into()
         }
     };
 
     let replies_count_text = match replies_count {
-        1 => Cow::Borrowed("1 reply"),
-        n => Cow::Owned(format!("{n} replies"))
+        1 => Cow::Borrowed(tr_key(app_language, "room_screen.thread_summary.one_reply")),
+        n => Cow::Owned(tr_fmt(app_language, "room_screen.thread_summary.n_replies", &[("n", &n.to_string())]))
     };
     item.label(cx, ids!(thread_summary_count))
         .set_text(cx, &replies_count_text);
@@ -5276,6 +6164,7 @@ fn populate_thread_root_summary(
 pub fn populate_preview_of_timeline_item(
     cx: &mut Cx,
     widget_out: &HtmlOrPlaintextRef,
+    app_language: AppLanguage,
     timeline_item_content: &TimelineItemContent,
     sender_user_id: &UserId,
     sender_username: &str,
@@ -5284,7 +6173,7 @@ pub fn populate_preview_of_timeline_item(
         match m.msgtype() {
             MessageType::Text(TextMessageEventContent { body, formatted, .. })
             | MessageType::Notice(NoticeMessageEventContent { body, formatted, .. }) => {
-                let _ = populate_text_message_content(cx, widget_out, body, formatted.as_ref(), None, None, None);
+                let _ = populate_text_message_content(cx, widget_out, app_language, body, formatted.as_ref(), None, None, None);
                 return;
             }
             _ => { } // fall through to the general case for all timeline items below.
@@ -5488,6 +6377,7 @@ fn populate_small_state_event(
     list: &mut PortalList,
     item_id: usize,
     timeline_kind: &TimelineKind,
+    app_language: AppLanguage,
     event_tl_item: &EventTimelineItem,
     event_content: &impl SmallStateEventContent,
     item_drawn_status: ItemDrawnStatus,
@@ -5530,7 +6420,7 @@ fn populate_small_state_event(
     });
 
     // Proceed to draw the actual event content.
-    event_content.populate_item_content(
+    let (item, new_drawn_status) = event_content.populate_item_content(
         cx,
         list,
         item_id,
@@ -5539,7 +6429,12 @@ fn populate_small_state_event(
         &username,
         item_drawn_status,
         new_drawn_status,
-    )
+    );
+
+    item.button(cx, ids!(invite_user_button))
+        .set_text(cx, tr_key(app_language, "room_screen.small_state.invite_to_room"));
+
+    (item, new_drawn_status)
 }
 
 
@@ -5654,6 +6549,7 @@ pub enum MessageAction {
     ActionBarClose,
     /// The user requested toggling the in-room app service quick actions card.
     ToggleAppServiceActions,
+    ShowThreadsPane,
     #[default]
     None,
 }
@@ -5672,6 +6568,7 @@ pub enum AppServicePanelAction {
     OpenDeleteBotModal,
     SendListBots,
     SendBotHelp,
+    ShowBoundBots,
     Unbind,
     #[default]
     None,
@@ -5687,10 +6584,18 @@ impl ActionDefaultRef for AppServicePanelAction {
 #[derive(Script, ScriptHook, Widget)]
 pub struct AppServicePanel {
     #[deref] view: View,
+    #[rust] app_language: AppLanguage,
+    #[rust] app_language_initialized: bool,
 }
 
 impl Widget for AppServicePanel {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        let app_language = scope.data.get::<AppState>()
+            .map(|app_state| app_state.app_language)
+            .unwrap_or_default();
+        if !self.app_language_initialized || self.app_language != app_language {
+            self.set_app_language(cx, app_language);
+        }
         self.view.handle_event(cx, event, scope);
 
         let room_screen_props = scope
@@ -5756,6 +6661,17 @@ impl Widget for AppServicePanel {
 
             if self
                 .view
+                .button(cx, ids!(keyboard.third_row.view_bound_button))
+                .clicked(actions)
+            {
+                cx.widget_action(
+                    room_screen_props.room_screen_widget_uid,
+                    AppServicePanelAction::ShowBoundBots,
+                );
+            }
+
+            if self
+                .view
                 .button(cx, ids!(keyboard.third_row.unbind_button))
                 .clicked(actions)
             {
@@ -5768,7 +6684,51 @@ impl Widget for AppServicePanel {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let app_language = scope.data.get::<AppState>()
+            .map(|app_state| app_state.app_language)
+            .unwrap_or_default();
+        if !self.app_language_initialized || self.app_language != app_language {
+            self.set_app_language(cx, app_language);
+        }
         self.view.draw_walk(cx, scope, walk)
+    }
+}
+
+impl AppServicePanel {
+    fn set_app_language(&mut self, cx: &mut Cx, app_language: AppLanguage) {
+        self.app_language = app_language;
+        self.app_language_initialized = true;
+        self.view
+            .label(cx, ids!(sender_row.sender_name))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.sender_name"));
+        self.view
+            .label(cx, ids!(sender_row.sender_tag))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.sender_tag"));
+        self.view
+            .label(cx, ids!(bubble.header.title))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.title"));
+        self.view
+            .label(cx, ids!(bubble.subtitle))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.subtitle"));
+        self.view
+            .label(cx, ids!(bubble.footer.timestamp))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.timestamp_now"));
+        self.view
+            .button(cx, ids!(keyboard.first_row.create_button))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.button.create_bot"));
+        self.view
+            .button(cx, ids!(keyboard.first_row.list_button))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.button.list_bots"));
+        self.view
+            .button(cx, ids!(keyboard.second_row.delete_button))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.button.delete_bot"));
+        self.view
+            .button(cx, ids!(keyboard.second_row.help_button))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.button.bot_help"));
+        self.view
+            .button(cx, ids!(keyboard.third_row.unbind_button))
+            .set_text(cx, tr_key(self.app_language, "room_screen.app_service.button.unbind"));
+        self.view.redraw(cx);
     }
 }
 

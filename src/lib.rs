@@ -42,6 +42,8 @@ pub mod app;
 pub mod persistence;
 /// The settings screen and settings-related content/widgets.
 pub mod settings;
+/// App-localized text and language preference definitions.
+pub mod i18n;
 
 /// Login screen
 pub mod login;
@@ -78,6 +80,8 @@ pub mod media_cache;
 pub mod verification;
 
 pub mod utils;
+/// Multi-account management for supporting multiple Matrix accounts simultaneously.
+pub mod account_manager;
 pub mod temp_storage;
 pub mod location;
 

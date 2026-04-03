@@ -34,9 +34,9 @@ use crate::{
     avatar_cache::{self, AvatarCacheEntry}, login::login_screen::LoginAction, logout::logout_confirm_modal::LogoutAction, profile::{
         user_profile::UserProfile,
         user_profile_cache::{self, UserProfileUpdate},
-    }, shared::{
+    }, home::spaces_bar::SpacesBarWidgetExt, shared::{
         avatar::{AvatarState, AvatarWidgetExt}, styles::*, verification_badge::VerificationBadgeWidgetExt
-    }, sliding_sync::{current_user_id, AccountDataAction}, utils::{self, RoomNameId}
+    }, sliding_sync::{current_user_id, AccountDataAction, AccountSwitchAction}, utils::{self, RoomNameId}
 };
 
 script_mod! {
@@ -289,6 +289,13 @@ impl Widget for ProfileIcon {
                     continue;
                 }
 
+                // Handle account switch - refresh profile with new account's data
+                if let Some(AccountSwitchAction::Switched(_new_user_id)) = action.downcast_ref() {
+                    self.own_profile = get_own_profile(cx);
+                    self.view.redraw(cx);
+                    continue;
+                }
+
                 // Handle account data changes (e.g., avatar updated/removed)
                 match action.downcast_ref() {
                     Some(AccountDataAction::AvatarChanged(None)) => {
@@ -425,6 +432,7 @@ impl ScriptHook for NavigationTabBar {
             if let Some(mut rb) = self.view.radio_button(cx, ids!(home_button)).borrow_mut() {
                 rb.animator_play(cx, ids!(active.on));
             }
+            cx.set_global(self.view.spaces_bar(cx, ids!(root_spaces_bar)));
         });
     }
 }
