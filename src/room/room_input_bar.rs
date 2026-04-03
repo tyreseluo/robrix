@@ -109,6 +109,33 @@ script_mod! {
                     spacing: 6
                     align: Align{x: 0.0, y: 0.5}
 
+                    room_info_card_button := RobrixIconButton {
+                        width: Fit
+                        align: Align{x: 0.0, y: 0.5}
+                        margin: Inset{top: 1, bottom: 1}
+                        padding: Inset{left: 10, right: 10, top: 8, bottom: 8}
+                        spacing: 8
+                        draw_icon +: {
+                            svg: (ICON_INFO)
+                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
+                        },
+                        draw_bg +: {
+                            color: (COLOR_BG_PREVIEW)
+                            color_hover: #E0E8F0
+                            color_down: #D0D8E8
+                            border_size: 1.0
+                            border_color: (COLOR_SECONDARY)
+                        }
+                        draw_text +: {
+                            color: (COLOR_TEXT)
+                            color_hover: (COLOR_TEXT)
+                            color_down: (COLOR_TEXT)
+                            text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                        }
+                        icon_walk: Walk{width: 20, height: 20}
+                        text: "room info",
+                    }
+
                     location_card_button := RobrixIconButton {
                         width: Fit
                         align: Align{x: 0.0, y: 0.5}
@@ -450,6 +477,14 @@ impl RoomInputBar {
             cx.widget_action(
                 room_screen_props.room_screen_widget_uid,
                 MessageAction::ShowThreadsPane,
+            );
+            self.redraw(cx);
+        }
+
+        if self.button(cx, ids!(room_info_card_button)).clicked(actions) {
+            cx.widget_action(
+                room_screen_props.room_screen_widget_uid,
+                MessageAction::ShowRoomInfoPane,
             );
             self.redraw(cx);
         }
