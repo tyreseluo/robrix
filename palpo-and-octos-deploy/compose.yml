@@ -61,7 +61,6 @@ services:
       - ./palpo.toml:/var/palpo/palpo.toml:ro
       - ./appservices:/var/palpo/appservices:ro
       - ./data/media:/var/palpo/media
-      - ./static:/var/palpo/static:ro
     depends_on:
       palpo_postgres:
         condition: service_healthy
