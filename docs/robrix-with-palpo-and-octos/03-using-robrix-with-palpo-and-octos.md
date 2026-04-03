@@ -14,6 +14,7 @@ This guide walks you through using Robrix as a Matrix client connected to a Palp
 | Create an account | [Section 3](#3-registration) |
 | Chat with the AI bot | [Section 5](#5-chatting-with-the-ai-bot) |
 | Create specialized bots | [Section 6](#6-bot-management-advanced) |
+| Bot commands and public/private bots | [Section 7](#7-octos-bot-commands-and-behavior) |
 
 ---
 
@@ -175,7 +176,65 @@ After creating a child bot, use it like the main bot:
 
 ---
 
-## 7. Tips and Common Patterns
+## 7. Octos Bot Commands and Behavior
+
+Octos bots support a small set of slash commands that you type directly in the chat room. In this guide, we focus on the main BotFather management commands and the public/private visibility model for child bots.
+
+### 7.1 BotFather Management Commands
+
+These commands only work when sent to the BotFather bot (`@octosbot`). Child bots do not respond to them.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `/createbot <username> <display_name> [flags]` | Create a new child bot. Flags: `--public` or `--private` (default), `--prompt "..."` for system prompt. | `/createbot weather Weather Bot --public --prompt "You are a weather assistant"` |
+| `/deletebot <matrix_user_id>` | Delete a child bot. Only the bot's creator (or the operator) can delete it. | `/deletebot @octosbot_weather:127.0.0.1:8128` |
+| `/listbots` | List all public bots plus your own private bots. | `/listbots` |
+| `/bothelp` | Show help text for bot management commands. | `/bothelp` |
+
+> **Note:** You can also create bots through Robrix's UI (Section 6.2), which provides a form-based alternative to these slash commands.
+
+### 7.2 BotFather vs Child Bots
+
+BotFather and child bots serve different roles:
+
+| | BotFather (`@octosbot`) | Child Bot (`@octosbot_<name>`) |
+|---|---|---|
+| **Role** | Management gateway + general AI chat | Specialized AI assistant |
+| **Bot management commands** | Yes (`/createbot`, `/deletebot`, `/listbots`) | No |
+| **Custom system prompt** | Uses default prompt | Has its own dedicated prompt |
+| **Can create other bots** | Yes | No |
+| **Matrix user ID** | `@octosbot:server_name` | `@octosbot_<username>:server_name` |
+
+**When to use which:**
+- Use **BotFather** for general-purpose AI chat and for managing (creating/deleting) other bots.
+- Use **child bots** when you need a dedicated assistant for a specific task (translation, coding help, writing review, etc.) with a fixed system prompt.
+
+### 7.3 Public vs Private Bots
+
+When creating a child bot, you can set its **visibility**:
+
+- **Private (default):** Only the creator can invite and chat with this bot. Other users cannot discover it via `/listbots`, and if they try to invite it, the bot will join briefly, send a rejection message, then leave the room.
+- **Public:** Any user on the server can discover the bot via `/listbots`, invite it to rooms, and chat with it.
+
+**Creating a private bot (default):**
+```
+/createbot myhelper My Helper --prompt "You are my personal assistant"
+```
+
+**Creating a public bot:**
+```
+/createbot translator Translator Bot --public --prompt "Translate all messages to English"
+```
+
+**Who can delete a bot:**
+- The **creator** (owner) of the bot can always delete it.
+- The **operator** (anyone in `allowed_senders` in `botfather.json`) can delete any bot as an override.
+
+> **Tip:** Start with private bots for personal use. Make a bot public only when you want other users on the server to use it.
+
+---
+
+## 8. Tips
 
 - **Multiple bots in one room.** You can invite several bots into the same room. Each bot responds independently based on its own system prompt. This is useful for comparing outputs or building multi-agent workflows.
 
@@ -193,7 +252,7 @@ After creating a child bot, use it like the main bot:
 
 ---
 
-## 8. Common Matrix IDs Reference
+## 9. Common Matrix IDs Reference
 
 For a local deployment with `server_name = 127.0.0.1:8128`:
 
