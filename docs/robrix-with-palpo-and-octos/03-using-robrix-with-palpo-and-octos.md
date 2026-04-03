@@ -37,7 +37,7 @@ When you open Robrix, the login screen appears. By default, Robrix connects to `
 2. Enter `http://127.0.0.1:8128` for a local deployment.
 3. For a remote server, enter `https://your.server.name` or `http://server-ip:8128`.
 
-<!-- screenshot: login-homeserver.png — Robrix login screen with Homeserver URL field highlighted at the bottom -->
+![Robrix login screen — enter your Homeserver URL at the bottom](../images/login-screen.png)
 
 > **Note:** If the Homeserver URL field is left empty, Robrix connects to `matrix.org` by default. You must fill it in to reach your own Palpo server.
 
@@ -94,7 +94,20 @@ This is the main workflow: create a room, invite the bot, and start a conversati
 
 <!-- screenshot: invite-bot.png — Invite dialog with @octosbot:127.0.0.1:8128 entered -->
 
-> **Tip:** If you deployed with a different `server_name`, replace `127.0.0.1:8128` in the bot ID accordingly. For example, on a server with `server_name = chat.example.com`, the bot ID would be `@octosbot:chat.example.com`.
+> **How is this bot name determined?** The BotFather's Matrix ID is assembled from two config values:
+>
+> | Part | Value | Configured in |
+> |------|-------|---------------|
+> | Username (localpart) | `octosbot` | `sender_localpart` in `octos-registration.yaml` and `botfather.json` |
+> | Server domain | `127.0.0.1:8128` | `server_name` in `palpo.toml` |
+> | **Full Matrix ID** | **`@octosbot:127.0.0.1:8128`** | |
+> | Display name (shown in rooms) | `BotFather` | `name` in `botfather.json` |
+>
+> Child bots created via `/createbot` follow a similar pattern. The `user_prefix` field in `botfather.json` (default: `octosbot_`) is automatically prepended to the username you specify:
+>
+> `/createbot weather Weather Bot` → Matrix ID: `@octosbot_weather:127.0.0.1:8128`
+>
+> If you change `server_name` in production, all bot IDs change accordingly. You must also update the namespace regex in `octos-registration.yaml` to match.
 
 ### 5.3 Start Chatting
 

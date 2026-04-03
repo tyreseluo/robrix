@@ -125,7 +125,7 @@ palpo-and-octos-deploy/
 ├── setup.sh                            # One-time setup script
 ├── .env.example                        # Environment variables template
 ├── palpo.toml                          # Palpo homeserver configuration
-├── palpo.Dockerfile                    # Palpo build instructions (multi-arch)
+├── palpo.Dockerfile                    # Palpo Docker build (multi-stage, release)
 ├── appservices/
 │   └── octos-registration.yaml         # Appservice registration (links Palpo <-> Octos)
 ├── config/

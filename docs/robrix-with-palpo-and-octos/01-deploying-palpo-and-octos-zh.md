@@ -125,7 +125,7 @@ palpo-and-octos-deploy/
 ├── setup.sh                            # 一次性初始化脚本
 ├── .env.example                        # 环境变量模板
 ├── palpo.toml                          # Palpo 主服务器配置
-├── palpo.Dockerfile                    # Palpo 构建指令（多架构支持）
+├── palpo.Dockerfile                    # Palpo Docker 构建（多阶段，release 模式）
 ├── appservices/
 │   └── octos-registration.yaml         # 应用服务注册文件（连接 Palpo <-> Octos）
 ├── config/

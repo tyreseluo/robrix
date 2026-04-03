@@ -6,12 +6,6 @@
 
 Robrix 是一个用 Rust 编写的跨平台 Matrix 聊天客户端，基于 [Makepad](https://github.com/makepad/makepad/) UI 框架。原生运行在 macOS、Linux、Windows、Android 和 iOS 上。
 
----
-
-## 下载预编译版本（推荐）
-
-从 [Robrix 发布页面](https://github.com/Project-Robius-China/robrix2/releases) 下载最新版本。支持 macOS、Linux 和 Windows。
-
 ## 从源码构建
 
 ### 前提条件
@@ -39,6 +33,8 @@ Android 和 iOS 构建方法请参考 [Robrix README — 构建与运行](https:
 ## 连接 Matrix 服务器
 
 启动 Robrix 后，登录界面底部有一个 **Homeserver URL** 输入框。
+
+![Robrix 登录界面](../images/login-screen.png)
 
 - **留空** 默认连接 `matrix.org`（公共服务器）
 - **输入自定义 URL** 连接其他 Matrix 兼容服务器：

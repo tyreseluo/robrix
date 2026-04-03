@@ -40,6 +40,8 @@ For Android and iOS builds, see the [Robrix README — Building & Running](https
 
 When you launch Robrix, you'll see the login screen with a **Homeserver URL** field at the bottom.
 
+![Robrix login screen](../images/login-screen.png)
+
 - **Leave it empty** to connect to `matrix.org` (the default public server)
 - **Enter a custom URL** to connect to any Matrix-compatible server:
   - Local Palpo instance: `http://127.0.0.1:8128`
