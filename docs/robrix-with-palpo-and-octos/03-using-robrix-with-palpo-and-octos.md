@@ -37,7 +37,7 @@ When you open Robrix, the login screen appears. By default, Robrix connects to `
 2. Enter `http://127.0.0.1:8128` for a local deployment.
 3. For a remote server, enter `https://your.server.name` or `http://server-ip:8128`.
 
-![Robrix login screen — enter your Homeserver URL at the bottom](../images/login-screen.png)
+<img src="../images/login-screen.png" width="600" alt="Robrix login screen — enter your Homeserver URL at the bottom">
 
 > **Note:** If the Homeserver URL field is left empty, Robrix connects to `matrix.org` by default. You must fill it in to reach your own Palpo server.
 
@@ -53,7 +53,7 @@ To create a new account on your Palpo server:
 4. Enter the **Homeserver URL**: `http://127.0.0.1:8128`.
 5. Click **Sign up**.
 
-![Register account](../images/register-account.png)
+<img src="../images/register-account.png" width="600" alt="Register account — enter username, password, and Homeserver URL">
 
 > **Note:** Registration must be enabled on the server. Make sure `allow_registration = true` is set in your `palpo.toml`. See [Deployment Guide -- Configuration](01-deploying-palpo-and-octos.md) for details.
 
@@ -87,12 +87,13 @@ This is the main workflow: create a room, invite the bot, and start a conversati
 
 ### 5.2 Invite the Bot
 
-1. Click the **invite** button inside the room (usually a person-with-plus icon).
-2. Enter the bot's Matrix ID: `@octosbot:127.0.0.1:8128`.
-3. Send the invitation.
-4. The bot joins automatically. This is handled by the Application Service mechanism -- no manual acceptance is needed on the bot side.
+1. Click the **search icon** (**①** in the screenshot below) at the top of the room list.
+2. In the search dialog, type the bot's full Matrix ID: `@octosbot:127.0.0.1:8128`.
+3. Click the **People** tab (**②**) to filter results to users and bots (instead of Rooms or Spaces).
+4. Select the bot from the search results to start a direct conversation or invite it to a room.
+5. The bot joins automatically. This is handled by the Application Service mechanism -- no manual acceptance is needed on the bot side.
 
-<!-- screenshot: invite-bot.png — Invite dialog with @octosbot:127.0.0.1:8128 entered -->
+<img src="../images/search-invite-bot.png" width="600" alt="Search for the bot: click the search icon (1), type the bot ID, then click People (2) to find it">
 
 > **How is this bot name determined?** The BotFather's Matrix ID is assembled from two config values:
 >

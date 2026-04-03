@@ -37,7 +37,7 @@
 2. 输入 `http://127.0.0.1:8128`（本地部署）。
 3. 如果是远程服务器，输入 `https://your.server.name` 或 `http://服务器IP:8128`。
 
-![Robrix 登录界面 — 在底部输入 Homeserver URL](../images/login-screen.png)
+<img src="../images/login-screen.png" width="600" alt="Robrix 登录界面 — 在底部输入 Homeserver URL">
 
 > **注意：** 如果 Homeserver URL 留空，Robrix 会默认连接到 `matrix.org`。你必须填写此字段才能连接到自己的 Palpo 服务器。
 
@@ -53,7 +53,7 @@
 4. 输入 **Homeserver URL**：`http://127.0.0.1:8128`。
 5. 点击 **Sign up（注册）**。
 
-![注册账号](../images/register-account.png)
+<img src="../images/register-account.png" width="600" alt="注册账号 — 输入用户名、密码和 Homeserver URL">
 
 > **注意：** 服务器必须启用注册功能。请确保 `palpo.toml` 中设置了 `allow_registration = true`。详见 [部署指南 -- 配置部分](01-deploying-palpo-and-octos-zh.md)。
 
@@ -87,12 +87,13 @@
 
 ### 5.2 邀请机器人
 
-1. 在房间内点击 **邀请** 按钮（通常是一个人形加号图标）。
-2. 输入机器人的 Matrix ID：`@octosbot:127.0.0.1:8128`。
-3. 发送邀请。
-4. 机器人会自动加入房间。这是通过 Application Service 机制实现的，不需要在机器人端手动接受邀请。
+1. 点击房间列表顶部的 **搜索图标**（下图中的 **①**）。
+2. 在搜索对话框中输入机器人的完整 Matrix ID：`@octosbot:127.0.0.1:8128`。
+3. 点击 **People** 标签页（**②**），将搜索结果过滤为用户和机器人（而非 Rooms 或 Spaces）。
+4. 从搜索结果中选择机器人，即可开始直接对话或邀请它加入房间。
+5. 机器人会自动加入。这是通过 Application Service 机制实现的，不需要在机器人端手动接受邀请。
 
-<!-- screenshot: invite-bot.png — 邀请对话框中输入了 @octosbot:127.0.0.1:8128 -->
+<img src="../images/search-invite-bot.png" width="600" alt="搜索机器人：点击搜索图标（1），输入机器人 ID，然后点击 People（2）找到它">
 
 > **这个机器人名字是怎么来的？** BotFather 的 Matrix ID 由两个配置值组合而成：
 >

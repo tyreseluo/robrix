@@ -40,7 +40,7 @@ For Android and iOS builds, see the [Robrix README — Building & Running](https
 
 When you launch Robrix, you'll see the login screen with a **Homeserver URL** field at the bottom.
 
-![Robrix login screen](../images/login-screen.png)
+<img src="../images/login-screen.png" width="600" alt="Robrix login screen">
 
 - **Leave it empty** to connect to `matrix.org` (the default public server)
 - **Enter a custom URL** to connect to any Matrix-compatible server:
