@@ -245,6 +245,8 @@ impl Widget for CommandTextInput {
         if cx.has_key_focus(self.key_controller_text_input_ref().area()) {
             if let Event::KeyDown(key_event) = event {
                 let popup_visible = self.view(cx, ids!(popup)).visible();
+                log!("DEBUG CommandTextInput::KeyDown: key={:?}, popup_visible={}, selectable_count={}, kb_focus={:?}",
+                    key_event.key_code, popup_visible, self.selectable_widgets.len(), self.keyboard_focus_index);
 
                 if popup_visible {
                     let mut eat_the_event = true;
@@ -308,14 +310,14 @@ impl Widget for CommandTextInput {
             let mut selected_by_click = None;
             let mut should_redraw = false;
 
+            log!("DEBUG CommandTextInput::Actions: self_ptr={:p}, selectable_count={}", self as *const _, self.selectable_widgets.len());
             for (idx, item) in self.selectable_widgets.iter().enumerate() {
                 let item = item.as_view();
 
-                if item
-                    .finger_down(actions)
-                    .map(|fe| fe.tap_count == 1)
-                    .unwrap_or(false)
+                let fd = item.finger_down(actions);
+                if fd.as_ref().map(|fe| fe.tap_count == 1).unwrap_or(false)
                 {
+                    log!("DEBUG CommandTextInput: finger_down on item {}", idx);
                     selected_by_click = Some((*item).clone());
 
                     // Clear keyboard focus when mouse is clicked
@@ -526,6 +528,7 @@ impl CommandTextInput {
     ///
     /// Normally called as response to `should_build_items`.
     pub fn clear_items(&mut self, cx: &Cx) {
+        log!("DEBUG CommandTextInput::clear_items: self_ptr={:p}, was_count={}", self as *const _, self.selectable_widgets.len());
         self.list(cx, ids!(list)).clear();
         self.selectable_widgets.clear();
         self.keyboard_focus_index = None;
@@ -538,6 +541,7 @@ impl CommandTextInput {
     pub fn add_item(&mut self, cx: &Cx, widget: WidgetRef) {
         self.list(cx, ids!(list)).add(widget.clone());
         self.selectable_widgets.push(widget);
+        log!("DEBUG CommandTextInput::add_item: self_ptr={:p}, new_count={}", self as *const _, self.selectable_widgets.len());
         self.keyboard_focus_index = self.keyboard_focus_index.or(Some(0));
     }
 
@@ -747,12 +751,15 @@ impl CommandTextInput {
     fn update_highlights(&mut self, cx: &mut Cx) {
         // Check if currently there is a keyboard-focused item
         let has_keyboard_focus = self.keyboard_focus_index.is_some();
+        if !self.selectable_widgets.is_empty() {
+            log!("DEBUG update_highlights: self_ptr={:p}, count={}, kb_focus={:?}, hover={:?}",
+                self as *const _, self.selectable_widgets.len(), self.keyboard_focus_index, self.pointer_hover_index);
+        }
 
         for (idx, item) in self.selectable_widgets.iter().enumerate() {
             let mut item = item.clone();
             script_apply_eval!(cx, item, {
-                show_bg: true,
-                cursor: MouseCursor.Hand
+                show_bg: true
             });
 
             // If there is a keyboard focus, prioritize it over mouse hover

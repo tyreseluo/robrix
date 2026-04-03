@@ -175,137 +175,96 @@ script_mod! {
 
     // Template for user list items in the mention dropdown
     mod.widgets.UserListItem = View {
-        width: Fill,
-        height: Fit,
+        width: Fill
+        height: 32
         margin: Inset{left: 4 right: 4}
         padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
         show_bg: true
-        cursor: Hand
-        draw_bg: {
-            color: (COLOR_PRIMARY),
-            uniform border_radius: 4.0,
-            instance hover: 0.0,
-            instance selected: 0.0,
-
-            pixel: fn() {
-                let sdf = Sdf2d.viewport(self.pos * self.rect_size);
-                // Draw rounded rectangle with configurable radius
-                sdf.box(0., 0., self.rect_size.x, self.rect_size.y, self.border_radius);
-
-                if self.selected > 0.0 {
-                    sdf.fill(KEYBOARD_FOCUS_OR_COLOR_HOVER)
-                } else if self.hover > 0.0 {
-                    sdf.fill(KEYBOARD_FOCUS_OR_COLOR_HOVER)
-                } else {
-                    // Default state
-                    sdf.fill(self.color)
-                }
-                return sdf.result
-            }
+        draw_bg +: {
+            color: (COLOR_PRIMARY)
+            border_radius: 4.0
         }
-        flow: Down
+        flow: Right
         spacing: 2.0
+        align: Align{y: 0.5}
 
-        user_info = View {
-            width: Fill,
-            height: Fit,
-            flow: Right,
+        user_info := View {
+            width: Fill
+            height: Fit
+            flow: Right
             spacing: 8.0
             align: Align{y: 0.5}
 
-            avatar = Avatar {
-                width: 24,
-                height: 24,
-                text_view = { text = { draw_text: {
-                    text_style: { font_size: 12.0 }
-                }}}
+            avatar := Avatar {
+                width: 24
+                height: 24
             }
 
-            username = Label {
-                height: Fit,
-                draw_text: {
-                    color: #000,
-                    text_style: {font_size: 14.0}
+            username := Label {
+                height: Fit
+                draw_text +: {
+                    color: #000
+                    text_style: REGULAR_TEXT {font_size: 14.0}
                 }
             }
 
-            filler = FillerX {}
+            filler := FillerX {}
         }
 
-        user_id = Label {
-            height: Fit,
-            draw_text: {
-                color: #666,
-                text_style: {font_size: 12.0}
+        user_id := Label {
+            height: Fit
+            draw_text +: {
+                color: #666
+                text_style: REGULAR_TEXT {font_size: 12.0}
             }
         }
     }
 
     // Template for the @room mention list item
     mod.widgets.RoomMentionListItem = View {
-        width: Fill,
-        height: Fit,
+        width: Fill
+        height: 32
         margin: Inset{left: 4 right: 4}
         padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
         show_bg: true
-        cursor: Hand
-        draw_bg: {
-            color: (COLOR_PRIMARY),
-            uniform border_radius: 4.0,
-            instance hover: 0.0,
-            instance selected: 0.0,
-
-            pixel: fn() {
-                let sdf = Sdf2d.viewport(self.pos * self.rect_size);
-                sdf.box(0., 0., self.rect_size.x, self.rect_size.y, self.border_radius);
-
-                if self.selected > 0.0 {
-                    sdf.fill(KEYBOARD_FOCUS_OR_COLOR_HOVER)
-                } else if self.hover > 0.0 {
-                    sdf.fill(KEYBOARD_FOCUS_OR_COLOR_HOVER)
-                } else {
-                    sdf.fill(self.color)
-                }
-                return sdf.result
-            }
+        draw_bg +: {
+            color: (COLOR_PRIMARY)
+            border_radius: 4.0
         }
-        flow: Down
+        flow: Right
         spacing: 2.0
         align: Align{y: 0.5}
 
-        user_info = View {
-            width: Fill,
-            height: Fit,
-            flow: Right,
+        user_info := View {
+            width: Fill
+            height: Fit
+            flow: Right
             spacing: 8.0
             align: Align{y: 0.5}
 
-            room_avatar = Avatar {
-                width: 24,
-                height: 24,
-                text_view = { text = { draw_text: {
-                    text_style: { font_size: 12.0 }
-                }}}
+            room_avatar := Avatar {
+                width: 24
+                height: 24
             }
 
-            room_mention = Label {
-                height: Fit,
-                draw_text: {
-                    color: #000,
-                    text_style: {font_size: 14.0}
+            room_mention := Label {
+                height: Fit
+                draw_text +: {
+                    color: #000
+                    text_style: REGULAR_TEXT {font_size: 14.0}
                 }
                 text: "Notify the entire room"
             }
 
-            filler = FillerX {}
+            filler := FillerX {}
         }
 
-        room_user_id = Label {
-            height: Fit,
-            align: Align{y: 0.5},
-            draw_text: {
-                color: #666,
-                text_style: {font_size: 12.0}
+        room_user_id := Label {
+            height: Fit
+            align: Align{y: 0.5}
+            draw_text +: {
+                color: #666
+                text_style: REGULAR_TEXT {font_size: 12.0}
             }
             text: "@room"
         }
@@ -313,54 +272,56 @@ script_mod! {
 
     // Template for loading indicator when members are being fetched
     mod.widgets.LoadingIndicator = View {
-        width: Fill,
-        height: 48,
+        width: Fill
+        height: 48
         margin: Inset{left: 4 right: 4}
         padding: Inset{left: 8 right: 8 top: 8 bottom: 8}
-        flow: Right,
-        spacing: 8.0,
+        flow: Right
+        spacing: 8.0
         align: Align{x: 0.0 y: 0.5}
-        draw_bg: {
-            color: (COLOR_PRIMARY),
+        show_bg: true
+        draw_bg +: {
+            color: (COLOR_PRIMARY)
         }
 
-        loading_text = Label {
-            height: Fit,
-            draw_text: {
-                color: #666,
-                text_style: {font_size: 14.0}
+        loading_text := Label {
+            height: Fit
+            draw_text +: {
+                color: #666
+                text_style: REGULAR_TEXT {font_size: 14.0}
             }
             text: "Loading members"
         }
 
-        loading_animation = BouncingDots {
-            width: 60,
-            height: 24,
-            draw_bg: {
-                color: (COLOR_ROBRIX_PURPLE),
-                dot_radius: 2.0,
+        loading_animation := BouncingDots {
+            width: 60
+            height: 24
+            draw_bg +: {
+                color: (COLOR_ROBRIX_PURPLE)
+                dot_radius: 2.0
             }
         }
     }
 
     // Template for no matches indicator when no users match the search
     mod.widgets.NoMatchesIndicator = View {
-        width: Fill,
-        height: 48,
+        width: Fill
+        height: 48
         margin: Inset{left: 4 right: 4}
         padding: Inset{left: 8 right: 8 top: 8 bottom: 8}
-        flow: Right,
-        spacing: 8.0,
+        flow: Right
+        spacing: 8.0
         align: Align{x: 0.0 y: 0.5}
-        draw_bg: {
-            color: (COLOR_PRIMARY),
+        show_bg: true
+        draw_bg +: {
+            color: (COLOR_PRIMARY)
         }
 
-        no_matches_text = Label {
-            height: Fit,
-            draw_text: {
-                color: #666,
-                text_style: {font_size: 14.0}
+        no_matches_text := Label {
+            height: Fit
+            draw_text +: {
+                color: #666
+                text_style: REGULAR_TEXT {font_size: 14.0}
             }
             text: "No matching users found"
         }
@@ -368,29 +329,29 @@ script_mod! {
 
     mod.widgets.MentionableTextInput = #(MentionableTextInput::register_widget(vm)) {
         ..mod.widgets.CommandTextInput
-        width: Fill,
+        width: Fill
         height: Fit
         trigger: "@"
         inline_search: true
 
-        color_focus: (FOCUS_HOVER_COLOR),
-        color_hover: (FOCUS_HOVER_COLOR),
+        color_focus: (FOCUS_HOVER_COLOR)
+        color_hover: (FOCUS_HOVER_COLOR)
 
         popup +: {
             spacing: 0.0
             padding: 0.0
 
-            draw_bg: {
-                color: (COLOR_SECONDARY),
+            draw_bg +: {
+                color: (COLOR_SECONDARY)
             }
             header_view +: {
                 margin: Inset{left: 4 right: 4}
-                draw_bg: {
-                    color: (COLOR_ROBRIX_PURPLE),
+                draw_bg +: {
+                    color: (COLOR_ROBRIX_PURPLE)
                 }
                 header_label +: {
-                    draw_text: {
-                        color: (COLOR_PRIMARY_DARKER),
+                    draw_text +: {
+                        color: (COLOR_PRIMARY_DARKER)
                     }
                     text: "Users in this Room"
                 }
@@ -408,7 +369,7 @@ script_mod! {
             top +: { height: 0 }
             bottom +: { height: 0 }
             center +: {
-                text_input = RobrixTextInput {
+                text_input := RobrixTextInput {
                     empty_text: "Start typing..."
                 }
             }
@@ -918,17 +879,8 @@ impl MentionableTextInput {
         } else {
             MOBILE_ITEM_HEIGHT
         };
-        if is_desktop {
-            script_apply_eval!(cx, room_mention_item, {
-                    height: #(new_height)
-                    flow: Right
-                });
-        } else {
-            script_apply_eval!(cx, room_mention_item, {
-                    height: #(new_height)
-                    flow: Down
-                });
-        }
+        // Layout is set in the DSL template (defaults to desktop layout).
+        // TODO: add mobile-specific layout when adaptive layout is implemented.
 
         self.cmd_text_input.add_item(cx, room_mention_item);
         true
@@ -986,21 +938,8 @@ impl MentionableTextInput {
             let user_id_str = member.user_id().as_str();
             item.label(cx, ids!(user_id)).set_text(cx, user_id_str);
 
-            if is_desktop {
-                script_apply_eval!(cx, item, {
-                    flow: Right
-                    height: #(DESKTOP_ITEM_HEIGHT)
-                    align: Align{y: 0.5}
-                });
-                item.view(cx, ids!(user_info.filler)).set_visible(cx, true);
-            } else {
-                script_apply_eval!(cx, item, {
-                        flow: Down
-                        height: #(MOBILE_ITEM_HEIGHT)
-                        spacing: #(MOBILE_USERNAME_SPACING)
-                    });
-                item.view(cx, ids!(user_info.filler)).set_visible(cx, false);
-            }
+            // Layout is set in the DSL template (defaults to desktop layout).
+            // TODO: add mobile-specific layout when adaptive layout is implemented.
 
             let avatar = item.avatar(cx, ids!(user_info.avatar));
             if let Some(mxc_uri) = member.avatar_url() {
@@ -1049,7 +988,7 @@ impl MentionableTextInput {
         match &self.search_state {
             MentionSearchState::Idle | MentionSearchState::JustCancelled => {
                 // Not in search mode, hide popup
-                script_apply_eval!(cx, popup, { height: Fit });
+                
                 popup.set_visible(cx, false);
             }
             MentionSearchState::WaitingForMembers { .. } => {
@@ -1729,7 +1668,7 @@ impl MentionableTextInput {
         header_view.set_visible(cx, true);
 
         // Let popup auto-size based on content
-        script_apply_eval!(cx, popup, { height: Fit });
+        
 
         // Maintain text input focus so user can continue typing, but only if currently focused
         let text_input_area = self.cmd_text_input.text_input_ref().area();
@@ -1823,7 +1762,7 @@ impl MentionableTextInput {
         popup.set_visible(cx, false);
 
         // Reset popup height
-        script_apply_eval!(cx, popup, { height: Fit });
+        
 
         // Ensure header view is reset to visible next time it's triggered
         // This will happen before update_user_list is called in handle_text_change
