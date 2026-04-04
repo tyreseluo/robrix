@@ -179,6 +179,7 @@ script_mod! {
         height: 32
         margin: Inset{left: 4 right: 4}
         padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
+        cursor: MouseCursor.Hand
         show_bg: true
         draw_bg +: {
             color: (COLOR_PRIMARY)
@@ -226,6 +227,7 @@ script_mod! {
         height: 32
         margin: Inset{left: 4 right: 4}
         padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
+        cursor: MouseCursor.Hand
         show_bg: true
         draw_bg +: {
             color: (COLOR_PRIMARY)
@@ -334,7 +336,7 @@ script_mod! {
         trigger: "@"
         inline_search: true
 
-        color_focus: (FOCUS_HOVER_COLOR)
+        color_focus: (KEYBOARD_FOCUS_OR_COLOR_HOVER)
         color_hover: (FOCUS_HOVER_COLOR)
 
         popup +: {
@@ -823,7 +825,7 @@ impl MentionableTextInput {
         let Some(ptr) = self.room_mention_list_item else {
             return false;
         };
-        let mut room_mention_item = crate::widget_ref_from_live_ptr(cx, Some(ptr));
+        let room_mention_item = crate::widget_ref_from_live_ptr(cx, Some(ptr));
         let mut room_avatar_shown = false;
 
         let avatar_ref = room_mention_item.avatar(cx, ids!(user_info.room_avatar));
@@ -930,7 +932,7 @@ impl MentionableTextInput {
                 // user_list_item_ptr is None
                 continue;
             };
-            let mut item = crate::widget_ref_from_live_ptr(cx, Some(user_list_item_ptr));
+            let item = crate::widget_ref_from_live_ptr(cx, Some(user_list_item_ptr));
 
             item.label(cx, ids!(user_info.username)).set_text(cx, &display_name);
 
@@ -962,7 +964,6 @@ impl MentionableTextInput {
 
             // Set keyboard focus to the first item
             if index == 0 {
-                // If @room exists, it's index 0, otherwise first user is index 0
                 self.cmd_text_input.set_keyboard_focus_index(0);
             }
         }
