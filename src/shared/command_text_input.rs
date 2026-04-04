@@ -749,21 +749,18 @@ impl CommandTextInput {
     }
 
     fn update_highlights(&mut self, cx: &mut Cx) {
-        for (idx, item) in self.selectable_widgets.iter().enumerate() {
-            let color = popup_item_highlight_color(
-                idx,
-                self.keyboard_focus_index,
-                self.pointer_hover_index,
-                self.color_focus,
-                self.color_hover,
-            );
+        let has_keyboard_focus = self.keyboard_focus_index.is_some();
 
-            let mut item = item.clone();
-            script_apply_eval!(cx, item, {
-                draw_bg: {
-                    color: #(color)
-                }
-            });
+        for (idx, item) in self.selectable_widgets.iter().enumerate() {
+            let is_highlighted = Some(idx) == self.keyboard_focus_index
+                || (Some(idx) == self.pointer_hover_index && !has_keyboard_focus);
+
+            let view = item.as_view();
+            if is_highlighted {
+                view.animator_cut(cx, ids!(highlight.on));
+            } else {
+                view.animator_cut(cx, ids!(highlight.off));
+            }
         }
     }
 

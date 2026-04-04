@@ -176,47 +176,63 @@ script_mod! {
     // Template for user list items in the mention dropdown
     mod.widgets.UserListItem = View {
         width: Fill
-        height: 32
-        margin: Inset{left: 4 right: 4}
-        padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
+        height: 36
+        margin: Inset{left: 3 right: 3}
+        padding: Inset{left: 10 right: 10 top: 4 bottom: 4}
         cursor: MouseCursor.Hand
         show_bg: true
         draw_bg +: {
             color: (COLOR_PRIMARY)
             border_radius: 4.0
-        }
-        flow: Right
-        spacing: 2.0
-        align: Align{y: 0.5}
+            selected: instance(0.0)
 
-        user_info := View {
-            width: Fill
-            height: Fit
-            flow: Right
-            spacing: 8.0
-            align: Align{y: 0.5}
-
-            avatar := Avatar {
-                width: 24
-                height: 24
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y self.border_radius)
+                let highlight = #x1E90FF30
+                sdf.fill(Pal.premul(self.color.mix(highlight self.selected)))
+                return sdf.result
             }
+        }
 
-            username := Label {
-                height: Fit
-                draw_text +: {
-                    color: #000
-                    text_style: REGULAR_TEXT {font_size: 14.0}
+        animator: Animator {
+            highlight: {
+                default: @off
+                off: AnimatorState {
+                    from: { all: Forward { duration: 0.12 } }
+                    apply: { draw_bg: { selected: 0.0 } }
+                }
+                on: AnimatorState {
+                    from: { all: Forward { duration: 0.08 } }
+                    apply: { draw_bg: { selected: 1.0 } }
                 }
             }
-
-            filler := FillerX {}
         }
+
+        flow: Right
+        spacing: 8.0
+        align: Align{y: 0.5}
+
+        avatar := Avatar {
+            width: 26
+            height: 26
+        }
+
+        username := Label {
+            height: Fit
+            draw_text +: {
+                color: #222
+                text_style: BOLD_TEXT {font_size: 13.0}
+            }
+        }
+
+        filler := FillerX {}
 
         user_id := Label {
             height: Fit
             draw_text +: {
-                color: #666
-                text_style: REGULAR_TEXT {font_size: 12.0}
+                color: #aaa
+                text_style: REGULAR_TEXT {font_size: 10.0}
             }
         }
     }
@@ -224,49 +240,62 @@ script_mod! {
     // Template for the @room mention list item
     mod.widgets.RoomMentionListItem = View {
         width: Fill
-        height: 32
+        height: 40
         margin: Inset{left: 4 right: 4}
-        padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
+        padding: Inset{left: 10 right: 10 top: 6 bottom: 6}
         cursor: MouseCursor.Hand
         show_bg: true
         draw_bg +: {
             color: (COLOR_PRIMARY)
             border_radius: 4.0
+            selected: instance(0.0)
+
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y self.border_radius)
+                let highlight = #x1E90FF30
+                sdf.fill(Pal.premul(self.color.mix(highlight self.selected)))
+                return sdf.result
+            }
         }
+
+        animator: Animator {
+            highlight: {
+                default: @off
+                off: AnimatorState {
+                    from: { all: Forward { duration: 0.12 } }
+                    apply: { draw_bg: { selected: 0.0 } }
+                }
+                on: AnimatorState {
+                    from: { all: Forward { duration: 0.08 } }
+                    apply: { draw_bg: { selected: 1.0 } }
+                }
+            }
+        }
+
         flow: Right
-        spacing: 2.0
+        spacing: 10.0
         align: Align{y: 0.5}
 
-        user_info := View {
-            width: Fill
+        room_avatar := Avatar {
+            width: 28
+            height: 28
+        }
+
+        room_mention := Label {
             height: Fit
-            flow: Right
-            spacing: 8.0
-            align: Align{y: 0.5}
-
-            room_avatar := Avatar {
-                width: 24
-                height: 24
+            draw_text +: {
+                color: #222
+                text_style: BOLD_TEXT {font_size: 13.0}
             }
-
-            room_mention := Label {
-                height: Fit
-                draw_text +: {
-                    color: #000
-                    text_style: REGULAR_TEXT {font_size: 14.0}
-                }
-                text: "Notify the entire room"
-            }
-
-            filler := FillerX {}
+            text: "Notify the entire room"
         }
 
         room_user_id := Label {
             height: Fit
-            align: Align{y: 0.5}
             draw_text +: {
-                color: #666
-                text_style: REGULAR_TEXT {font_size: 12.0}
+                color: #aaa
+                text_style: REGULAR_TEXT {font_size: 10.0}
             }
             text: "@room"
         }
@@ -341,19 +370,28 @@ script_mod! {
 
         popup +: {
             spacing: 0.0
-            padding: 0.0
+            padding: Inset{top: 0 bottom: 6 left: 0 right: 0}
 
             draw_bg +: {
-                color: (COLOR_SECONDARY)
+                color: (COLOR_PRIMARY)
+                border_radius: 6.0
+                border_size: 1.0
+                border_color: #ddd
+                shadow_color: #0003
+                shadow_radius: 12.0
+                shadow_offset: vec2(0.0 2.0)
             }
             header_view +: {
-                margin: Inset{left: 4 right: 4}
+                margin: Inset{left: 0 right: 0 top: 0 bottom: 2}
+                padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
                 draw_bg +: {
                     color: (COLOR_ROBRIX_PURPLE)
+                    border_radius: 6.0
                 }
                 header_label +: {
                     draw_text +: {
-                        color: (COLOR_PRIMARY_DARKER)
+                        color: #fff
+                        text_style: REGULAR_TEXT {font_size: 11.0}
                     }
                     text: "Users in this Room"
                 }
@@ -363,7 +401,7 @@ script_mod! {
                 height: Fit
                 clip_y: true
                 spacing: 0.0
-                padding: 0.0
+                padding: Inset{top: 2 bottom: 2 left: 0 right: 0}
             }
         }
 
@@ -828,7 +866,7 @@ impl MentionableTextInput {
         let room_mention_item = crate::widget_ref_from_live_ptr(cx, Some(ptr));
         let mut room_avatar_shown = false;
 
-        let avatar_ref = room_mention_item.avatar(cx, ids!(user_info.room_avatar));
+        let avatar_ref = room_mention_item.avatar(cx, ids!(room_avatar));
 
         // Get room avatar fallback text from room name (with automatic ID fallback)
         let room_label = room_props.room_name_id.to_string();
@@ -934,7 +972,7 @@ impl MentionableTextInput {
             };
             let item = crate::widget_ref_from_live_ptr(cx, Some(user_list_item_ptr));
 
-            item.label(cx, ids!(user_info.username)).set_text(cx, &display_name);
+            item.label(cx, ids!(username)).set_text(cx, &display_name);
 
             // Use the full user ID string
             let user_id_str = member.user_id().as_str();
@@ -943,7 +981,7 @@ impl MentionableTextInput {
             // Layout is set in the DSL template (defaults to desktop layout).
             // TODO: add mobile-specific layout when adaptive layout is implemented.
 
-            let avatar = item.avatar(cx, ids!(user_info.avatar));
+            let avatar = item.avatar(cx, ids!(avatar));
             if let Some(mxc_uri) = member.avatar_url() {
                 match get_or_fetch_avatar(cx, &mxc_uri.to_owned()) {
                     AvatarCacheEntry::Loaded(avatar_data) => {
@@ -1055,7 +1093,7 @@ impl MentionableTextInput {
         let head = text_input_ref.borrow().map_or(0, |p| p.cursor().index);
 
         if let Some(start_idx) = self.get_trigger_position() {
-            let room_mention_label = selected.label(cx, ids!(user_info.room_mention));
+            let room_mention_label = selected.label(cx, ids!(room_mention));
             let room_mention_text = room_mention_label.text();
             let room_user_id_text = selected.label(cx, ids!(room_user_id)).text();
 
@@ -1068,7 +1106,7 @@ impl MentionableTextInput {
                 "@room ".to_string()
             } else {
                 // User selected a specific user
-                let username = selected.label(cx, ids!(user_info.username)).text();
+                let username = selected.label(cx, ids!(username)).text();
                 let user_id_str = selected.label(cx, ids!(user_id)).text();
                 let Ok(user_id): Result<OwnedUserId, _> = user_id_str.clone().try_into() else {
                     // Invalid user ID format - skip selection
