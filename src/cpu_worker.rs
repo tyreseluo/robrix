@@ -23,9 +23,9 @@ pub enum CpuJob {
 pub struct PrecomputedMemberSortReady {
     pub timeline_kind: TimelineKind,
     pub sort: Arc<PrecomputedMemberSort>,
-    /// Pointer identity of the Arc<Vec<RoomMember>> this sort was computed for.
-    /// Used to reject stale results if room_members was replaced.
-    pub members_identity: usize,
+    /// The Arc<Vec<RoomMember>> this sort was computed for.
+    /// Held alive to prevent ABA via address reuse; compared by Arc::ptr_eq.
+    pub members_arc: Arc<Vec<RoomMember>>,
 }
 
 pub struct PrecomputeMemberSortJob {
@@ -66,12 +66,11 @@ fn run_member_search(params: SearchRoomMembersJob) {
 }
 
 fn run_precompute_sort(params: PrecomputeMemberSortJob) {
-    let members_identity = Arc::as_ptr(&params.members) as usize;
     let sort = member_search::precompute_member_sort(&params.members);
     Cx::post_action(PrecomputedMemberSortReady {
         timeline_kind: params.timeline_kind,
         sort: Arc::new(sort),
-        members_identity,
+        members_arc: params.members, // keep alive to prevent ABA
     });
 }
 
