@@ -428,6 +428,8 @@ script_mod! {
                 }
             }
 
+            // height below is the DSL default; Rust dynamically adjusts it
+            // per platform via set_list_scroll_height() and DESKTOP/MOBILE_MAX_SCROLL_HEIGHT.
             list_scroll +: {
                 height: 360
                 list +: {
@@ -927,6 +929,14 @@ impl MentionableTextInput {
     /// Check if search was just cancelled
     fn is_just_cancelled(&self) -> bool {
         matches!(self.search_state, MentionSearchState::JustCancelled)
+    }
+
+    /// Sets the scroll container's viewport height.
+    fn set_list_scroll_height(&self, cx: &Cx, height: f64) {
+        let scroll_view = self.cmd_text_input.list_scroll_view(cx);
+        if let Some(mut inner) = scroll_view.borrow_mut() {
+            inner.walk.height = Size::Fixed(height);
+        }
     }
 
     /// Tries to add the `@room` mention item to the list of selectable popup mentions.
@@ -1514,10 +1524,7 @@ impl MentionableTextInput {
             };
 
             let scroll_height = content_height.min(max_scroll_height).max(0.0);
-            let scroll_view = self.cmd_text_input.list_scroll_view(cx);
-            if let Some(mut inner) = scroll_view.borrow_mut() {
-                inner.walk.height = Size::Fixed(scroll_height);
-            }
+            self.set_list_scroll_height(cx, scroll_height);
         }
 
         // Update popup visibility based on whether we have items
@@ -1783,10 +1790,7 @@ impl MentionableTextInput {
         header_view.set_visible(cx, true);
 
         // Set scroll container height to fit the loading indicator (48px + 4px padding)
-        let scroll_view = self.cmd_text_input.list_scroll_view(cx);
-        if let Some(mut inner) = scroll_view.borrow_mut() {
-            inner.walk.height = Size::Fixed(52.0);
-        }
+        self.set_list_scroll_height(cx, 52.0);
 
         popup.set_visible(cx, true);
 
@@ -1819,10 +1823,7 @@ impl MentionableTextInput {
         header_view.set_visible(cx, true);
 
         // Set scroll container height to fit the no-matches indicator (48px + 4px padding)
-        let scroll_view = self.cmd_text_input.list_scroll_view(cx);
-        if let Some(mut inner) = scroll_view.borrow_mut() {
-            inner.walk.height = Size::Fixed(52.0);
-        }
+        self.set_list_scroll_height(cx, 52.0);
 
         // Maintain text input focus so user can continue typing, but only if currently focused
         let text_input_area = self.cmd_text_input.text_input_ref().area();

@@ -9,6 +9,7 @@ Before starting work, read these documents:
 1. [DESIGN.md](DESIGN.md) — architecture overview, module organization, technology stack
 2. [specs/project.spec.md](specs/project.spec.md) — project constraints, decisions, forbidden actions
 3. [CLAUDE.md](CLAUDE.md) — project workflow rules and Makepad 2.0 guidance
+4. [MAKEPAD.md](MAKEPAD.md) — Makepad 2.0 skill routing and design judgment entry point
 
 ## Critical Rules
 

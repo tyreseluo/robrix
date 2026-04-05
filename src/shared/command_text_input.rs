@@ -113,7 +113,7 @@ script_mod! {
 
             list_scroll := ScrollYView {
                 width: Fill
-                height: Fit
+                height: 200
                 clip_y: true
                 list := mod.widgets.CommandTextInputList{
                     height: Fit
@@ -214,10 +214,6 @@ pub struct CommandTextInput {
     #[rust]
     prev_cursor_position: usize,
 
-    /// Tracked Y scroll position of the list scroll view.
-    /// We maintain this ourselves because ViewRef has no public get_scroll_pos().
-    #[rust]
-    list_scroll_y: f64,
 }
 
 impl Widget for CommandTextInput {
@@ -561,7 +557,6 @@ impl CommandTextInput {
     /// Call this when starting a new search or closing the popup,
     /// NOT on every streaming result refresh (which would cause scroll jumping).
     pub fn reset_list_scroll(&mut self, cx: &mut Cx) {
-        self.list_scroll_y = 0.0;
         self.list_scroll_view(cx).set_scroll_pos(cx, DVec2 { x: 0.0, y: 0.0 });
     }
 
@@ -778,8 +773,9 @@ impl CommandTextInput {
 
     /// Scrolls the list scroll view so the currently focused item is visible.
     ///
-    /// Uses the tracked `list_scroll_y` instead of deriving scroll offset
-    /// from item rects (which is biased by list padding and fragile).
+    /// Derives the current scroll offset from the list content's screen position
+    /// relative to the scroll view, so it works correctly even after manual
+    /// wheel/trackpad scrolling (no stale tracked state).
     fn scroll_to_focused_item(&mut self, cx: &mut Cx) {
         let Some(focus_idx) = self.keyboard_focus_index else { return };
         let Some(widget) = self.selectable_widgets.get(focus_idx) else { return };
@@ -795,24 +791,34 @@ impl CommandTextInput {
 
         let view_height = scroll_rect.size.y;
 
-        // The item's position within the visible viewport:
-        // When scrolled by `list_scroll_y`, the viewport shows content from
-        // [list_scroll_y .. list_scroll_y + view_height].
-        // Item's screen position relative to scroll view top:
+        // Item's screen position relative to scroll view top.
+        // This accounts for any scroll state (programmatic or manual).
         let item_screen_top = item_rect.pos.y - scroll_rect.pos.y;
         let item_screen_bottom = item_screen_top + item_rect.size.y;
 
+        if item_screen_bottom <= view_height && item_screen_top >= 0.0 {
+            return; // Already fully visible, no scroll needed
+        }
+
+        // Derive the current scroll offset from the list content's position.
+        // The list widget (inner content) is drawn at its full height inside the scroll view.
+        // When scroll=0, list top = scroll view top. When scrolled down by S,
+        // list top is S pixels above scroll view top.
+        let list_ref = self.list(cx, ids!(list));
+        let list_rect = list_ref.as_view().area().rect(cx);
+        if list_rect.size.y <= 0.0 {
+            return; // List hasn't been drawn yet
+        }
+        let current_scroll = scroll_rect.pos.y - list_rect.pos.y;
+
         let new_scroll_y = if item_screen_bottom > view_height {
             // Item extends below the visible area — scroll down
-            self.list_scroll_y + (item_screen_bottom - view_height)
-        } else if item_screen_top < 0.0 {
-            // Item is above the visible area — scroll up
-            (self.list_scroll_y + item_screen_top).max(0.0)
+            current_scroll + (item_screen_bottom - view_height)
         } else {
-            return; // Already fully visible, no scroll needed
+            // Item is above the visible area — scroll up
+            (current_scroll + item_screen_top).max(0.0)
         };
 
-        self.list_scroll_y = new_scroll_y;
         scroll_view.set_scroll_pos(cx, DVec2 { x: 0.0, y: new_scroll_y });
     }
 
