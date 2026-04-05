@@ -852,6 +852,7 @@ fn is_whitespace(grapheme: &str) -> bool {
     grapheme.chars().all(char::is_whitespace)
 }
 
+#[cfg(test)]
 fn popup_item_highlight_color(
     idx: usize,
     keyboard_focus_index: Option<usize>,

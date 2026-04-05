@@ -157,14 +157,42 @@ enum MentionSearchState {
 // Default is derived above; Idle is marked as the default variant
 
 // Constants for mention popup height calculations
-const DESKTOP_ITEM_HEIGHT: f64 = 32.0;
-const MOBILE_ITEM_HEIGHT: f64 = 64.0;
-const MOBILE_USERNAME_SPACING: f64 = 0.5;
-
 // Constants for search behavior
 const DESKTOP_MAX_VISIBLE_ITEMS: usize = 10;
 const MOBILE_MAX_VISIBLE_ITEMS: usize = 5;
 const SEARCH_BUFFER_MULTIPLIER: usize = 2;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PopupStatusItemKind {
+    Loading,
+    NoMatches,
+}
+
+fn popup_status_item_is_selectable(_kind: PopupStatusItemKind) -> bool {
+    false
+}
+
+fn member_list_ready_for_mentions(member_count: usize, sync_pending: bool) -> bool {
+    member_count > 0 && !sync_pending
+}
+
+fn member_data_change_requires_popup_refresh(
+    previous_member_count: usize,
+    current_member_count: usize,
+    previous_sync_pending: bool,
+    current_sync_pending: bool,
+    search_state: &MentionSearchState,
+) -> bool {
+    let member_count_changed =
+        current_member_count > 0 && current_member_count != previous_member_count;
+    let sync_just_completed = previous_sync_pending && !current_sync_pending;
+
+    (member_count_changed || sync_just_completed)
+        && matches!(
+            search_state,
+            MentionSearchState::WaitingForMembers { .. } | MentionSearchState::Searching { .. }
+        )
+}
 
 script_mod! {
     use mod.prelude.widgets.*
@@ -539,7 +567,7 @@ impl Widget for MentionableTextInput {
 
         // Best practice: Always check Scope first to get current context
         // Scope represents the current widget context as passed down from parents
-        let (scope_room_id, scope_member_count) = {
+        let (scope_room_id, scope_member_count, scope_sync_pending) = {
             let room_props = scope
                 .props
                 .get::<RoomScreenProps>()
@@ -549,8 +577,19 @@ impl Widget for MentionableTextInput {
                 .as_ref()
                 .map(|members| members.len())
                 .unwrap_or(0);
-            (room_props.room_name_id.room_id().clone(), member_count)
+            (
+                room_props.room_name_id.room_id().clone(),
+                member_count,
+                room_props.room_members_sync_pending,
+            )
         };
+
+        self.refresh_popup_for_member_change(
+            cx,
+            scope,
+            scope_member_count,
+            scope_sync_pending,
+        );
 
         // Check search channel on every frame if we're searching
         if let MentionSearchState::Searching { .. } = &self.search_state {
@@ -752,26 +791,6 @@ impl Widget for MentionableTextInput {
             }
         }
 
-        // Check if we were waiting for members and they're now available
-        // When members arrive, always update regardless of focus state
-        // update_user_list will handle popup visibility based on current focus
-        if let MentionSearchState::WaitingForMembers {
-            trigger_position: _,
-            pending_search_text,
-        } = &self.search_state
-        {
-            let room_props = scope
-                .props
-                .get::<RoomScreenProps>()
-                .expect("RoomScreenProps should be available in scope");
-
-            if let Some(room_members) = &room_props.room_members {
-                if !room_members.is_empty() {
-                    let search_text = pending_search_text.clone();
-                    self.update_user_list(cx, &search_text, scope);
-                }
-            }
-        }
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
@@ -803,6 +822,69 @@ impl Widget for MentionableTextInput {
 }
 
 impl MentionableTextInput {
+    fn active_search_text(&self) -> Option<String> {
+        match &self.search_state {
+            MentionSearchState::WaitingForMembers {
+                pending_search_text,
+                ..
+            } => Some(pending_search_text.clone()),
+            MentionSearchState::Searching { search_text, .. } => Some(search_text.clone()),
+            _ => None,
+        }
+    }
+
+    fn add_popup_status_item(
+        &mut self,
+        cx: &Cx,
+        widget: WidgetRef,
+        item_kind: PopupStatusItemKind,
+    ) {
+        if popup_status_item_is_selectable(item_kind) {
+            self.cmd_text_input.add_item(cx, widget);
+        } else {
+            self.cmd_text_input.add_unselectable_item(cx, widget);
+        }
+    }
+
+    fn refresh_popup_for_member_change(
+        &mut self,
+        cx: &mut Cx,
+        scope: &mut Scope,
+        current_member_count: usize,
+        current_sync_pending: bool,
+    ) {
+        let previous_member_count = self.last_member_count;
+        let previous_sync_pending = self.last_sync_pending;
+        self.last_member_count = current_member_count;
+        self.last_sync_pending = current_sync_pending;
+
+        if !member_data_change_requires_popup_refresh(
+            previous_member_count,
+            current_member_count,
+            previous_sync_pending,
+            current_sync_pending,
+            &self.search_state,
+        ) {
+            return;
+        }
+
+        if self.pending_popup_cleanup {
+            return;
+        }
+
+        let text_input_area = self.cmd_text_input.text_input_ref().area();
+        if !cx.has_key_focus(text_input_area) {
+            return;
+        }
+
+        let Some(search_text) = self.active_search_text() else {
+            return;
+        };
+
+        self.last_search_text = None;
+        self.update_user_list(cx, &search_text, scope);
+    }
+
     /// Check if currently in any form of search mode
     fn is_searching(&self) -> bool {
         matches!(
@@ -850,7 +932,7 @@ impl MentionableTextInput {
         cx: &mut Cx,
         search_text: &str,
         room_props: &RoomScreenProps,
-        is_desktop: bool,
+        _is_desktop: bool,
     ) -> bool {
         // Don't show @room option in direct messages
         if false /* TODO: add is_direct_room to RoomScreenProps */ {
@@ -913,12 +995,6 @@ impl MentionableTextInput {
             );
         }
 
-        // Apply layout and height styling based on device type
-        let new_height = if is_desktop {
-            DESKTOP_ITEM_HEIGHT
-        } else {
-            MOBILE_ITEM_HEIGHT
-        };
         // Layout is set in the DSL template (defaults to desktop layout).
         // TODO: add mobile-specific layout when adaptive layout is implemented.
 
@@ -933,7 +1009,7 @@ impl MentionableTextInput {
         cx: &mut Cx,
         results: &[usize],
         user_items_limit: usize,
-        is_desktop: bool,
+        _is_desktop: bool,
         room_props: &RoomScreenProps,
     ) -> usize {
         let mut items_added = 0;
@@ -1011,14 +1087,14 @@ impl MentionableTextInput {
 
     /// Update popup visibility and layout based on current state
     fn update_popup_visibility(&mut self, cx: &mut Cx, scope: &mut Scope, has_items: bool) {
-        let mut popup = self.cmd_text_input.view(cx, ids!(popup));
+        let popup = self.cmd_text_input.view(cx, ids!(popup));
 
         // Get current state from props
         let room_props = scope
             .props
             .get::<RoomScreenProps>()
             .expect("RoomScreenProps should be available in scope");
-        let members_sync_pending = false; // TODO: add room_members_sync_pending to RoomScreenProps
+        let members_sync_pending = room_props.room_members_sync_pending;
         let members_available = room_props
             .room_members
             .as_ref()
@@ -1386,11 +1462,11 @@ impl MentionableTextInput {
         // This gives visual feedback that more members may be loading
         // IMPORTANT: Don't call show_loading_indicator here as it calls clear_items()
         // which would remove the user list we just added
-        if false /* TODO: add room_members_sync_pending to RoomScreenProps */ {
+        if room_props.room_members_sync_pending {
             // Add loading indicator widget without clearing existing items
             if let Some(ptr) = self.loading_indicator {
                 let loading_item = crate::widget_ref_from_live_ptr(cx, Some(ptr));
-                self.cmd_text_input.add_item(cx, loading_item.clone());
+                self.add_popup_status_item(cx, loading_item.clone(), PopupStatusItemKind::Loading);
                 self.loading_indicator_ref = Some(loading_item.clone());
 
                 // Start the loading animation
@@ -1459,9 +1535,17 @@ impl MentionableTextInput {
         } else {
             MOBILE_MAX_VISIBLE_ITEMS
         };
+        let members_sync_pending = room_props.room_members_sync_pending;
+        let cached_member_count = room_props
+            .room_members
+            .as_ref()
+            .map(|members| members.len())
+            .unwrap_or(0);
 
         let cached_members = match &room_props.room_members {
-            Some(members) if !members.is_empty() => {
+            Some(members)
+                if member_list_ready_for_mentions(cached_member_count, members_sync_pending) =>
+            {
                 // Members available, continue to search
                 members.clone()
             }
@@ -1470,10 +1554,11 @@ impl MentionableTextInput {
                     self.search_state,
                     MentionSearchState::WaitingForMembers { .. }
                 );
+                let needs_local_member_fetch = cached_member_count == 0 && !members_sync_pending;
 
                 self.cancel_active_search();
 
-                if !already_waiting {
+                if !already_waiting && needs_local_member_fetch {
                     submit_async_request(MatrixRequest::GetRoomMembers {
                         timeline_kind: crate::sliding_sync::TimelineKind::MainRoom { room_id: room_props.room_name_id.room_id().clone() },
                         memberships: RoomMemberships::JOIN,
@@ -1637,33 +1722,23 @@ impl MentionableTextInput {
 
     /// Shows the loading indicator when waiting for initial members to be loaded
     fn show_loading_indicator(&mut self, cx: &mut Cx) {
-        // Check if we already have a loading indicator displayed
-        // Avoid recreating it on every call, which would prevent animation from playing
-        if let Some(ref existing_indicator) = self.loading_indicator_ref {
-            // Already showing, just ensure animation is running
-            existing_indicator
-                .bouncing_dots(cx, ids!(loading_animation))
-                .start_animation(cx);
-            cx.new_next_frame();
-            return;
-        }
-
-        // Clear old items before creating new loading indicator
+        // Rebuild the popup body every time. Mention search can request loading twice
+        // within the same actions batch (`should_build_items` and `Changed`), and the
+        // second pass may have already cleared the list before we get here again.
         self.cmd_text_input.clear_items(cx);
 
-        // Create fresh loading indicator widget
-        let Some(ptr) = self.loading_indicator else {
-            return;
+        let loading_item = if let Some(existing_indicator) = self.loading_indicator_ref.clone() {
+            existing_indicator
+        } else {
+            let Some(ptr) = self.loading_indicator else {
+                return;
+            };
+            crate::widget_ref_from_live_ptr(cx, Some(ptr))
         };
-        let loading_item = crate::widget_ref_from_live_ptr(cx, Some(ptr));
 
-        // Start the loading animation
+        self.add_popup_status_item(cx, loading_item.clone(), PopupStatusItemKind::Loading);
+        self.loading_indicator_ref = Some(loading_item.clone());
         loading_item.bouncing_dots(cx, ids!(loading_animation)).start_animation(cx);
-
-        // Now that the widget is in the UI tree, start the loading animation
-        loading_item
-            .bouncing_dots(cx, ids!(loading_animation))
-            .start_animation(cx);
         cx.new_next_frame();
 
         // Setup popup dimensions for loading state
@@ -1696,11 +1771,10 @@ impl MentionableTextInput {
         let no_matches_item = crate::widget_ref_from_live_ptr(cx, Some(ptr));
 
         // Add the no matches indicator to the popup
-        self.cmd_text_input.add_item(cx, no_matches_item);
+        self.add_popup_status_item(cx, no_matches_item, PopupStatusItemKind::NoMatches);
         self.loading_indicator_ref = None;
 
         // Setup popup dimensions for no matches state
-        let mut popup = self.cmd_text_input.view(cx, ids!(popup));
         let header_view = self.cmd_text_input.view(cx, ids!(popup.header_view));
 
         // Ensure header is visible
@@ -1790,7 +1864,7 @@ impl MentionableTextInput {
         self.reset_search_state(cx);
 
         // Get popup and header view references
-        let mut popup = self.cmd_text_input.view(cx, ids!(popup));
+        let popup = self.cmd_text_input.view(cx, ids!(popup));
         let header_view = self.cmd_text_input.view(cx, ids!(popup.header_view));
 
         // Force hide header view - necessary when handling deletion operations
@@ -1939,5 +2013,87 @@ impl MentionableTextInputRef {
             let message = RoomMessageEventContent::text_markdown(entered_text);
             message.add_mentions(self.get_real_mentions_in_markdown_text(entered_text))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn popup_status_items_are_never_selectable() {
+        assert!(!popup_status_item_is_selectable(PopupStatusItemKind::Loading));
+        assert!(!popup_status_item_is_selectable(PopupStatusItemKind::NoMatches));
+    }
+
+    #[test]
+    fn member_list_waits_while_sync_is_pending() {
+        assert!(!member_list_ready_for_mentions(1, true));
+        assert!(!member_list_ready_for_mentions(0, false));
+        assert!(member_list_ready_for_mentions(3, false));
+    }
+
+    #[test]
+    fn member_count_change_refreshes_active_search() {
+        assert!(member_data_change_requires_popup_refresh(
+            2,
+            5,
+            false,
+            false,
+            &MentionSearchState::Searching {
+                trigger_position: 0,
+                search_text: "al".to_owned(),
+                receiver: std::sync::mpsc::channel().1,
+                accumulated_results: Vec::new(),
+                search_id: 1,
+                cancel_token: Arc::new(AtomicBool::new(false)),
+            },
+        ));
+    }
+
+    #[test]
+    fn member_count_change_refreshes_waiting_search_when_members_arrive() {
+        assert!(member_data_change_requires_popup_refresh(
+            0,
+            3,
+            false,
+            true,
+            &MentionSearchState::WaitingForMembers {
+                trigger_position: 0,
+                pending_search_text: "al".to_owned(),
+            },
+        ));
+    }
+
+    #[test]
+    fn unchanged_member_count_does_not_refresh_popup() {
+        assert!(!member_data_change_requires_popup_refresh(
+            3,
+            3,
+            false,
+            false,
+            &MentionSearchState::Searching {
+                trigger_position: 0,
+                search_text: "al".to_owned(),
+                receiver: std::sync::mpsc::channel().1,
+                accumulated_results: Vec::new(),
+                search_id: 1,
+                cancel_token: Arc::new(AtomicBool::new(false)),
+            },
+        ));
+    }
+
+    #[test]
+    fn sync_completion_refreshes_popup_even_without_member_count_change() {
+        assert!(member_data_change_requires_popup_refresh(
+            1,
+            1,
+            true,
+            false,
+            &MentionSearchState::WaitingForMembers {
+                trigger_position: 0,
+                pending_search_text: "al".to_owned(),
+            },
+        ));
     }
 }

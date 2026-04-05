@@ -18,7 +18,7 @@ use makepad_widgets::log;
 const BATCH_SIZE: usize = 10; // Number of results per streamed batch
 
 /// Pre-computed member sort key for fast empty search
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct MemberSortKey {
     /// Power level rank: 0=Admin, 1=Moderator, 2=User
     pub power_rank: u8,
@@ -35,6 +35,126 @@ pub struct PrecomputedMemberSort {
     pub sorted_indices: Vec<usize>,
     /// Pre-computed sort keys (parallel to original members array)
     pub member_keys: Vec<MemberSortKey>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct SearchCandidate {
+    priority: u8,
+    sort_key: MemberSortKey,
+    index: usize,
+}
+
+impl SearchCandidate {
+    fn from_member(
+        members: &[RoomMember],
+        index: usize,
+        priority: u8,
+        precomputed_sort: Option<&PrecomputedMemberSort>,
+    ) -> Self {
+        let sort_key = precomputed_sort
+            .map(|sort_data| sort_data.member_keys[index].clone())
+            .unwrap_or_else(|| member_sort_key_for_member(&members[index]));
+
+        Self {
+            priority,
+            sort_key,
+            index,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_for_test(
+        priority: u8,
+        power_rank: u8,
+        name_category: u8,
+        sort_key: &str,
+        index: usize,
+    ) -> Self {
+        Self {
+            priority,
+            sort_key: MemberSortKey {
+                power_rank,
+                name_category,
+                sort_key: sort_key.to_owned(),
+            },
+            index,
+        }
+    }
+}
+
+impl Ord for SearchCandidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.priority
+            .cmp(&other.priority)
+            .then_with(|| self.sort_key.cmp(&other.sort_key))
+            .then_with(|| self.index.cmp(&other.index))
+    }
+}
+
+impl PartialOrd for SearchCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn push_top_candidate(
+    heap: &mut BinaryHeap<SearchCandidate>,
+    max_results: usize,
+    candidate: SearchCandidate,
+) {
+    if max_results == 0 {
+        return;
+    }
+
+    if heap.len() < max_results {
+        heap.push(candidate);
+    } else if heap.peek().is_some_and(|worst| candidate < *worst) {
+        let _ = heap.pop();
+        heap.push(candidate);
+    }
+}
+
+fn member_sort_key_for_member(member: &RoomMember) -> MemberSortKey {
+    let power_rank = role_to_rank(member.suggested_role_for_power_level());
+
+    let raw_name = member
+        .display_name()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| member.user_id().localpart());
+
+    let stripped = raw_name.trim_start_matches(|c: char| !c.is_alphanumeric());
+    let sort_key = if stripped.is_empty() {
+        if raw_name.is_ascii() {
+            raw_name.to_ascii_lowercase()
+        } else {
+            raw_name.to_lowercase()
+        }
+    } else if stripped.is_ascii() {
+        stripped.to_ascii_lowercase()
+    } else {
+        stripped.to_lowercase()
+    };
+
+    let name_category = if !stripped.is_empty() {
+        match stripped.chars().next() {
+            Some(c) if c.is_alphabetic() => 0,
+            Some(c) if c.is_numeric() => 1,
+            _ => 2,
+        }
+    } else {
+        match raw_name.chars().next() {
+            Some(c) if c.is_alphabetic() => 0,
+            Some(c) if c.is_numeric() => 1,
+            _ => 2,
+        }
+    };
+
+    MemberSortKey {
+        power_rank,
+        name_category,
+        sort_key,
+    }
 }
 
 /// Pre-compute sort keys and indices for room members
@@ -58,60 +178,10 @@ pub fn precompute_member_sort(members: &[RoomMember]) -> PrecomputedMemberSort {
             }
         }
 
-        // Get power level rank
-        let power_rank = role_to_rank(member.suggested_role_for_power_level());
-
-        // Get normalized display name
-        let raw_name = member
-            .display_name()
-            .map(|n| n.trim())
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| member.user_id().localpart());
-
-        // Generate sort key by stripping leading non-alphanumeric
-        let stripped = raw_name.trim_start_matches(|c: char| !c.is_alphanumeric());
-        let sort_key = if stripped.is_empty() {
-            // Name is all symbols, use original
-            if raw_name.is_ascii() {
-                raw_name.to_ascii_lowercase()
-            } else {
-                raw_name.to_lowercase()
-            }
-        } else {
-            // Use stripped version for sorting
-            if stripped.is_ascii() {
-                stripped.to_ascii_lowercase()
-            } else {
-                stripped.to_lowercase()
-            }
-        };
-
-        // Determine name category based on stripped name for consistency
-        // This makes "!!!alice" categorized as alphabetic, not symbols
-        let name_category = if !stripped.is_empty() {
-            // Use first char of stripped name
-            match stripped.chars().next() {
-                Some(c) if c.is_alphabetic() => 0,
-                Some(c) if c.is_numeric() => 1,
-                _ => 2,
-            }
-        } else {
-            // Name is all symbols, use original first char
-            match raw_name.chars().next() {
-                Some(c) if c.is_alphabetic() => 0, // Shouldn't happen if stripped is empty
-                Some(c) if c.is_numeric() => 1,    // Shouldn't happen if stripped is empty
-                _ => 2,                            // Symbols
-            }
-        };
-
-        let key = MemberSortKey {
-            power_rank,
-            name_category,
-            sort_key: sort_key.clone(),
-        };
+        let key = member_sort_key_for_member(member);
 
         member_keys.push(key.clone());
-        sortable_members.push((power_rank, name_category, sort_key, index));
+        sortable_members.push((key.power_rank, key.name_category, key.sort_key.clone(), index));
     }
 
     // Sort all valid members
@@ -230,7 +300,7 @@ fn compute_empty_search_indices(
         return Some(indices);
     }
 
-    let mut valid_members: Vec<(u8, u8, usize)> = Vec::with_capacity(members.len());
+    let mut valid_members: Vec<(MemberSortKey, usize)> = Vec::with_capacity(members.len());
 
     for (index, member) in members.iter().enumerate() {
         if is_cancelled(cancel_token) {
@@ -241,55 +311,14 @@ fn compute_empty_search_indices(
             continue;
         }
 
-        let power_rank = role_to_rank(member.suggested_role_for_power_level());
-
-        let raw_name = member
-            .display_name()
-            .map(|n| n.trim())
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| member.user_id().localpart());
-
-        let stripped = raw_name.trim_start_matches(|c: char| !c.is_alphanumeric());
-        let name_category = if !stripped.is_empty() {
-            match stripped.chars().next() {
-                Some(c) if c.is_alphabetic() => 0,
-                Some(c) if c.is_numeric() => 1,
-                _ => 2,
-            }
-        } else {
-            2
-        };
-
-        valid_members.push((power_rank, name_category, index));
+        valid_members.push((member_sort_key_for_member(member), index));
     }
 
     if is_cancelled(cancel_token) {
         return None;
     }
 
-    valid_members.sort_by(|a, b| match a.0.cmp(&b.0) {
-        std::cmp::Ordering::Equal => match a.1.cmp(&b.1) {
-            std::cmp::Ordering::Equal => {
-                let name_a = members[a.2]
-                    .display_name()
-                    .map(|n| n.trim())
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| members[a.2].user_id().localpart());
-                let name_b = members[b.2]
-                    .display_name()
-                    .map(|n| n.trim())
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| members[b.2].user_id().localpart());
-
-                name_a
-                    .chars()
-                    .map(|c| c.to_ascii_lowercase())
-                    .cmp(name_b.chars().map(|c| c.to_ascii_lowercase()))
-            }
-            other => other,
-        },
-        other => other,
-    });
+    valid_members.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     if is_cancelled(cancel_token) {
         return None;
@@ -297,7 +326,7 @@ fn compute_empty_search_indices(
 
     valid_members.truncate(max_results);
 
-    Some(valid_members.into_iter().map(|(_, _, idx)| idx).collect())
+    Some(valid_members.into_iter().map(|(_, idx)| idx).collect())
 }
 
 fn compute_non_empty_search_indices(
@@ -312,7 +341,7 @@ fn compute_non_empty_search_indices(
         return None;
     }
 
-    let mut top_matches: BinaryHeap<(u8, usize)> = BinaryHeap::with_capacity(max_results);
+    let mut top_matches: BinaryHeap<SearchCandidate> = BinaryHeap::with_capacity(max_results);
     let mut high_priority_count = 0;
     let mut best_priority_seen = u8::MAX;
 
@@ -331,14 +360,11 @@ fn compute_non_empty_search_indices(
             }
             best_priority_seen = best_priority_seen.min(priority);
 
-            if top_matches.len() < max_results {
-                top_matches.push((priority, index));
-            } else if let Some(&(worst_priority, _)) = top_matches.peek() {
-                if priority < worst_priority {
-                    top_matches.pop();
-                    top_matches.push((priority, index));
-                }
-            }
+                push_top_candidate(
+                    &mut top_matches,
+                    max_results,
+                    SearchCandidate::from_member(members, index, priority, precomputed_sort),
+                );
 
             if max_results > 0
                 && high_priority_count >= max_results * 2
@@ -354,64 +380,13 @@ fn compute_non_empty_search_indices(
         return None;
     }
 
-    let mut all_matches: Vec<(u8, usize)> = top_matches.into_iter().collect();
-
-    all_matches.sort_by(|(priority_a, idx_a), (priority_b, idx_b)| {
-        match priority_a.cmp(priority_b) {
-            std::cmp::Ordering::Equal => {
-                if let Some(sort_data) = precomputed_sort {
-                    let key_a = &sort_data.member_keys[*idx_a];
-                    let key_b = &sort_data.member_keys[*idx_b];
-
-                    match key_a.power_rank.cmp(&key_b.power_rank) {
-                        std::cmp::Ordering::Equal => match key_a.name_category.cmp(&key_b.name_category) {
-                            std::cmp::Ordering::Equal => key_a.sort_key.cmp(&key_b.sort_key),
-                            other => other,
-                        },
-                        other => other,
-                    }
-                } else {
-                    let member_a = &members[*idx_a];
-                    let member_b = &members[*idx_b];
-
-                    let power_a = role_to_rank(member_a.suggested_role_for_power_level());
-                    let power_b = role_to_rank(member_b.suggested_role_for_power_level());
-
-                    match power_a.cmp(&power_b) {
-                        std::cmp::Ordering::Equal => {
-                            let name_a = member_a
-                                .display_name()
-                                .map(|n| n.trim())
-                                .filter(|n| !n.is_empty())
-                                .unwrap_or_else(|| member_a.user_id().localpart());
-                            let name_b = member_b
-                                .display_name()
-                                .map(|n| n.trim())
-                                .filter(|n| !n.is_empty())
-                                .unwrap_or_else(|| member_b.user_id().localpart());
-
-                            if name_a.is_ascii() && name_b.is_ascii() {
-                                name_a
-                                    .chars()
-                                    .map(|c| c.to_ascii_lowercase())
-                                    .cmp(name_b.chars().map(|c| c.to_ascii_lowercase()))
-                            } else {
-                                name_a.to_lowercase().cmp(&name_b.to_lowercase())
-                            }
-                        }
-                        other => other,
-                    }
-                }
-            }
-            other => other,
-        }
-    });
+    let all_matches = top_matches.into_sorted_vec();
 
     if is_cancelled(cancel_token) {
         return None;
     }
 
-    Some(all_matches.into_iter().map(|(_, idx)| idx).collect())
+    Some(all_matches.into_iter().map(|candidate| candidate.index).collect())
 }
 
 /// Search room members with optional pre-computed sort data
@@ -1182,6 +1157,36 @@ mod tests {
         let k5 = top_k(&items, 5);
         let priorities: Vec<u8> = k5.into_iter().map(|(p, _)| p).collect();
         assert_eq!(priorities, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_top_k_prefers_better_tie_breaker_when_priorities_match() {
+        let max_results = 2;
+        let mut heap = BinaryHeap::with_capacity(max_results);
+
+        push_top_candidate(
+            &mut heap,
+            max_results,
+            SearchCandidate::new_for_test(5, 2, 0, "zoe", 10),
+        );
+        push_top_candidate(
+            &mut heap,
+            max_results,
+            SearchCandidate::new_for_test(5, 2, 0, "mike", 11),
+        );
+        push_top_candidate(
+            &mut heap,
+            max_results,
+            SearchCandidate::new_for_test(5, 1, 0, "alice", 12),
+        );
+
+        let kept_names: Vec<_> = heap
+            .into_sorted_vec()
+            .into_iter()
+            .map(|candidate| candidate.sort_key.sort_key)
+            .collect();
+
+        assert_eq!(kept_names, vec!["alice".to_owned(), "mike".to_owned()]);
     }
 
     #[test]

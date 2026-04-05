@@ -2015,6 +2015,7 @@ impl Widget for RoomScreen {
                     room_name_id: self.room_name_id.clone().unwrap_or_else(|| RoomNameId::empty(room_id)),
                     timeline_kind: tl.kind.clone(),
                     room_members,
+                    room_members_sync_pending: tl.room_members_sync_pending,
                     room_avatar_url: self.room_avatar_url.clone(),
                     app_service_enabled,
                     app_service_room_bound,
@@ -2028,6 +2029,7 @@ impl Widget for RoomScreen {
                     timeline_kind: self.timeline_kind.clone()
                         .expect("BUG: room_name_id was set but timeline_kind was missing"),
                     room_members: None,
+                    room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
@@ -2046,6 +2048,7 @@ impl Widget for RoomScreen {
                     room_name_id: RoomNameId::empty(room_id.clone()),
                     timeline_kind: TimelineKind::MainRoom { room_id },
                     room_members: None,
+                    room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
@@ -3184,9 +3187,12 @@ impl RoomScreen {
                     }
                 }
                 TimelineUpdate::RoomMembersSynced => {
-                    // log!("process_timeline_updates(): room members fetched for room {}", tl.kind.room_id());
-                    // Here, to be most efficient, we could redraw only the user avatars and names in the timeline,
-                    // but for now we just fall through and let the final `redraw()` call re-draw the whole timeline view.
+                    tl.awaiting_post_sync_member_refresh = true;
+                    submit_async_request(MatrixRequest::GetRoomMembers {
+                        timeline_kind: tl.kind.clone(),
+                        memberships: matrix_sdk::RoomMemberships::JOIN,
+                        local_only: true,
+                    });
                 }
                 TimelineUpdate::RoomMembersListFetched { members } => {
                     let members = Arc::new(members);
@@ -3202,6 +3208,10 @@ impl RoomScreen {
                                 bot_user_id,
                             });
                         }
+                    }
+                    if tl.awaiting_post_sync_member_refresh {
+                        tl.room_members_sync_pending = false;
+                        tl.awaiting_post_sync_member_refresh = false;
                     }
                     tl.room_members = Some(members);
                 },
@@ -4065,6 +4075,8 @@ impl RoomScreen {
                 user_power: UserPowerLevels::all(),
                 // Room members start as None and get populated when fetched from the server
                 room_members: None,
+                room_members_sync_pending: false,
+                awaiting_post_sync_member_refresh: false,
                 // We assume timelines being viewed for the first time haven't been fully paginated.
                 fully_paginated: false,
                 backwards_pagination_in_flight: false,
@@ -4128,6 +4140,8 @@ impl RoomScreen {
             // Even though we specify that room member profiles should be lazy-loaded,
             // the matrix server still doesn't consistently send them to our client properly.
             // So we kick off a request to fetch the room members here upon first viewing the room.
+            tl_state.room_members_sync_pending = true;
+            tl_state.awaiting_post_sync_member_refresh = false;
             submit_async_request(MatrixRequest::SyncRoomMemberList {
                 timeline_kind: tl_state.kind.clone(),
             });
@@ -4464,6 +4478,7 @@ pub struct RoomScreenProps {
     pub room_name_id: RoomNameId,
     pub timeline_kind: TimelineKind,
     pub room_members: Option<Arc<Vec<RoomMember>>>,
+    pub room_members_sync_pending: bool,
     pub room_avatar_url: Option<OwnedMxcUri>,
     pub app_service_enabled: bool,
     pub app_service_room_bound: bool,
@@ -4622,6 +4637,12 @@ struct TimelineUiState {
 
     /// The list of room members for this room.
     room_members: Option<Arc<Vec<RoomMember>>>,
+
+    /// Whether the initial room-member sync is still in progress for this room.
+    room_members_sync_pending: bool,
+
+    /// Whether we're waiting for a refreshed local member snapshot after sync completion.
+    awaiting_post_sync_member_refresh: bool,
 
     /// Whether this room's timeline has been fully paginated, which means
     /// that the oldest (first) event in the timeline is locally synced and available.
