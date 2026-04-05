@@ -38,6 +38,30 @@ view.animator_cut(cx, ids!(highlight.on));
 ### Async Matrix Operations
 Always use `submit_async_request(MatrixRequest::*)`. Do NOT spawn raw tokio tasks for Matrix API calls.
 
+## Makepad 2.0 Skills
+
+When working on Makepad UI code, **always invoke the relevant Makepad 2.0 skill** before writing or debugging:
+
+| Situation | Skill to Use |
+|-----------|-------------|
+| UI not rendering, widget invisible, click not working | `makepad-2.0-troubleshooting` (Pitfalls #1-#44) |
+| DSL syntax questions, `script_mod!`, property system | `makepad-2.0-dsl` |
+| Layout issues (width/height/flow/align) | `makepad-2.0-layout` |
+| Hover effects, state transitions, animation | `makepad-2.0-animation` |
+| Shader code, `draw_bg`, `Sdf2d`, pixel functions | `makepad-2.0-shaders` |
+| Event handling, `handle_event`, actions, `script_apply_eval!` | `makepad-2.0-events` |
+| Widget catalog (View, Button, Label, etc.) | `makepad-2.0-widgets` |
+| Migrating from Makepad 1.x to 2.0 | `makepad-2.0-migration` |
+| App structure, `app_main!`, `MatchEvent` | `makepad-2.0-app-structure` |
+| Theme system, colors, fonts | `makepad-2.0-theme` |
+
+**Key pitfalls from this project** (in `makepad-2.0-troubleshooting`):
+- **#40**: `script_apply_eval!` fails on dynamic widgets — use Animator instead
+- **#41**: DSL constants (`Right`, `Fit`, `Align`) unavailable at runtime in `script_apply_eval!`
+- **#42**: `Dock.load_state()` corrupts DrawList references
+- **#43**: Named children: `=` vs `:=` in `script_mod!`
+- **#44**: `draw_bg:` replaces vs `draw_bg +:` merges
+
 ## Build & Test
 
 ```bash
