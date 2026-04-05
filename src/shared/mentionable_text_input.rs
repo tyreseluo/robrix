@@ -1301,7 +1301,7 @@ impl MentionableTextInput {
             self.check_search_channel(cx, scope);
 
             // Redraw to ensure UI updates are visible
-            cx.redraw_all();
+            self.redraw(cx);
         } else if self.is_searching() {
             self.close_mention_popup(cx);
         }
@@ -1483,7 +1483,7 @@ impl MentionableTextInput {
         self.update_popup_visibility(cx, scope, items_added > 0);
 
         // Force immediate redraw to ensure UI updates are visible
-        cx.redraw_all();
+        self.redraw(cx);
     }
 
     /// Updates the mention suggestion list based on search
@@ -1612,7 +1612,7 @@ impl MentionableTextInput {
         };
         self.search_results_pending = true;
 
-        let precomputed_sort = None /* TODO: add room_members_sort to RoomScreenProps */;
+        let precomputed_sort = room_props.room_members_sort.clone();
         let cancel_token_for_job = cancel_token.clone();
         cpu_worker::spawn_cpu_job(cx, CpuJob::SearchRoomMembers(SearchRoomMembersJob {
             members: cached_members,
@@ -1637,27 +1637,17 @@ impl MentionableTextInput {
             return None;
         }
 
-        // Check cache and rebuild if text changed (performance optimization)
-        let (text_graphemes_owned, byte_positions) = if let Some((cached_text, cached_graphemes, cached_positions)) = &self.cached_text_analysis {
-            if cached_text == text {
-                // Cache hit - use cached data
-                (cached_graphemes.clone(), cached_positions.clone())
-            } else {
-                // Cache miss - rebuild and update cache
-                let graphemes_owned: Vec<String> = text.graphemes(true).map(|s| s.to_string()).collect();
-                let positions = utils::build_grapheme_byte_positions(text);
-                self.cached_text_analysis = Some((text.to_string(), graphemes_owned.clone(), positions.clone()));
-                (graphemes_owned, positions)
-            }
-        } else {
-            // No cache - build and cache
+        // Ensure cache is up-to-date (rebuild only if text changed)
+        let needs_rebuild = self.cached_text_analysis.as_ref()
+            .map_or(true, |(cached_text, _, _)| cached_text != text);
+        if needs_rebuild {
             let graphemes_owned: Vec<String> = text.graphemes(true).map(|s| s.to_string()).collect();
             let positions = utils::build_grapheme_byte_positions(text);
-            self.cached_text_analysis = Some((text.to_string(), graphemes_owned.clone(), positions.clone()));
-            (graphemes_owned, positions)
-        };
+            self.cached_text_analysis = Some((text.to_string(), graphemes_owned, positions));
+        }
 
-        // Convert owned strings to slices for processing
+        // Borrow directly from cache — no clone needed
+        let (_, text_graphemes_owned, byte_positions) = self.cached_text_analysis.as_ref().unwrap();
         let text_graphemes: Vec<&str> = text_graphemes_owned.iter().map(|s| s.as_str()).collect();
 
         // Use utility function to convert byte position to grapheme index

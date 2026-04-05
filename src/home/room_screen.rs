@@ -2016,6 +2016,7 @@ impl Widget for RoomScreen {
                     timeline_kind: tl.kind.clone(),
                     room_members,
                     room_members_sync_pending: tl.room_members_sync_pending,
+                    room_members_sort: tl.room_members_sort.clone(),
                     room_avatar_url: self.room_avatar_url.clone(),
                     app_service_enabled,
                     app_service_room_bound,
@@ -2029,6 +2030,7 @@ impl Widget for RoomScreen {
                     timeline_kind: self.timeline_kind.clone()
                         .expect("BUG: room_name_id was set but timeline_kind was missing"),
                     room_members: None,
+                    room_members_sort: None,
                     room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
@@ -2048,6 +2050,7 @@ impl Widget for RoomScreen {
                     room_name_id: RoomNameId::empty(room_id.clone()),
                     timeline_kind: TimelineKind::MainRoom { room_id },
                     room_members: None,
+                    room_members_sort: None,
                     room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
@@ -3213,6 +3216,9 @@ impl RoomScreen {
                         tl.room_members_sync_pending = false;
                         tl.awaiting_post_sync_member_refresh = false;
                     }
+                    tl.room_members_sort = Some(Arc::new(
+                        crate::room::member_search::precompute_member_sort(&members)
+                    ));
                     tl.room_members = Some(members);
                 },
                 TimelineUpdate::MediaFetched(request) => {
@@ -4075,7 +4081,8 @@ impl RoomScreen {
                 user_power: UserPowerLevels::all(),
                 // Room members start as None and get populated when fetched from the server
                 room_members: None,
-                room_members_sync_pending: false,
+                room_members_sort: None,
+                    room_members_sync_pending: false,
                 awaiting_post_sync_member_refresh: false,
                 // We assume timelines being viewed for the first time haven't been fully paginated.
                 fully_paginated: false,
@@ -4479,6 +4486,8 @@ pub struct RoomScreenProps {
     pub timeline_kind: TimelineKind,
     pub room_members: Option<Arc<Vec<RoomMember>>>,
     pub room_members_sync_pending: bool,
+    /// Pre-computed sort order for room members (for mention search optimization).
+    pub room_members_sort: Option<Arc<crate::room::member_search::PrecomputedMemberSort>>,
     pub room_avatar_url: Option<OwnedMxcUri>,
     pub app_service_enabled: bool,
     pub app_service_room_bound: bool,
@@ -4637,6 +4646,9 @@ struct TimelineUiState {
 
     /// The list of room members for this room.
     room_members: Option<Arc<Vec<RoomMember>>>,
+
+    /// Pre-computed sort order for room members (for efficient mention search).
+    room_members_sort: Option<Arc<crate::room::member_search::PrecomputedMemberSort>>,
 
     /// Whether the initial room-member sync is still in progress for this room.
     room_members_sync_pending: bool,
