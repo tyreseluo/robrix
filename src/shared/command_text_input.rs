@@ -251,8 +251,6 @@ impl Widget for CommandTextInput {
         if cx.has_key_focus(self.key_controller_text_input_ref().area()) {
             if let Event::KeyDown(key_event) = event {
                 let popup_visible = self.view(cx, ids!(popup)).visible();
-                log!("DEBUG CommandTextInput::KeyDown: key={:?}, popup_visible={}, selectable_count={}, kb_focus={:?}",
-                    key_event.key_code, popup_visible, self.selectable_widgets.len(), self.keyboard_focus_index);
 
                 if popup_visible {
                     let mut eat_the_event = true;
@@ -316,14 +314,12 @@ impl Widget for CommandTextInput {
             let mut selected_by_click = None;
             let mut should_redraw = false;
 
-            log!("DEBUG CommandTextInput::Actions: self_ptr={:p}, selectable_count={}", self as *const _, self.selectable_widgets.len());
             for (idx, item) in self.selectable_widgets.iter().enumerate() {
                 let item = item.as_view();
 
                 let fd = item.finger_down(actions);
                 if fd.as_ref().map(|fe| fe.tap_count == 1).unwrap_or(false)
                 {
-                    log!("DEBUG CommandTextInput: finger_down on item {}", idx);
                     selected_by_click = Some((*item).clone());
 
                     // Clear keyboard focus when mouse is clicked
@@ -536,7 +532,6 @@ impl CommandTextInput {
     ///
     /// Normally called as response to `should_build_items`.
     pub fn clear_items(&mut self, cx: &Cx) {
-        log!("DEBUG CommandTextInput::clear_items: self_ptr={:p}, was_count={}", self as *const _, self.selectable_widgets.len());
         self.list(cx, ids!(list)).clear();
         self.selectable_widgets.clear();
         self.keyboard_focus_index = None;
@@ -549,7 +544,6 @@ impl CommandTextInput {
     pub fn add_item(&mut self, cx: &Cx, widget: WidgetRef) {
         self.list(cx, ids!(list)).add(widget.clone());
         self.selectable_widgets.push(widget);
-        log!("DEBUG CommandTextInput::add_item: self_ptr={:p}, new_count={}", self as *const _, self.selectable_widgets.len());
         self.keyboard_focus_index = self.keyboard_focus_index.or(Some(0));
     }
 
@@ -815,11 +809,20 @@ impl CommandTextInput {
         // The list widget (inner content) is drawn at its full height inside the scroll view.
         // When scroll=0, list top = scroll view top. When scrolled down by S,
         // list top is S pixels above scroll view top.
+        //
+        // NOTE: Must access List.area directly via borrow(), NOT via .as_view().area().
+        // List stores its drawn area in its own `area` field (set by end_turtle_with_area),
+        // while the deref View's area is never populated.
         let list_ref = self.list(cx, ids!(list));
-        let list_rect = list_ref.as_view().area().rect(cx);
-        if list_rect.size.y <= 0.0 {
-            return; // List hasn't been drawn yet
-        }
+        let list_rect = if let Some(inner) = list_ref.borrow() {
+            let r = inner.area.rect(cx);
+            if r.size.y <= 0.0 {
+                return; // List hasn't been drawn yet
+            }
+            r
+        } else {
+            return;
+        };
         let current_scroll = scroll_rect.pos.y - list_rect.pos.y;
 
         let new_scroll_y = if item_screen_bottom > view_height {

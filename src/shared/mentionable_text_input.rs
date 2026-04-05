@@ -159,8 +159,8 @@ enum MentionSearchState {
 // Constants for mention popup sizing and search behavior.
 // MAX_DISPLAY_ITEMS: total items loaded into the scrollable list.
 // MAX_SCROLL_HEIGHT: maximum pixel height of the scroll viewport.
-const DESKTOP_MAX_DISPLAY_ITEMS: usize = 50;
-const MOBILE_MAX_DISPLAY_ITEMS: usize = 25;
+const DESKTOP_MAX_DISPLAY_ITEMS: usize = 30;
+const MOBILE_MAX_DISPLAY_ITEMS: usize = 15;
 const DESKTOP_MAX_SCROLL_HEIGHT: f64 = 360.0; // ~10 user items
 const MOBILE_MAX_SCROLL_HEIGHT: f64 = 216.0;  // ~6 user items
 const SEARCH_BUFFER_MULTIPLIER: usize = 2;
