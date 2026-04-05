@@ -2257,6 +2257,15 @@ impl Widget for RoomScreen {
                     _ => {}
                 }
 
+                // Handle precomputed member sort ready (from background thread)
+                if let Some(sort_ready) = action.downcast_ref::<crate::cpu_worker::PrecomputedMemberSortReady>() {
+                    if let Some(tl) = self.tl_state.as_mut() {
+                        if tl.kind == sort_ready.timeline_kind {
+                            tl.room_members_sort = Some(sort_ready.sort.clone());
+                        }
+                    }
+                }
+
                 match action.downcast_ref::<CreateBotModalAction>() {
                     Some(CreateBotModalAction::Close) => {
                         self.close_create_bot_modal(cx);
@@ -3216,8 +3225,12 @@ impl RoomScreen {
                         tl.room_members_sync_pending = false;
                         tl.awaiting_post_sync_member_refresh = false;
                     }
-                    tl.room_members_sort = Some(Arc::new(
-                        crate::room::member_search::precompute_member_sort(&members)
+                    // Compute sort in background thread to avoid UI stall on large rooms
+                    crate::cpu_worker::spawn_cpu_job(cx, crate::cpu_worker::CpuJob::PrecomputeMemberSort(
+                        crate::cpu_worker::PrecomputeMemberSortJob {
+                            timeline_kind: tl.kind.clone(),
+                            members: Arc::clone(&members),
+                        }
                     ));
                     tl.room_members = Some(members);
                 },

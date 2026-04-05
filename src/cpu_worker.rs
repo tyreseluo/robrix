@@ -7,13 +7,27 @@
 use makepad_widgets::{Cx, CxOsApi};
 use std::sync::{atomic::AtomicBool, mpsc::Sender, Arc};
 use crate::{
-    room::member_search::{search_room_members_streaming_with_sort, PrecomputedMemberSort},
+    room::member_search::{self, search_room_members_streaming_with_sort, PrecomputedMemberSort},
     shared::mentionable_text_input::SearchResult,
+    sliding_sync::TimelineKind,
 };
 use matrix_sdk::room::RoomMember;
 
 pub enum CpuJob {
     SearchRoomMembers(SearchRoomMembersJob),
+    PrecomputeMemberSort(PrecomputeMemberSortJob),
+}
+
+/// Action posted back to UI thread when precomputed sort is ready.
+#[derive(Debug)]
+pub struct PrecomputedMemberSortReady {
+    pub timeline_kind: TimelineKind,
+    pub sort: Arc<PrecomputedMemberSort>,
+}
+
+pub struct PrecomputeMemberSortJob {
+    pub timeline_kind: TimelineKind,
+    pub members: Arc<Vec<RoomMember>>,
 }
 
 pub struct SearchRoomMembersJob {
@@ -48,9 +62,18 @@ fn run_member_search(params: SearchRoomMembersJob) {
     );
 }
 
+fn run_precompute_sort(params: PrecomputeMemberSortJob) {
+    let sort = member_search::precompute_member_sort(&params.members);
+    Cx::post_action(PrecomputedMemberSortReady {
+        timeline_kind: params.timeline_kind,
+        sort: Arc::new(sort),
+    });
+}
+
 /// Spawns a CPU-bound job on a detached native thread.
 pub fn spawn_cpu_job(cx: &mut Cx, job: CpuJob) {
     cx.spawn_thread(move || match job {
         CpuJob::SearchRoomMembers(params) => run_member_search(params),
+        CpuJob::PrecomputeMemberSort(params) => run_precompute_sort(params),
     });
 }
