@@ -3231,14 +3231,17 @@ impl RoomScreen {
                         tl.room_members_sync_pending = false;
                         tl.awaiting_post_sync_member_refresh = false;
                     }
-                    // Compute sort in background thread to avoid UI stall on large rooms
+                    // Invalidate old sort before replacing members to prevent
+                    // stale sort + new members mismatch (index out of bounds).
+                    tl.room_members_sort = None;
+                    tl.room_members = Some(Arc::clone(&members));
+                    // Compute new sort in background thread
                     crate::cpu_worker::spawn_cpu_job(cx, crate::cpu_worker::CpuJob::PrecomputeMemberSort(
                         crate::cpu_worker::PrecomputeMemberSortJob {
                             timeline_kind: tl.kind.clone(),
-                            members: Arc::clone(&members),
+                            members,
                         }
                     ));
-                    tl.room_members = Some(members);
                 },
                 TimelineUpdate::MediaFetched(request) => {
                     log!("process_timeline_updates(): media fetched for room {}", tl.kind.room_id());
