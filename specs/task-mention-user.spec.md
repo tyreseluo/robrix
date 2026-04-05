@@ -1,54 +1,52 @@
 spec: task
-name: "Migrate @mention User Feature from Makepad 1.0 to 2.0"
-tags: [feature, migration, mention, makepad-2.0]
+name: "@mention User Autocomplete"
+inherits: project
+tags: [feature, mention, ui, matrix]
 estimate: 3d
 ---
 
 ## Intent
 
-Migrate the complete @mention user feature from the robrix (Makepad 1.0) project to robrix2 (Makepad 2.0). The 1.0 project at `/Users/zhangalex/Work/Projects/FW/robius/robrix` has a fully working mention system (~4600 lines) covering autocomplete popup, background member search, mention insertion as markdown links, mention metadata in sent messages, and pill-style rendering in the timeline. The robrix2 project currently has only a placeholder `MentionableTextInput` with no actual mention functionality. The existing `CommandTextInput` popup infrastructure in robrix2 provides the autocomplete foundation to build upon.
+Provide @mention autocomplete functionality in the message input bar. When a user types `@` followed by text, a popup appears showing matching room members with avatars and display names. Selecting a member inserts a markdown mention link that includes Matrix mention metadata when the message is sent. The system supports background search for responsiveness in large rooms (1000+ members) and renders received mentions as colored pills in the timeline.
 
 ## Decisions
 
-- Reuse `CommandTextInput` as the popup base widget for mention autocomplete — do not recreate popup from scratch
-- Port `member_search.rs` algorithm as-is (pure Rust, no UI framework changes needed)
-- Port `cpu_worker.rs` for background thread search execution via `cx.spawn_thread()`
-- Mention insertion format: `[{username}](matrixUri)` markdown link with trailing space
-- Track mentions via `possible_mentions: BTreeMap<OwnedUserId, String>` and `possible_room_mention: bool`
-- Extract real mentions from message text using `matrix_sdk::ruma::events::Mentions` before sending
-- Enable existing `MatrixLinkPill` rendering in `html_or_plaintext.rs` by uncommenting Matrix URI parsing
-- `@room` mention availability controlled by user's room power levels via `MentionableTextInputAction::PowerLevelsUpdated`
+- Popup infrastructure: reuse `CommandTextInput` as the base widget via `#[deref]` composition
 - Trigger character: `@` preceded by whitespace or start of text
 - State machine: `Idle` → `WaitingForMembers` → `Searching` → `Idle` (also `JustCancelled` on ESC)
-- Search results streamed in batches of 10 via MPSC channel for progressive UI updates
-- Cancellation via `Arc<AtomicBool>` token for graceful background search abort
-- Makepad 2.0 syntax: `script_mod!` DSL, `#[derive(Script, ScriptHook, Widget)]`, `script_apply_eval!` for runtime property updates
+- Search execution: background thread via `cpu_worker::spawn_cpu_job()` with MPSC channel streaming results in batches of 10
+- Search cancellation: `Arc<AtomicBool>` token for graceful abort
+- Mention insertion format: `[{username}](matrixUri)` markdown link with trailing space
+- Mention tracking: `possible_mentions: BTreeMap<OwnedUserId, String>` for users, `possible_room_mention: bool` for @room
+- Mention extraction: scan final message text for tracked mention patterns before sending via `Mentions` struct
+- Highlight rendering: Animator states with `selected: instance(0.0)` shader variable + `animator_cut(cx, ids!(highlight.on/off))` — NOT `script_apply_eval!` (fails on dynamic widgets)
+- Timeline pill rendering: `MatrixLinkPill` widget with avatar + display name, current-user mentions in red `#d91b38`
+- @room availability: controlled by user's room power levels via `MentionableTextInputAction::PowerLevelsUpdated`
+- Popup styling: rounded corners (6px), border (#ddd), shadow, compact items (36px height)
+- Username display: bold text, user_id right-aligned in lighter gray
 
 ## Boundaries
 
 ### Allowed Changes
 - src/shared/mentionable_text_input.rs
+- src/shared/command_text_input.rs
 - src/shared/html_or_plaintext.rs
-- src/room/member_search.rs (new)
-- src/cpu_worker.rs (new)
+- src/room/member_search.rs
+- src/cpu_worker.rs
 - src/room/mod.rs
 - src/lib.rs
 - src/home/room_screen.rs
-- src/home/editing_pane.rs
 
 ### Forbidden
-- Do not modify `CommandTextInput` internals — extend via composition only
-- Do not add new cargo dependencies — use existing `matrix_sdk`, `unicode_segmentation`, `ruma` crates
-- Do not change the message sending pipeline in `sliding_sync.rs`
-- Do not modify the `RoomInputBar` DSL layout — the `mentionable_text_input` widget slot already exists
+- Do not modify the message sending pipeline in `sliding_sync.rs`
+- Do not modify `RoomInputBar` DSL layout — the `mentionable_text_input` widget slot already exists
 
 ## Out of Scope
 
 - Vertical alignment of inline MatrixLinkPill with surrounding text (known Makepad limitation)
-- Mention extraction during message editing (editing_pane.rs has a TODO for this)
+- Mention extraction during message editing (editing_pane.rs has a TODO)
 - Custom pill colors per user
-- Mention notification sound/vibration
-- Desktop vs mobile adaptive layout for popup items (use single layout initially)
+- Desktop vs mobile adaptive popup layout (single desktop layout used)
 
 ## Completion Criteria
 
@@ -66,10 +64,17 @@ Scenario: Search filters members by typed text
   Then the popup shows "Alice" and "Alex"
   And the popup does not show "Bob"
 
+Scenario: Keyboard arrow keys highlight items
+  Test: manual_test_arrow_key_highlight
+  Given the mention popup is showing results
+  When the user presses ArrowDown
+  Then the next item is visually highlighted with a blue background
+  And the previous item returns to default background
+
 Scenario: Selecting a mention inserts markdown link
   Test: manual_test_mention_insert_markdown
   Given the mention popup is showing results
-  When the user selects "Alice" from the popup
+  When the user selects "Alice" via Enter or mouse click
   Then the input text contains "[Alice](matrix:u/alice:example.com) "
   And the popup closes
   And the cursor is positioned after the trailing space
@@ -82,71 +87,64 @@ Scenario: ESC dismisses mention popup
   And typing another "@" immediately does not re-open the popup (JustCancelled state)
 
 Scenario: Sent message includes Mentions metadata
-  Test: manual_test_mentions_metadata_in_sent_message
-  Given the user inserted a mention for "@alice:example.com" in the input
+  Test: manual_test_mentions_metadata
+  Given the user inserted a mention for "@alice:example.com"
   When the user sends the message
-  Then the `RoomMessageEventContent` includes `Mentions` with `user_ids` containing "alice:example.com"
+  Then the RoomMessageEventContent includes Mentions with user_ids containing "alice:example.com"
 
 Scenario: @room mention requires power level
   Test: manual_test_at_room_power_level
   Given the user has room notification power level
   When the user types "@room" and selects the @room item
-  Then the message includes `Mentions` with `room: true`
+  Then the message includes Mentions with room: true
 
-Scenario: @room hidden when user lacks power level
-  Test: manual_test_at_room_hidden_without_power
+Scenario: @room hidden without power level
+  Test: manual_test_at_room_hidden
   Given the user does not have room notification power level
   When the user types "@"
   Then the popup does not show the @room option
 
-Scenario: Member search runs in background without UI freeze
-  Test: manual_test_background_search_responsive
+Scenario: Background search keeps UI responsive
+  Test: manual_test_background_search
   Given a room with 1000+ members
   When the user types "@a"
   Then the UI remains responsive during search
-  And results appear progressively as they are found
+  And results appear progressively
 
 Scenario: MatrixLinkPill renders for received mentions
-  Test: manual_test_pill_renders_in_timeline
-  Given a message containing an HTML mention link `<a href="matrix:u/alice:example.com">Alice</a>`
+  Test: manual_test_pill_renders
+  Given a message containing an HTML mention link
   When the message is displayed in the timeline
-  Then a pill-style widget renders with avatar and display name "Alice"
+  Then a pill-style widget renders with avatar and display name
 
 Scenario: Current user mention renders with red background
-  Test: manual_test_current_user_pill_red
+  Test: manual_test_current_user_pill
   Given a message mentions the current logged-in user
   When the message is displayed in the timeline
-  Then the mention pill renders with red background color `#d91b38`
+  Then the mention pill renders with red background color
 
-Scenario: Empty search shows no-matches indicator
-  Test: manual_test_no_matches_indicator
+Scenario: No matches shows indicator
+  Test: manual_test_no_matches
   Given a room with members "Alice", "Bob"
   When the user types "@zzzzzzz"
   Then the popup shows "No matching users found" indicator
 
-Scenario: Member search handles Unicode names
-  Test: manual_test_unicode_member_search
-  Given a room with a member named "张三" (Zhang San)
-  When the user types "@张"
-  Then the popup shows "张三" in the results
-
-Scenario: Mention popup handles room with no loaded members gracefully
-  Test: manual_test_no_members_loaded_error
-  Given a room where members have not been fetched yet
+Scenario: Popup shows loading while members sync
+  Test: manual_test_loading_during_sync
+  Given a room where members have not been synced yet
   When the user types "@"
   Then the popup shows a loading indicator
-  And the popup does not crash or show empty results prematurely
+  And after sync completes the member list appears
 
-Scenario: Stale search results are discarded after cancellation
+Scenario: Stale search results are discarded
   Test: manual_test_stale_search_discarded
-  Given a background member search is in progress for "@al"
-  When the user presses ESC to cancel and then types "@bo"
-  Then results from the first search "@al" are discarded
-  And only results matching "@bo" are displayed
+  Given a background search is in progress for "@al"
+  When the user presses ESC and then types "@bo"
+  Then results from "@al" search are discarded
+  And only "@bo" results are displayed
 
-Scenario: Member search compiles and runs correctly in Makepad 2.0
-  Test: manual_test_member_search_ported
-  Given the `member_search.rs` module is ported from robrix 1.0
-  When `cargo build` is executed
-  Then the project compiles without errors
-  And `search_room_members_streaming_with_sort()` produces correct results
+Scenario: Unicode member names are searchable
+  Test: manual_test_unicode_search
+  Given a room with a member named "Zhang San"
+  When the user types the first character of their name
+  Then the popup shows the member in results
