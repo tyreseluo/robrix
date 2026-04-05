@@ -1,7 +1,7 @@
 # Splash Script Manual (Terse AI Reference)
 
-Splash is Makepad's UI scripting language. It is whitespace-delimited. Robrix uses newlines to separate properties for readability.
-**Please use newlines to separate properties. Commas are tolerated but newlines are preferred.**
+Splash is Makepad's UI scripting language. It is whitespace-delimited, but Robrix uses commas or newlines to separate properties for readability (commas are treated as whitespace by the tokenizer).
+**Please use commas or newlines to separate properties, matching the surrounding code style.**
 
 **Do NOT use `Root{}` or `Window{}`** — those are host-level wrappers handled externally. Your output is the content inside a body/splash widget.
 
