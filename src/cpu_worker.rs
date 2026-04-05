@@ -23,6 +23,8 @@ pub enum CpuJob {
 pub struct PrecomputedMemberSortReady {
     pub timeline_kind: TimelineKind,
     pub sort: Arc<PrecomputedMemberSort>,
+    /// The member count this sort was computed for, used to reject stale results.
+    pub member_count: usize,
 }
 
 pub struct PrecomputeMemberSortJob {
@@ -63,10 +65,12 @@ fn run_member_search(params: SearchRoomMembersJob) {
 }
 
 fn run_precompute_sort(params: PrecomputeMemberSortJob) {
+    let member_count = params.members.len();
     let sort = member_search::precompute_member_sort(&params.members);
     Cx::post_action(PrecomputedMemberSortReady {
         timeline_kind: params.timeline_kind,
         sort: Arc::new(sort),
+        member_count,
     });
 }
 

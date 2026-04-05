@@ -2257,11 +2257,16 @@ impl Widget for RoomScreen {
                     _ => {}
                 }
 
-                // Handle precomputed member sort ready (from background thread)
+                // Handle precomputed member sort ready (from background thread).
+                // Validate member count to reject stale results from an older member list.
                 if let Some(sort_ready) = action.downcast_ref::<crate::cpu_worker::PrecomputedMemberSortReady>() {
                     if let Some(tl) = self.tl_state.as_mut() {
                         if tl.kind == sort_ready.timeline_kind {
-                            tl.room_members_sort = Some(sort_ready.sort.clone());
+                            let current_count = tl.room_members.as_ref().map_or(0, |m| m.len());
+                            if current_count == sort_ready.member_count {
+                                tl.room_members_sort = Some(sort_ready.sort.clone());
+                            }
+                            // else: stale sort from an older member snapshot, discard
                         }
                     }
                 }
