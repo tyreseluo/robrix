@@ -529,6 +529,7 @@ impl CommandTextInput {
         );
         self.clear_items(cx);
         self.reset_list_scroll(cx);
+        self.reset_list_scroll_height(cx);
     }
 
     /// Clears the list of items.
@@ -558,6 +559,16 @@ impl CommandTextInput {
     /// NOT on every streaming result refresh (which would cause scroll jumping).
     pub fn reset_list_scroll(&mut self, cx: &mut Cx) {
         self.list_scroll_view(cx).set_scroll_pos(cx, DVec2 { x: 0.0, y: 0.0 });
+    }
+
+    /// Resets the scroll viewport height to zero.
+    /// Prevents a stale tall viewport from showing as a blank box
+    /// between searches.
+    pub fn reset_list_scroll_height(&self, cx: &Cx) {
+        let scroll_view = self.list_scroll_view(cx);
+        if let Some(mut inner) = scroll_view.borrow_mut() {
+            inner.walk.height = Size::Fixed(0.0);
+        }
     }
 
     /// Add a custom unselectable item to the list.
