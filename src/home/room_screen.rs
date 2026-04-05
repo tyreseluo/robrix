@@ -2258,15 +2258,17 @@ impl Widget for RoomScreen {
                 }
 
                 // Handle precomputed member sort ready (from background thread).
-                // Validate member count to reject stale results from an older member list.
+                // Validate by Arc pointer identity to reject stale results from a
+                // different member snapshot (even if same length).
                 if let Some(sort_ready) = action.downcast_ref::<crate::cpu_worker::PrecomputedMemberSortReady>() {
                     if let Some(tl) = self.tl_state.as_mut() {
                         if tl.kind == sort_ready.timeline_kind {
-                            let current_count = tl.room_members.as_ref().map_or(0, |m| m.len());
-                            if current_count == sort_ready.member_count {
+                            let current_identity = tl.room_members.as_ref()
+                                .map_or(0, |m| Arc::as_ptr(m) as usize);
+                            if current_identity == sort_ready.members_identity {
                                 tl.room_members_sort = Some(sort_ready.sort.clone());
                             }
-                            // else: stale sort from an older member snapshot, discard
+                            // else: stale sort from a different member snapshot, discard
                         }
                     }
                 }
