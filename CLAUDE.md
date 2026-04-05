@@ -7,6 +7,7 @@ Before starting any task, read these documents:
 1. **[DESIGN.md](DESIGN.md)** — Architecture overview, module organization, technology stack
 2. **[specs/project.spec.md](specs/project.spec.md)** — Project-level constraints, decisions, and forbidden actions
 3. **[AGENTS.md](AGENTS.md)** — Makepad 2.0 patterns and DSL syntax reference
+4. **[MAKEPAD.md](MAKEPAD.md)** — Makepad 2.0 skill routing and design judgment entry point; **For ALL Makepad questions, FIRST load `makepad-2.0-design-judgment`.**
 
 ## Critical Rules
 
