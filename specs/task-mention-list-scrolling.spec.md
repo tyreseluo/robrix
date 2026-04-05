@@ -43,19 +43,23 @@ Keyboard navigation (ArrowUp/Down) is managed via `keyboard_focus_index` in `Com
 ### Scenario: Popup height is bounded
 - **Given** a room with 500+ members
 - **When** the popup shows unfiltered results
-- **Then** the popup height does not exceed a reasonable maximum (~400px desktop, ~250px mobile)
+- **Then** the popup height does not exceed a reasonable maximum (~360px desktop, ~216px mobile)
 - **And** the popup does not overflow the screen
 
 ## Decisions
 
 - Wrap the `List` widget in a `ScrollYView` named `list_scroll` in the CommandTextInput DSL — do NOT rewrite List's draw logic
-- Use `height: Fit{max: Abs(360)}` on `list_scroll` in MentionableTextInput DSL for auto-sizing with a cap (native Makepad bounded Fit)
-- Add separate `DESKTOP_MAX_DISPLAY_ITEMS = 50` / `MOBILE_MAX_DISPLAY_ITEMS = 25` constants for the scrollable list item limit
-- Also increase backend search limit (`max_results`) to use display limits — otherwise CPU search caps at 20/10 results
-- Keep existing `MAX_VISIBLE_ITEMS` constants for height reference only
-- Keyboard navigation (`on_keyboard_move`) auto-scrolls via `set_scroll_pos()` with manual position calculation — `scroll_bars_obj` is private
-- Add `reset_list_scroll()` called from `clear_popup()` and new-search-start — NOT from `clear_items()` (which runs on every streaming refresh and would cause scroll jumping)
+- ScrollYView requires a fixed height viewport (NOT `Fit` or `Fit{max}`). DSL default is `height: 200`; Rust dynamically sets the height via `walk.height = Size::Fixed(...)` based on item count and platform
+- `DESKTOP_MAX_DISPLAY_ITEMS = 30` / `MOBILE_MAX_DISPLAY_ITEMS = 15` — display limits for the scrollable list. Kept at 30/15 (not 50) for scroll performance since List is non-virtualized
+- `DESKTOP_MAX_SCROLL_HEIGHT = 360.0` / `MOBILE_MAX_SCROLL_HEIGHT = 216.0` — platform-specific viewport height caps
+- Backend search limit (`max_results`) uses `max_display_items * SEARCH_BUFFER_MULTIPLIER` to ensure enough results
+- Old `MAX_VISIBLE_ITEMS` constants removed — no longer needed
+- Keyboard auto-scroll derives current scroll offset from `List.area` rendered position (not a tracked field), so it works correctly after manual wheel/trackpad scrolling
+- Must access `List.area` via `borrow()`, NOT via `.as_view().area()` — List stores its drawn area in its own `area` field, not in the deref View's area
+- `reset_list_scroll()` and `reset_list_scroll_height()` called from `clear_popup()` — NOT from `clear_items()` (which runs on every streaming refresh)
+- `reset_list_scroll()` also called at new-search-start in `start_background_search()`
 - `clip_y: true` on `list_scroll` to prevent content leaking past rounded corners
+- Hot-path `log!` calls removed from KeyDown, Actions, clear_items, add_item for scroll performance
 
 ## Boundaries
 
@@ -68,7 +72,7 @@ Keyboard navigation (ArrowUp/Down) is managed via `keyboard_focus_index` in `Com
 - Do NOT change the trigger mechanism or search logic
 - Do NOT change the mention insertion or tracking behavior
 - Do NOT change the highlight/Animator system
-- Do NOT use `PortalList` (virtual scrolling) — overkill for 50 items, and would require rewriting item instantiation
+- Do NOT use `PortalList` (virtual scrolling) — would require rewriting item instantiation; deferred as future optimization if 30 items is still too slow
 - Do NOT run `cargo fmt`
 
 ## Completion Criteria
