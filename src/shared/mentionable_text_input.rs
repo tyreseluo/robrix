@@ -156,10 +156,13 @@ enum MentionSearchState {
 
 // Default is derived above; Idle is marked as the default variant
 
-// Constants for mention popup height calculations
-// Constants for search behavior
-const DESKTOP_MAX_VISIBLE_ITEMS: usize = 10;
-const MOBILE_MAX_VISIBLE_ITEMS: usize = 5;
+// Constants for mention popup sizing and search behavior.
+// MAX_DISPLAY_ITEMS: total items loaded into the scrollable list.
+// MAX_SCROLL_HEIGHT: maximum pixel height of the scroll viewport.
+const DESKTOP_MAX_DISPLAY_ITEMS: usize = 50;
+const MOBILE_MAX_DISPLAY_ITEMS: usize = 25;
+const DESKTOP_MAX_SCROLL_HEIGHT: f64 = 360.0; // ~10 user items
+const MOBILE_MAX_SCROLL_HEIGHT: f64 = 216.0;  // ~6 user items
 const SEARCH_BUFFER_MULTIPLIER: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -425,11 +428,13 @@ script_mod! {
                 }
             }
 
-            list +: {
-                height: Fit
-                clip_y: true
-                spacing: 0.0
-                padding: Inset{top: 2 bottom: 2 left: 0 right: 0}
+            list_scroll +: {
+                height: 360
+                list +: {
+                    height: Fit
+                    spacing: 0.0
+                    padding: Inset{top: 2 bottom: 2 left: 0 right: 0}
+                }
             }
         }
 
@@ -1421,10 +1426,10 @@ impl MentionableTextInput {
         self.loading_indicator_ref = None;
 
         let is_desktop = cx.display_context.is_desktop();
-        let max_visible_items: usize = if is_desktop {
-            DESKTOP_MAX_VISIBLE_ITEMS
+        let max_display_items: usize = if is_desktop {
+            DESKTOP_MAX_DISPLAY_ITEMS
         } else {
-            MOBILE_MAX_VISIBLE_ITEMS
+            MOBILE_MAX_DISPLAY_ITEMS
         };
         let mut items_added = 0;
 
@@ -1447,7 +1452,7 @@ impl MentionableTextInput {
 
         // Add user mention items using the results
         if !results_to_display.is_empty() {
-            let user_items_limit = max_visible_items.saturating_sub(has_room_item as usize);
+            let user_items_limit = max_display_items.saturating_sub(has_room_item as usize);
             let user_items_added = self.add_user_mention_items_from_results(
                 cx,
                 &results_to_display,
@@ -1476,6 +1481,42 @@ impl MentionableTextInput {
                 cx.new_next_frame();
 
                 items_added += 1;
+            }
+        }
+
+        // Dynamically adjust the scroll container height based on item count.
+        // ScrollYView needs a fixed height viewport. We default to 360px in the DSL,
+        // but shrink it when there are fewer items to keep the popup compact.
+        {
+            const USER_ITEM_HEIGHT: f64 = 36.0;
+            const ROOM_ITEM_HEIGHT: f64 = 40.0;
+            const STATUS_ITEM_HEIGHT: f64 = 48.0;
+            const LIST_PADDING: f64 = 4.0; // top: 2 + bottom: 2
+
+            let max_scroll_height = if is_desktop {
+                DESKTOP_MAX_SCROLL_HEIGHT
+            } else {
+                MOBILE_MAX_SCROLL_HEIGHT
+            };
+
+            // Estimate content height from items added
+            let content_height = if items_added == 0 {
+                0.0
+            } else {
+                let user_count = items_added.saturating_sub(has_room_item as usize)
+                    .saturating_sub(if room_props.room_members_sync_pending { 1 } else { 0 });
+                let room_count = has_room_item as usize;
+                let loading_count = if room_props.room_members_sync_pending { 1 } else { 0 };
+                (user_count as f64 * USER_ITEM_HEIGHT)
+                    + (room_count as f64 * ROOM_ITEM_HEIGHT)
+                    + (loading_count as f64 * STATUS_ITEM_HEIGHT)
+                    + LIST_PADDING
+            };
+
+            let scroll_height = content_height.min(max_scroll_height).max(0.0);
+            let scroll_view = self.cmd_text_input.list_scroll_view(cx);
+            if let Some(mut inner) = scroll_view.borrow_mut() {
+                inner.walk.height = Size::Fixed(scroll_height);
             }
         }
 
@@ -1529,11 +1570,14 @@ impl MentionableTextInput {
 
         self.last_search_text = Some(search_text.to_string());
 
+        // Reset scroll to top for a new search round
+        self.cmd_text_input.reset_list_scroll(cx);
+
         let is_desktop = cx.display_context.is_desktop();
-        let max_visible_items = if is_desktop {
-            DESKTOP_MAX_VISIBLE_ITEMS
+        let max_display_items = if is_desktop {
+            DESKTOP_MAX_DISPLAY_ITEMS
         } else {
-            MOBILE_MAX_VISIBLE_ITEMS
+            MOBILE_MAX_DISPLAY_ITEMS
         };
         let members_sync_pending = room_props.room_members_sync_pending;
         let cached_member_count = room_props
@@ -1596,7 +1640,7 @@ impl MentionableTextInput {
 
         // Prepare background search job parameters
         let search_text_clone = search_text.to_string();
-        let max_results = max_visible_items * SEARCH_BUFFER_MULTIPLIER;
+        let max_results = max_display_items * SEARCH_BUFFER_MULTIPLIER;
         let search_id = self.allocate_search_id();
 
         // Transition to Searching state with new receiver
@@ -1738,8 +1782,12 @@ impl MentionableTextInput {
         // Ensure header is visible
         header_view.set_visible(cx, true);
 
-        // Don't manually set popup height for loading - let it auto-size based on content
-        // This avoids conflicts with list +: { height: Fill }
+        // Set scroll container height to fit the loading indicator (48px + 4px padding)
+        let scroll_view = self.cmd_text_input.list_scroll_view(cx);
+        if let Some(mut inner) = scroll_view.borrow_mut() {
+            inner.walk.height = Size::Fixed(52.0);
+        }
+
         popup.set_visible(cx, true);
 
         // Maintain text input focus only if it currently has focus
@@ -1770,8 +1818,11 @@ impl MentionableTextInput {
         // Ensure header is visible
         header_view.set_visible(cx, true);
 
-        // Let popup auto-size based on content
-        
+        // Set scroll container height to fit the no-matches indicator (48px + 4px padding)
+        let scroll_view = self.cmd_text_input.list_scroll_view(cx);
+        if let Some(mut inner) = scroll_view.borrow_mut() {
+            inner.walk.height = Size::Fixed(52.0);
+        }
 
         // Maintain text input focus so user can continue typing, but only if currently focused
         let text_input_area = self.cmd_text_input.text_input_ref().area();

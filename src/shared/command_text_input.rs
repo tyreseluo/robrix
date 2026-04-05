@@ -111,8 +111,13 @@ script_mod! {
                 }
             }
 
-            list := mod.widgets.CommandTextInputList{
+            list_scroll := ScrollYView {
+                width: Fill
                 height: Fit
+                clip_y: true
+                list := mod.widgets.CommandTextInputList{
+                    height: Fit
+                }
             }
         }
 
@@ -208,6 +213,11 @@ pub struct CommandTextInput {
     /// Remember which was the last cursor position handled, to support `inline_search`.
     #[rust]
     prev_cursor_position: usize,
+
+    /// Tracked Y scroll position of the list scroll view.
+    /// We maintain this ourselves because ViewRef has no public get_scroll_pos().
+    #[rust]
+    list_scroll_y: f64,
 }
 
 impl Widget for CommandTextInput {
@@ -522,6 +532,7 @@ impl CommandTextInput {
             false,
         );
         self.clear_items(cx);
+        self.reset_list_scroll(cx);
     }
 
     /// Clears the list of items.
@@ -543,6 +554,15 @@ impl CommandTextInput {
         self.selectable_widgets.push(widget);
         log!("DEBUG CommandTextInput::add_item: self_ptr={:p}, new_count={}", self as *const _, self.selectable_widgets.len());
         self.keyboard_focus_index = self.keyboard_focus_index.or(Some(0));
+    }
+
+    /// Resets the list scroll position to the top.
+    ///
+    /// Call this when starting a new search or closing the popup,
+    /// NOT on every streaming result refresh (which would cause scroll jumping).
+    pub fn reset_list_scroll(&mut self, cx: &mut Cx) {
+        self.list_scroll_y = 0.0;
+        self.list_scroll_view(cx).set_scroll_pos(cx, DVec2 { x: 0.0, y: 0.0 });
     }
 
     /// Add a custom unselectable item to the list.
@@ -708,6 +728,11 @@ impl CommandTextInput {
         self.child_by_path(ids!(search_input)).as_text_input()
     }
 
+    /// Returns a reference to the scroll view wrapping the list.
+    pub fn list_scroll_view(&self, cx: &Cx) -> ViewRef {
+        self.view(cx, ids!(list_scroll))
+    }
+
     fn trigger_grapheme(&self) -> Option<&str> {
         self.trigger.as_ref().and_then(|t| graphemes(t).next())
     }
@@ -745,7 +770,50 @@ impl CommandTextInput {
         // This ensures keyboard navigation and mouse hover don't appear simultaneously
         self.pointer_hover_index = None;
 
+        // Auto-scroll to keep the focused item visible within the scroll container
+        self.scroll_to_focused_item(cx);
+
         self.redraw(cx);
+    }
+
+    /// Scrolls the list scroll view so the currently focused item is visible.
+    ///
+    /// Uses the tracked `list_scroll_y` instead of deriving scroll offset
+    /// from item rects (which is biased by list padding and fragile).
+    fn scroll_to_focused_item(&mut self, cx: &mut Cx) {
+        let Some(focus_idx) = self.keyboard_focus_index else { return };
+        let Some(widget) = self.selectable_widgets.get(focus_idx) else { return };
+
+        let item_rect = widget.area().rect(cx);
+        let scroll_view = self.list_scroll_view(cx);
+        let scroll_rect = scroll_view.area().rect(cx);
+
+        // Rects are invalid before the first draw
+        if item_rect.size.y <= 0.0 || scroll_rect.size.y <= 0.0 {
+            return;
+        }
+
+        let view_height = scroll_rect.size.y;
+
+        // The item's position within the visible viewport:
+        // When scrolled by `list_scroll_y`, the viewport shows content from
+        // [list_scroll_y .. list_scroll_y + view_height].
+        // Item's screen position relative to scroll view top:
+        let item_screen_top = item_rect.pos.y - scroll_rect.pos.y;
+        let item_screen_bottom = item_screen_top + item_rect.size.y;
+
+        let new_scroll_y = if item_screen_bottom > view_height {
+            // Item extends below the visible area — scroll down
+            self.list_scroll_y + (item_screen_bottom - view_height)
+        } else if item_screen_top < 0.0 {
+            // Item is above the visible area — scroll up
+            (self.list_scroll_y + item_screen_top).max(0.0)
+        } else {
+            return; // Already fully visible, no scroll needed
+        };
+
+        self.list_scroll_y = new_scroll_y;
+        scroll_view.set_scroll_pos(cx, DVec2 { x: 0.0, y: new_scroll_y });
     }
 
     fn update_highlights(&mut self, cx: &mut Cx) {
