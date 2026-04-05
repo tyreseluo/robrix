@@ -245,6 +245,8 @@ impl Widget for CommandTextInput {
         if cx.has_key_focus(self.key_controller_text_input_ref().area()) {
             if let Event::KeyDown(key_event) = event {
                 let popup_visible = self.view(cx, ids!(popup)).visible();
+                log!("DEBUG CommandTextInput::KeyDown: key={:?}, popup_visible={}, selectable_count={}, kb_focus={:?}",
+                    key_event.key_code, popup_visible, self.selectable_widgets.len(), self.keyboard_focus_index);
 
                 if popup_visible {
                     let mut eat_the_event = true;
@@ -308,14 +310,14 @@ impl Widget for CommandTextInput {
             let mut selected_by_click = None;
             let mut should_redraw = false;
 
+            log!("DEBUG CommandTextInput::Actions: self_ptr={:p}, selectable_count={}", self as *const _, self.selectable_widgets.len());
             for (idx, item) in self.selectable_widgets.iter().enumerate() {
                 let item = item.as_view();
 
-                if item
-                    .finger_down(actions)
-                    .map(|fe| fe.tap_count == 1)
-                    .unwrap_or(false)
+                let fd = item.finger_down(actions);
+                if fd.as_ref().map(|fe| fe.tap_count == 1).unwrap_or(false)
                 {
+                    log!("DEBUG CommandTextInput: finger_down on item {}", idx);
                     selected_by_click = Some((*item).clone());
 
                     // Clear keyboard focus when mouse is clicked
@@ -526,6 +528,7 @@ impl CommandTextInput {
     ///
     /// Normally called as response to `should_build_items`.
     pub fn clear_items(&mut self, cx: &Cx) {
+        log!("DEBUG CommandTextInput::clear_items: self_ptr={:p}, was_count={}", self as *const _, self.selectable_widgets.len());
         self.list(cx, ids!(list)).clear();
         self.selectable_widgets.clear();
         self.keyboard_focus_index = None;
@@ -538,6 +541,7 @@ impl CommandTextInput {
     pub fn add_item(&mut self, cx: &Cx, widget: WidgetRef) {
         self.list(cx, ids!(list)).add(widget.clone());
         self.selectable_widgets.push(widget);
+        log!("DEBUG CommandTextInput::add_item: self_ptr={:p}, new_count={}", self as *const _, self.selectable_widgets.len());
         self.keyboard_focus_index = self.keyboard_focus_index.or(Some(0));
     }
 
@@ -745,35 +749,17 @@ impl CommandTextInput {
     }
 
     fn update_highlights(&mut self, cx: &mut Cx) {
-        // Check if currently there is a keyboard-focused item
         let has_keyboard_focus = self.keyboard_focus_index.is_some();
 
         for (idx, item) in self.selectable_widgets.iter().enumerate() {
-            let mut item = item.clone();
-            script_apply_eval!(cx, item, {
-                show_bg: true,
-                cursor: MouseCursor.Hand
-            });
+            let is_highlighted = Some(idx) == self.keyboard_focus_index
+                || (Some(idx) == self.pointer_hover_index && !has_keyboard_focus);
 
-            // If there is a keyboard focus, prioritize it over mouse hover
-            // If there is no keyboard focus, show mouse hover
-            if Some(idx) == self.keyboard_focus_index {
-                // Keyboard-selected item is highlighted in blue
-                let color = self.color_focus;
-                script_apply_eval!(cx, item, {
-                    draw_bg.color: #(color)
-                });
-            } else if Some(idx) == self.pointer_hover_index && !has_keyboard_focus {
-                // Mouse-hovered item is highlighted in gray, but only when there is no keyboard focus
-                let color = self.color_hover;
-                script_apply_eval!(cx, item, {
-                    draw_bg.color: #(color)
-                });
+            let view = item.as_view();
+            if is_highlighted {
+                view.animator_cut(cx, ids!(highlight.on));
             } else {
-                // Default state
-                script_apply_eval!(cx, item, {
-                    draw_bg.color: #00000000
-                });
+                view.animator_cut(cx, ids!(highlight.off));
             }
         }
     }
@@ -864,6 +850,68 @@ fn get_head(text_input: &TextInputRef) -> usize {
 
 fn is_whitespace(grapheme: &str) -> bool {
     grapheme.chars().all(char::is_whitespace)
+}
+
+#[cfg(test)]
+fn popup_item_highlight_color(
+    idx: usize,
+    keyboard_focus_index: Option<usize>,
+    pointer_hover_index: Option<usize>,
+    color_focus: Vec4f,
+    color_hover: Vec4f,
+) -> Vec4f {
+    if Some(idx) == keyboard_focus_index {
+        if color_focus == Vec4f::default() {
+            vec4(0.11, 0.15, 0.30, 1.0)
+        } else {
+            color_focus
+        }
+    } else if Some(idx) == pointer_hover_index && keyboard_focus_index.is_none() {
+        if color_hover == Vec4f::default() {
+            vec4(0.11, 0.15, 0.30, 0.7)
+        } else {
+            color_hover
+        }
+    } else {
+        vec4(0.0, 0.0, 0.0, 0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_prefers_keyboard_focus_over_hover() {
+        let focus = vec4(0.11, 0.15, 0.30, 1.0);
+        let hover = vec4(0.80, 0.80, 0.80, 1.0);
+
+        assert_eq!(
+            popup_item_highlight_color(1, Some(1), Some(1), focus, hover),
+            focus,
+        );
+    }
+
+    #[test]
+    fn highlight_uses_hover_only_without_keyboard_focus() {
+        let focus = vec4(0.11, 0.15, 0.30, 1.0);
+        let hover = vec4(0.80, 0.80, 0.80, 1.0);
+
+        assert_eq!(
+            popup_item_highlight_color(1, None, Some(1), focus, hover),
+            hover,
+        );
+    }
+
+    #[test]
+    fn highlight_falls_back_to_dark_blue_when_focus_color_missing() {
+        let hover = vec4(0.80, 0.80, 0.80, 1.0);
+
+        assert_eq!(
+            popup_item_highlight_color(0, Some(0), None, Vec4f::default(), hover),
+            vec4(0.11, 0.15, 0.30, 1.0),
+        );
+    }
 }
 
 /// Reduced and adapted copy of the `List` widget from Moly.

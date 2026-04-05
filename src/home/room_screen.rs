@@ -2015,6 +2015,8 @@ impl Widget for RoomScreen {
                     room_name_id: self.room_name_id.clone().unwrap_or_else(|| RoomNameId::empty(room_id)),
                     timeline_kind: tl.kind.clone(),
                     room_members,
+                    room_members_sync_pending: tl.room_members_sync_pending,
+                    room_members_sort: tl.room_members_sort.clone(),
                     room_avatar_url: self.room_avatar_url.clone(),
                     app_service_enabled,
                     app_service_room_bound,
@@ -2028,6 +2030,8 @@ impl Widget for RoomScreen {
                     timeline_kind: self.timeline_kind.clone()
                         .expect("BUG: room_name_id was set but timeline_kind was missing"),
                     room_members: None,
+                    room_members_sort: None,
+                    room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
@@ -2046,6 +2050,8 @@ impl Widget for RoomScreen {
                     room_name_id: RoomNameId::empty(room_id.clone()),
                     timeline_kind: TimelineKind::MainRoom { room_id },
                     room_members: None,
+                    room_members_sort: None,
+                    room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
@@ -2249,6 +2255,21 @@ impl Widget for RoomScreen {
                         return false;
                     }
                     _ => {}
+                }
+
+                // Handle precomputed member sort ready (from background thread).
+                // Validate by Arc::ptr_eq to reject stale results from a different
+                // member snapshot. The Arc is kept alive in the action to prevent ABA.
+                if let Some(sort_ready) = action.downcast_ref::<crate::cpu_worker::PrecomputedMemberSortReady>() {
+                    if let Some(tl) = self.tl_state.as_mut() {
+                        if tl.kind == sort_ready.timeline_kind {
+                            let is_same = tl.room_members.as_ref()
+                                .is_some_and(|m| Arc::ptr_eq(m, &sort_ready.members_arc));
+                            if is_same {
+                                tl.room_members_sort = Some(sort_ready.sort.clone());
+                            }
+                        }
+                    }
                 }
 
                 match action.downcast_ref::<CreateBotModalAction>() {
@@ -3184,9 +3205,12 @@ impl RoomScreen {
                     }
                 }
                 TimelineUpdate::RoomMembersSynced => {
-                    // log!("process_timeline_updates(): room members fetched for room {}", tl.kind.room_id());
-                    // Here, to be most efficient, we could redraw only the user avatars and names in the timeline,
-                    // but for now we just fall through and let the final `redraw()` call re-draw the whole timeline view.
+                    tl.awaiting_post_sync_member_refresh = true;
+                    submit_async_request(MatrixRequest::GetRoomMembers {
+                        timeline_kind: tl.kind.clone(),
+                        memberships: matrix_sdk::RoomMemberships::JOIN,
+                        local_only: true,
+                    });
                 }
                 TimelineUpdate::RoomMembersListFetched { members } => {
                     let members = Arc::new(members);
@@ -3203,7 +3227,21 @@ impl RoomScreen {
                             });
                         }
                     }
-                    tl.room_members = Some(members);
+                    if tl.awaiting_post_sync_member_refresh {
+                        tl.room_members_sync_pending = false;
+                        tl.awaiting_post_sync_member_refresh = false;
+                    }
+                    // Invalidate old sort before replacing members to prevent
+                    // stale sort + new members mismatch (index out of bounds).
+                    tl.room_members_sort = None;
+                    tl.room_members = Some(Arc::clone(&members));
+                    // Compute new sort in background thread
+                    crate::cpu_worker::spawn_cpu_job(cx, crate::cpu_worker::CpuJob::PrecomputeMemberSort(
+                        crate::cpu_worker::PrecomputeMemberSortJob {
+                            timeline_kind: tl.kind.clone(),
+                            members,
+                        }
+                    ));
                 },
                 TimelineUpdate::MediaFetched(request) => {
                     log!("process_timeline_updates(): media fetched for room {}", tl.kind.room_id());
@@ -4065,6 +4103,9 @@ impl RoomScreen {
                 user_power: UserPowerLevels::all(),
                 // Room members start as None and get populated when fetched from the server
                 room_members: None,
+                room_members_sort: None,
+                    room_members_sync_pending: false,
+                awaiting_post_sync_member_refresh: false,
                 // We assume timelines being viewed for the first time haven't been fully paginated.
                 fully_paginated: false,
                 backwards_pagination_in_flight: false,
@@ -4128,6 +4169,8 @@ impl RoomScreen {
             // Even though we specify that room member profiles should be lazy-loaded,
             // the matrix server still doesn't consistently send them to our client properly.
             // So we kick off a request to fetch the room members here upon first viewing the room.
+            tl_state.room_members_sync_pending = true;
+            tl_state.awaiting_post_sync_member_refresh = false;
             submit_async_request(MatrixRequest::SyncRoomMemberList {
                 timeline_kind: tl_state.kind.clone(),
             });
@@ -4233,8 +4276,10 @@ impl RoomScreen {
             room_input_bar_state: room_input_bar.save_state(),
         };
         tl.saved_state = state;
-        // Clear room_members to avoid wasting memory (in case this room is never re-opened).
+        // Clear room_members and precomputed sort to avoid wasting memory
+        // (in case this room is never re-opened).
         tl.room_members = None;
+        tl.room_members_sort = None;
         // Store this Timeline's `TimelineUiState` in the global map of states.
         TIMELINE_STATES.with_borrow_mut(|ts| ts.insert(tl.kind.clone(), tl));
     }
@@ -4464,6 +4509,9 @@ pub struct RoomScreenProps {
     pub room_name_id: RoomNameId,
     pub timeline_kind: TimelineKind,
     pub room_members: Option<Arc<Vec<RoomMember>>>,
+    pub room_members_sync_pending: bool,
+    /// Pre-computed sort order for room members (for mention search optimization).
+    pub room_members_sort: Option<Arc<crate::room::member_search::PrecomputedMemberSort>>,
     pub room_avatar_url: Option<OwnedMxcUri>,
     pub app_service_enabled: bool,
     pub app_service_room_bound: bool,
@@ -4622,6 +4670,15 @@ struct TimelineUiState {
 
     /// The list of room members for this room.
     room_members: Option<Arc<Vec<RoomMember>>>,
+
+    /// Pre-computed sort order for room members (for efficient mention search).
+    room_members_sort: Option<Arc<crate::room::member_search::PrecomputedMemberSort>>,
+
+    /// Whether the initial room-member sync is still in progress for this room.
+    room_members_sync_pending: bool,
+
+    /// Whether we're waiting for a refreshed local member snapshot after sync completion.
+    awaiting_post_sync_member_refresh: bool,
 
     /// Whether this room's timeline has been fully paginated, which means
     /// that the oldest (first) event in the timeline is locally synced and available.
