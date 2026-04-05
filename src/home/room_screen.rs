@@ -4254,8 +4254,10 @@ impl RoomScreen {
             room_input_bar_state: room_input_bar.save_state(),
         };
         tl.saved_state = state;
-        // Clear room_members to avoid wasting memory (in case this room is never re-opened).
+        // Clear room_members and precomputed sort to avoid wasting memory
+        // (in case this room is never re-opened).
         tl.room_members = None;
+        tl.room_members_sort = None;
         // Store this Timeline's `TimelineUiState` in the global map of states.
         TIMELINE_STATES.with_borrow_mut(|ts| ts.insert(tl.kind.clone(), tl));
     }
