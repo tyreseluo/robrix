@@ -446,6 +446,7 @@ script_mod! {
             center +: {
                 text_input := RobrixTextInput {
                     empty_text: "Start typing..."
+                    is_multiline: true,
                 }
             }
         }

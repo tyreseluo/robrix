@@ -14,6 +14,9 @@ script_mod! {
 
     mod.widgets.IMG_APP_LOGO = crate_resource("self://resources/robrix_logo_alpha.png")
 
+    mod.widgets.ICON_EYE_OPEN   = crate_resource("self://resources/icons/eye_open.svg")
+    mod.widgets.ICON_EYE_CLOSED = crate_resource("self://resources/icons/eye_closed.svg")
+
     mod.widgets.SsoButton = RoundedView {
         width: Fit,
         height: Fit,
@@ -109,12 +112,57 @@ script_mod! {
                         empty_text: "User ID"
                     }
 
-                    password_input := RobrixTextInput {
+                    View {
                         width: 275, height: Fit
-                        flow: Right, // do not wrap
-                        padding: 10,
-                        empty_text: "Password"
-                        is_password: true,
+                        flow: Overlay,
+
+                        password_input := RobrixTextInput {
+                            width: Fill, height: Fit
+                            flow: Right, // do not wrap
+                            padding: Inset{top: 10, bottom: 10, left: 10, right: 40}
+                            empty_text: "Password"
+                            is_password: true,
+                        }
+
+                        View {
+                            width: Fill, height: Fill
+                            align: Align{x: 1.0, y: 0.5}
+
+                            show_password_button := Button {
+                                width: 36, height: 36,
+                                padding: 6,
+                                draw_bg +: {
+                                    color: #0000
+                                    color_hover: #0000
+                                    color_down: #0000
+                                    border_size: 0.0
+                                }
+                                draw_icon +: {
+                                    svg: (mod.widgets.ICON_EYE_CLOSED),
+                                    color: #8C8C8C,
+                                }
+                                icon_walk: Walk{width: 20, height: 20}
+                                text: ""
+                            }
+
+                            hide_password_button := Button {
+                                visible: false,
+                                width: 36, height: 36,
+                                padding: 6,
+                                draw_bg +: {
+                                    color: #0000
+                                    color_hover: #0000
+                                    color_down: #0000
+                                    border_size: 0.0
+                                }
+                                draw_icon +: {
+                                    svg: (mod.widgets.ICON_EYE_OPEN),
+                                    color: #8C8C8C,
+                                }
+                                icon_walk: Walk{width: 20, height: 20}
+                                text: ""
+                            }
+                        }
                     }
 
                     confirm_password_wrapper := View {
@@ -300,6 +348,8 @@ pub struct LoginScreen {
     #[deref] view: View,
     /// Whether the screen is showing the in-app sign-up flow.
     #[rust] signup_mode: bool,
+    /// Whether the password field is currently showing plaintext.
+    #[rust] password_visible: bool,
     /// Boolean to indicate if the SSO login process is still in flight
     #[rust] sso_pending: bool,
     /// The URL to redirect to after logging in with SSO.
@@ -423,6 +473,17 @@ impl WidgetMatchEvent for LoginScreen {
             self.view.view(cx, ids!(sso_view)).set_visible(cx, true);
             mode_toggle_button.set_visible(cx, true);
             cx.action(LoginAction::CancelAddAccount);
+            self.redraw(cx);
+        }
+
+        // Handle toggling password visibility
+        let show_pw_button = self.view.button(cx, ids!(show_password_button));
+        let hide_pw_button = self.view.button(cx, ids!(hide_password_button));
+        if show_pw_button.clicked(actions) || hide_pw_button.clicked(actions) {
+            self.password_visible = !self.password_visible;
+            password_input.toggle_is_password(cx);
+            show_pw_button.set_visible(cx, !self.password_visible);
+            hide_pw_button.set_visible(cx, self.password_visible);
             self.redraw(cx);
         }
 

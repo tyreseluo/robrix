@@ -25,8 +25,9 @@ use matrix_sdk_ui::timeline::{
 };
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
+use matrix_sdk_ui::sync_service::State;
 use crate::{
-    app::{AppState, AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{bot_binding_modal::BotBindingModalAction, create_bot_modal::{CreateBotModalAction, CreateBotModalWidgetExt}, delete_bot_modal::{DeleteBotModalAction, DeleteBotModalWidgetExt}, edited_indicator::EditedIndicatorWidgetRefExt, invite_modal::InviteModalAction, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, i18n::{AppLanguage, tr_fmt, tr_key}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
+    app::{AppState, AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{bot_binding_modal::BotBindingModalAction, create_bot_modal::{CreateBotModalAction, CreateBotModalWidgetExt}, delete_bot_modal::{DeleteBotModalAction, DeleteBotModalWidgetExt}, edited_indicator::EditedIndicatorWidgetRefExt, invite_modal::InviteModalAction, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, rooms_list_header::RoomsListHeaderAction, tombstone_footer::SuccessorRoomDetails}, i18n::{AppLanguage, tr_fmt, tr_key}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
@@ -488,6 +489,8 @@ script_mod! {
 
         thread_summary_latest := MessageHtml {
             flow: Right,
+            max_lines: 2
+            text_overflow: Ellipsis
         }
     }
 
@@ -617,6 +620,8 @@ script_mod! {
                         flow: Right, // do not wrap
                         padding: 0,
                         margin: Inset{bottom: 9.0, top: 20.0, right: 10.0,}
+                        max_lines: 1
+                        text_overflow: Ellipsis
                         draw_text +: {
                             text_style: USERNAME_TEXT_STYLE {},
                             color: (USERNAME_TEXT_COLOR)
@@ -3128,6 +3133,18 @@ impl Widget for RoomScreen {
                     }
                 }
 
+                // When transitioning from offline to online, clear stale `Requested`/`Failed`
+                // entries from per-room caches so they can be re-fetched.
+                if let Some(RoomsListHeaderAction::StateUpdate(new_state)) = action.downcast_ref() {
+                    if !matches!(new_state, State::Offline) {
+                        if let Some(tl) = self.tl_state.as_mut() {
+                            tl.media_cache.clear_all_pending_and_failed_requests();
+                            tl.link_preview_cache.clear_all_pending_and_failed_requests();
+                        }
+                    }
+                    continue;
+                }
+
                 // Handle the highlight animation for a message.
                 let Some(tl) = self.tl_state.as_mut() else { continue };
                 if let MessageHighlightAnimationState::Pending { item_id } = tl.message_highlight_animation_state {
@@ -4501,11 +4518,7 @@ impl RoomScreen {
                         // NOTE: this code was copied from the `MessageAction::JumpToRelated` handler;
                         //       we should deduplicate them at some point.
                         let speed = 50.0;
-                        // Scroll to the message right above the replied-to message.
-                        // FIXME: `smooth_scroll_to` should accept a scroll offset parameter too,
-                        //       so that we can scroll to the replied-to message and have it
-                        //       appear beneath the top of the viewport.
-                        portal_list.smooth_scroll_to(cx, index.saturating_sub(1), speed, None);
+                        portal_list.smooth_scroll_to(cx, index, speed, None, 10.0);
                         // start highlight animation.
                         tl.message_highlight_animation_state = MessageHighlightAnimationState::Pending {
                             item_id: index
@@ -5273,11 +5286,7 @@ impl RoomScreen {
         if let Some(index) = related_msg_tl_index {
             // log!("The related message {replied_to_event} was immediately found in room {}, scrolling to from index {reply_message_item_id} --> {index} (first ID {}).", tl.kind.room_id(), portal_list.first_id());
             let speed = 50.0;
-            // Scroll to the message right *before* the replied-to message.
-            // FIXME: `smooth_scroll_to` should accept a "scroll offset" (first scroll) parameter too,
-            //       so that we can scroll to the replied-to message and have it
-            //       appear beneath the top of the viewport.
-            portal_list.smooth_scroll_to(cx, index.saturating_sub(1), speed, None);
+            portal_list.smooth_scroll_to(cx, index, speed, None, 10.0);
             // start highlight animation.
             tl.message_highlight_animation_state = MessageHighlightAnimationState::Pending {
                 item_id: index
