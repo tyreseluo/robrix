@@ -38,7 +38,7 @@ use tokio::{
     sync::{broadcast, mpsc::{Sender, UnboundedReceiver, UnboundedSender}, watch, Notify}, task::JoinHandle, time::error::Elapsed,
 };
 use url::Url;
-use std::{borrow::Cow, cmp::{max, min}, future::Future, hash::{BuildHasherDefault, DefaultHasher}, iter::Peekable, ops::{Deref, DerefMut, Not}, path::{ Path, PathBuf }, sync::{Arc, LazyLock, Mutex}, time::Duration};
+use std::{borrow::Cow, cmp::{max, min}, future::Future, hash::{BuildHasherDefault, DefaultHasher}, iter::Peekable, ops::{Deref, DerefMut, Not}, path::{ Path, PathBuf }, sync::{Arc, LazyLock, Mutex, atomic::{AtomicBool, Ordering}}, time::Duration};
 use std::io;
 use hashbrown::{HashMap, HashSet};
 use crate::{
@@ -3198,6 +3198,12 @@ fn clear_account_switch_target() {
     }
 }
 
+/// Set to `true` when the access token has been rejected by the homeserver,
+/// signaling the main task to tear down the current session and wait for re-login.
+static TOKEN_EXPIRED: AtomicBool = AtomicBool::new(false);
+/// Notifies the main monitoring loop to wake up and check `TOKEN_EXPIRED`.
+static TOKEN_EXPIRED_NOTIFY: LazyLock<Notify> = LazyLock::new(Notify::new);
+
 
 /// Get a reference to the current sync service, if available.
 pub fn get_sync_service() -> Option<Arc<SyncService>> {
@@ -4568,11 +4574,15 @@ fn handle_session_changes(
                         "Your login token is no longer valid.\n\nPlease log in again."
                     };
                     error!("Session token is no longer valid (soft_logout: {soft_logout}). Prompting re-login.");
+                    TOKEN_EXPIRED.store(true, Ordering::Release);
+                    TOKEN_EXPIRED_NOTIFY.notify_one();
                     Cx::post_action(LoginAction::LoginFailure(msg.to_string()));
                     clear_persisted_session(client.user_id()).await;
                     let _ = session_reset_sender.send(SessionResetAction::Reauthenticate {
                         message: msg.to_string(),
                     });
+                    // Only prompt once — the SDK will keep emitting UnknownToken
+                    // for every rejected request, but one re-login prompt suffices.
                     break;
                 }
                 Ok(SessionChange::TokensRefreshed) => {}
@@ -4597,7 +4607,18 @@ fn handle_sync_service_state_subscriber(mut subscriber: Subscriber<sync_service:
                     if is_invalid_token_error(&e) {
                         // The access token is invalid; `handle_session_changes` will have
                         // already posted a LoginAction::LoginFailure, so just log here.
+                        // Stop the sync service and exit this loop to prevent further
+                        // state transitions (e.g., Offline) from triggering misleading
+                        // "cannot reach homeserver" notifications.
+                        // Setting TOKEN_EXPIRED signals the main monitoring loop to
+                        // tear down the current session and wait for re-login.
                         error!("Sync service stopped due to invalid/expired access token: {e}.");
+                        TOKEN_EXPIRED.store(true, Ordering::Release);
+                        TOKEN_EXPIRED_NOTIFY.notify_one();
+                        if let Some(ss) = get_sync_service() {
+                            ss.stop().await;
+                        }
+                        break;
                     } else {
                         log!("Restarting sync service due to error: {e}.");
                         if let Some(ss) = get_sync_service() {
@@ -4610,6 +4631,10 @@ fn handle_sync_service_state_subscriber(mut subscriber: Subscriber<sync_service:
                             );
                         }
                     }
+                }
+                _other if TOKEN_EXPIRED.load(Ordering::Acquire) => {
+                    log!("Ignoring sync service state update after token expiration.");
+                    break;
                 }
                 other => Cx::post_action(RoomsListHeaderAction::StateUpdate(other)),
             }

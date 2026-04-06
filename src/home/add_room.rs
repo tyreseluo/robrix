@@ -146,11 +146,6 @@ script_mod! {
         padding: Inset{top: 5, left: 15, right: 15, bottom: 0},
 
         title := TitleLabel {
-            flow: Flow.Right{wrap: true},
-            draw_text +: {
-                text_style: TITLE_TEXT {font_size: 13},
-                color: #000
-            }
             text: "Add/Explore Rooms and Spaces"
             draw_text +: {
                 text_style: theme.font_regular {font_size: 18},

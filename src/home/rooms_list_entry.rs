@@ -36,6 +36,8 @@ script_mod! {
         width: Fill, height: Fit
         flow: Flow.Right{wrap: false},
         padding: 0,
+        max_lines: 1
+        text_overflow: Ellipsis
         draw_text +: {
             color: #000,
             text_style: USERNAME_TEXT_STYLE { font_size: 10. }
@@ -59,6 +61,8 @@ script_mod! {
             html_view +: {
                 html +: {
                     font_size: 9.3
+                    max_lines: 2
+                    text_overflow: Ellipsis
                     text_style_normal +: { font_size: 9.3 }
                     text_style_italic +: { font_size: 9.3 }
                     text_style_bold +: { font_size: 9.3 }
@@ -68,6 +72,8 @@ script_mod! {
             }
             plaintext_view +: {
                 pt_label +: {
+                    max_lines: 2
+                    text_overflow: Ellipsis
                     draw_text +: {
                         text_style: theme.font_regular { font_size: 9.5 },
                     }

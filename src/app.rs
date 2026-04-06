@@ -89,30 +89,20 @@ script_mod! {
                     draw_bg.color: #F3F3F3
                     caption_label +: {
                         label +: {
-                            align: Align{x: 0.5},
                             draw_text +: { color: #0 }
                             text: "Robrix"
                         }
-                    }
-                    windows_buttons +: {
-                         // Note: these are the background colors of the buttons used in Windows:
-                        // * idle: Clear, for all three buttons.
-                        // * hover: #E9E9E9 for minimize and maximize, #E81123 for close.
-                        // * down: either darker (on light mode) or lighter (on dark mode).
-                        //
-                        // However, the DesktopButton widget doesn't support drawing a background color yet,
-                        // so these colors are the colors of the icon itself, not the background highlight.
-                        // When it supports that, we will keep the icon color always black,
-                        // and change the background color instead based on the above colors.
-                        min +: { draw_bg +: {color: #0, color_hover: #9, color_down: #3} }
-                        max +: { draw_bg +: {color: #0, color_hover: #9, color_down: #3} }
-                        close +: { draw_bg +: {color: #0, color_hover: #E81123, color_down: #FF0015} }
                     }
                 }
             
 
                 body +: {
-                    padding: 0,
+                    padding: Inset{
+                        top: (mod.widgets.SAFE_INSET_PAD_TOP),
+                        bottom: (mod.widgets.SAFE_INSET_PAD_BOTTOM),
+                        left: (mod.widgets.SAFE_INSET_PAD_LEFT),
+                        right: (mod.widgets.SAFE_INSET_PAD_RIGHT),
+                    }
 
                     View {
                         width: Fill, height: Fill,
@@ -617,15 +607,6 @@ impl MatchEvent for App {
             error!("Failed to load window state: {}", e);
         }
 
-        // Hide the caption bar on macOS and Linux, which use native window chrome.
-        // On Windows (with custom chrome), the caption bar is needed.
-        if matches!(cx.os_type(), OsType::Macos | OsType::LinuxWindow(_) | OsType::LinuxDirect) {
-            let mut window = self.ui.window(cx, ids!(main_window));
-            script_apply_eval!(cx, window, {
-                show_caption_bar: false
-            });
-        }
-
         self.update_login_visibility(cx);
         self.sync_app_language(cx);
 
@@ -848,7 +829,8 @@ impl MatchEvent for App {
                     self.update_login_visibility(cx);
                     self.ui.redraw(cx);
                 }
-                continue;
+                // Do NOT continue here — let the action propagate to the LoginScreen widget,
+                // which will open the login_status_modal to show the failure message.
             }
 
             if let RoomFilterAction::Changed(keywords) = action.as_widget_action().cast_ref() {
