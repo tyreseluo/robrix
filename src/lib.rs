@@ -73,6 +73,7 @@ pub mod tsp_dummy;
 
 
 // Matrix stuff
+pub mod cpu_worker;
 pub mod sliding_sync;
 pub mod space_service_sync;
 pub mod avatar_cache;
