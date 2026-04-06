@@ -697,6 +697,10 @@ impl MatchEvent for App {
                     }
                     RoomFilterResultTarget::RemoteUser(user_profile) => {
                         submit_async_request(MatrixRequest::OpenOrCreateDirectMessage {
+                            create_encrypted: self.app_state.bot_settings.should_create_encrypted_dm(
+                                user_profile.user_id.as_ref(),
+                                current_user_id().as_deref(),
+                            ),
                             user_profile,
                             allow_create: false,
                         });
@@ -1283,6 +1287,10 @@ impl MatchEvent for App {
                 }
                 Some(DirectMessageRoomAction::DidNotExist { user_profile }) => {
                     let user_profile = user_profile.clone();
+                    let create_encrypted = self.app_state.bot_settings.should_create_encrypted_dm(
+                        user_profile.user_id.as_ref(),
+                        current_user_id().as_deref(),
+                    );
                     let body_text = match &user_profile.username {
                         Some(un) if !un.is_empty() => format!(
                             "You don't have an existing direct message room with {} ({}).\n\n\
@@ -1304,6 +1312,7 @@ impl MatchEvent for App {
                             accept_button_text: Some("Create DM".into()),
                             on_accept_clicked: Some(Box::new(move |_cx| {
                                 submit_async_request(MatrixRequest::OpenOrCreateDirectMessage {
+                                    create_encrypted,
                                     user_profile,
                                     allow_create: true,
                                 });
@@ -2032,6 +2041,20 @@ impl BotSettingsState {
         }
 
         self.resolved_bot_user_id(current_user_id)
+    }
+
+    /// Returns `true` if new DM rooms for this target user should be encrypted.
+    ///
+    /// BotFather DM rooms are created unencrypted so that appservice bots that do
+    /// not support E2EE can still receive and reply to messages.
+    pub fn should_create_encrypted_dm(
+        &self,
+        target_user_id: &UserId,
+        current_user_id: Option<&UserId>,
+    ) -> bool {
+        self.resolved_bot_user_id(current_user_id)
+            .map(|bot_user_id| bot_user_id.as_str() != target_user_id.as_str())
+            .unwrap_or(true)
     }
 }
 
