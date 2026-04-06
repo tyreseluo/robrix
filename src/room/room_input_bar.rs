@@ -22,6 +22,8 @@ use matrix_sdk_ui::timeline::{EmbeddedEvent, EventTimelineItem, TimelineEventIte
 use ruma::{events::room::message::{LocationMessageEventContent, MessageType, ReplyWithinThread, RoomMessageEventContent}, OwnedRoomId, OwnedUserId};
 use crate::{home::{editing_pane::{EditingPaneState, EditingPaneWidgetExt, EditingPaneWidgetRefExt}, location_preview::{LocationPreviewWidgetExt, LocationPreviewWidgetRefExt}, room_screen::{MessageAction, RoomScreenProps, populate_preview_of_timeline_item}, tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt}}, i18n::AppLanguage, location::init_location_subscriber, shared::{avatar::AvatarWidgetRefExt, html_or_plaintext::HtmlOrPlaintextWidgetRefExt, mentionable_text_input::MentionableTextInputWidgetExt, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{MatrixRequest, TimelineKind, UserPowerLevels, submit_async_request}, utils};
 
+const ROOM_INFO_CARD_MOBILE_BREAKPOINT: f32 = 700.0;
+
 script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
@@ -133,7 +135,7 @@ script_mod! {
                             text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
                         }
                         icon_walk: Walk{width: 20, height: 20}
-                        text: "room info",
+                        text: "info",
                     }
 
                     location_card_button := RobrixIconButton {
@@ -367,6 +369,9 @@ impl Widget for RoomInputBar {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let width = self.view.area().rect(cx).size.x as f32;
+        let show_room_info_card = !(width > 1.0 && width < ROOM_INFO_CARD_MOBILE_BREAKPOINT);
+        self.button(cx, ids!(room_info_card_button)).set_visible(cx, show_room_info_card);
         self.view.draw_walk(cx, scope, walk)
     }
 }

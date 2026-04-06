@@ -26,7 +26,7 @@ use matrix_sdk_ui::timeline::{
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
 use crate::{
-    app::{AppState, AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{create_bot_modal::{CreateBotModalAction, CreateBotModalWidgetExt}, delete_bot_modal::{DeleteBotModalAction, DeleteBotModalWidgetExt}, edited_indicator::EditedIndicatorWidgetRefExt, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, i18n::{AppLanguage, tr_fmt, tr_key}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
+    app::{AppState, AppStateAction, ConfirmDeleteAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{create_bot_modal::{CreateBotModalAction, CreateBotModalWidgetExt}, delete_bot_modal::{DeleteBotModalAction, DeleteBotModalWidgetExt}, edited_indicator::EditedIndicatorWidgetRefExt, invite_modal::InviteModalAction, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, tombstone_footer::SuccessorRoomDetails}, i18n::{AppLanguage, tr_fmt, tr_key}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
@@ -43,7 +43,7 @@ use crate::shared::mentionable_text_input::MentionableTextInputAction;
 
 use rangemap::RangeSet;
 
-use super::{event_reaction_list::ReactionData, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
+use super::{event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
 
 /// The maximum number of timeline items to search through
 /// when looking for a particular event.
@@ -1045,8 +1045,9 @@ script_mod! {
                     height: Fit,
                     spacing: 0,
                     padding: 12,
-                    icon_walk: Walk{width: 0, height: 0}
-                    text: "Back"
+                    draw_icon.svg: (ICON_JUMP)
+                    icon_walk: Walk{width: 14, height: 14}
+                    text: ""
                 }
 
                 title := Label {
@@ -1056,7 +1057,7 @@ script_mod! {
                         text_style: USERNAME_TEXT_STYLE { font_size: 12.5 }
                         color: #000
                     }
-                    text: "Room Info"
+                    text: "Info"
                 }
 
                 spacer := View {
@@ -1125,15 +1126,33 @@ script_mod! {
                                 text: ""
                             }
 
-                            room_id_value := Label {
+                            room_id_row := View {
                                 width: Fill
                                 height: Fit
-                                flow: Flow.Right{wrap: true}
-                                draw_text +: {
-                                    text_style: MESSAGE_TEXT_STYLE { font_size: 9.5 }
-                                    color: #6A6A6A
+                                flow: Right
+                                align: Align{y: 0.5}
+                                spacing: 5
+
+                                room_id_value := Label {
+                                    width: Fill
+                                    height: Fit
+                                    flow: Flow.Right{wrap: true}
+                                    draw_text +: {
+                                        text_style: MESSAGE_TEXT_STYLE { font_size: 9.5 }
+                                        color: #6A6A6A
+                                    }
+                                    text: ""
                                 }
-                                text: ""
+
+                                copy_room_id_button := RobrixNeutralIconButton {
+                                    width: 24
+                                    height: 22
+                                    padding: 4
+                                    spacing: 0
+                                    draw_icon.svg: (ICON_COPY)
+                                    icon_walk: Walk{width: 11, height: 11}
+                                    text: ""
+                                }
                             }
                         }
                     }
@@ -1259,6 +1278,15 @@ script_mod! {
                         height: Fit
                         flow: Down
                         spacing: 8
+
+                        invite_button := RobrixNeutralIconButton {
+                            width: Fill
+                            height: 40
+                            padding: 10
+                            draw_icon.svg: (ICON_ADD_USER)
+                            icon_walk: Walk{width: 14, height: 14, margin: Inset{left: -2, right: -1}}
+                            text: "Invite"
+                        }
 
                         people_button := RobrixNeutralIconButton {
                             width: Fill
@@ -1798,6 +1826,7 @@ impl ActionDefaultRef for ThreadsPaneAction {
 
 #[derive(Clone, Default, Debug)]
 pub enum RoomInfoPaneAction {
+    InviteUser,
     ShowPeoplePage,
     OpenPeopleProfile(OwnedUserId),
     ReportRoom,
@@ -2175,7 +2204,12 @@ impl Widget for RoomInfoSlidingPane {
         }
 
         let area = self.view.area();
-        let close_pane = {
+        let close_pane = if is_invite_modal_open() {
+            matches!(
+                event,
+                Event::Actions(actions) if self.button(cx, ids!(close_button)).clicked(actions)
+            )
+        } else {
             matches!(
                 event,
                 Event::Actions(actions) if self.button(cx, ids!(close_button)).clicked(actions)
@@ -2206,6 +2240,22 @@ impl Widget for RoomInfoSlidingPane {
             if self.button(cx, ids!(content_scroll.info_view.topic_card.topic_toggle_button)).clicked(actions) {
                 self.topic_expanded = !self.topic_expanded;
                 self.redraw(cx);
+            }
+            if self.button(cx, ids!(content_scroll.info_view.summary_card.room_meta.room_id_row.copy_room_id_button)).clicked(actions)
+                && let Some(info) = self.info.as_ref()
+            {
+                cx.copy_to_clipboard(&info.room_id);
+                enqueue_popup_notification(
+                    "Room ID copied.",
+                    PopupKind::Success,
+                    Some(2.0),
+                );
+            }
+            if self.button(cx, ids!(content_scroll.info_view.actions_row.invite_button)).clicked(actions) {
+                cx.widget_action(
+                    self.widget_uid(),
+                    RoomInfoPaneAction::InviteUser,
+                );
             }
             if self.button(cx, ids!(content_scroll.info_view.actions_row.people_button)).clicked(actions) {
                 self.show_people_page = true;
@@ -2267,13 +2317,13 @@ impl Widget for RoomInfoSlidingPane {
         });
 
         self.button(cx, ids!(header.back_button)).set_visible(cx, self.show_people_page);
-        self.label(cx, ids!(header.title)).set_text(cx, if self.show_people_page { "People" } else { "Room Info" });
+        self.label(cx, ids!(header.title)).set_text(cx, if self.show_people_page { "People" } else { "Info" });
         self.view(cx, ids!(content_scroll)).set_visible(cx, !self.show_people_page);
         self.view(cx, ids!(content_scroll.info_view)).set_visible(cx, !self.show_people_page);
         self.view(cx, ids!(people_view)).set_visible(cx, self.show_people_page);
 
         self.label(cx, ids!(content_scroll.info_view.summary_card.room_meta.room_name_value)).set_text(cx, &info.room_name);
-        self.label(cx, ids!(content_scroll.info_view.summary_card.room_meta.room_id_value)).set_text(cx, &info.room_id);
+        self.label(cx, ids!(content_scroll.info_view.summary_card.room_meta.room_id_row.room_id_value)).set_text(cx, &info.room_id);
         self.label(cx, ids!(content_scroll.info_view.facts_card.visibility_row.visibility_value)).set_text(cx, &info.visibility);
         self.label(cx, ids!(content_scroll.info_view.facts_card.encryption_row.encryption_value)).set_text(cx, &info.encryption);
 
@@ -2533,6 +2583,7 @@ pub struct RoomScreen {
     #[rust] threads_pane_state: ThreadsPaneState,
     #[rust] app_language: AppLanguage,
     #[rust] app_language_initialized: bool,
+    #[rust] pending_invited_users: HashSet<OwnedUserId>,
 }
 
 impl Drop for RoomScreen {
@@ -2798,19 +2849,21 @@ impl Widget for RoomScreen {
                 }
 
                 // Handle InviteResultAction to show popup notifications.
-                if let Some(InviteResultAction::Sent { room_id, .. }) = action.downcast_ref() {
+                if let Some(InviteResultAction::Sent { room_id, user_id }) = action.downcast_ref() {
                     // Only handle if this is for the current room.
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
+                        self.pending_invited_users.insert(user_id.clone());
                         enqueue_popup_notification(
-                            tr_key(self.app_language, "room_screen.popup.invite.sent_success"),
-                            PopupKind::Success,
+                            "Invite sent. Waiting for acceptance.",
+                            PopupKind::Info,
                             Some(4.0),
                         );
                     }
                 }
-                if let Some(InviteResultAction::Failed { room_id, error, .. }) = action.downcast_ref() {
+                if let Some(InviteResultAction::Failed { room_id, user_id, error }) = action.downcast_ref() {
                     // Only handle if this is for the current room.
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
+                        self.pending_invited_users.remove(user_id);
                         let error_text = error.to_string();
                         enqueue_popup_notification(
                             tr_fmt(self.app_language, "room_screen.popup.invite.failed", &[
@@ -2859,6 +2912,11 @@ impl Widget for RoomScreen {
                 }
 
                 match action.as_widget_action().cast_ref() {
+                    RoomInfoPaneAction::InviteUser => {
+                        if let Some(room_name_id) = self.room_name_id.as_ref().cloned() {
+                            cx.action(InviteModalAction::Open(room_name_id));
+                        }
+                    }
                     RoomInfoPaneAction::ShowPeoplePage => {
                         if let Some(tl) = self.tl_state.as_ref()
                             && tl.room_members.is_none()
@@ -4088,6 +4146,36 @@ impl RoomScreen {
                             submit_async_request(MatrixRequest::GetNumberUnreadMessages{
                                 timeline_kind: tl.kind.clone(),
                             });
+                        }
+                    }
+
+                    if !self.pending_invited_users.is_empty() {
+                        let start = changed_indices.start.min(new_items.len());
+                        let end = changed_indices.end.min(new_items.len());
+                        let mut accepted_users: Vec<OwnedUserId> = Vec::new();
+                        for idx in start..end {
+                            let Some(new_item) = new_items.get(idx) else { continue };
+                            let TimelineItemKind::Event(event_tl_item) = new_item.kind() else { continue };
+                            let TimelineItemContent::MembershipChange(membership_change) = event_tl_item.content() else { continue };
+                            let accepted = matches!(
+                                membership_change.change(),
+                                Some(MembershipChange::InvitationAccepted)
+                                | Some(MembershipChange::Joined)
+                            );
+                            if accepted {
+                                let invited_user_id = event_tl_item.sender().to_owned();
+                                if self.pending_invited_users.contains(&invited_user_id) {
+                                    accepted_users.push(invited_user_id);
+                                }
+                            }
+                        }
+                        for accepted_user in accepted_users {
+                            self.pending_invited_users.remove(&accepted_user);
+                            enqueue_popup_notification(
+                                format!("{accepted_user} accepted the invite and joined."),
+                                PopupKind::Success,
+                                Some(4.0),
+                            );
                         }
                     }
 
@@ -5474,6 +5562,7 @@ impl RoomScreen {
             subscribe: false,
         });
         self.room_avatar_url = None;
+        self.pending_invited_users.clear();
     }
 
     /// Removes the current room's visual UI state from this widget
