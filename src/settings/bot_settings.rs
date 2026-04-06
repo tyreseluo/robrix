@@ -28,13 +28,28 @@ script_mod! {
         flow: Down
         spacing: 10
 
-        app_service_title := TitleLabel {
-            text: "App Service"
-        }
+        app_service_header := View {
+            width: Fill
+            height: Fit
+            flow: Right
+            align: Align{y: 1.0}
+            spacing: 8
+            margin: Inset{left: 5, right: 8, bottom: 2}
 
-        description := mod.widgets.BotSettingsInfoLabel {
-            margin: Inset{left: 5, right: 8, bottom: 4}
-            text: "Enable Matrix app service support here. Robrix stays a normal Matrix client: it binds BotFather to a room and sends the matching slash commands."
+            app_service_title := TitleLabel {
+                width: Fit
+                text: "App Service"
+            }
+
+            description := mod.widgets.BotSettingsInfoLabel {
+                width: Fill
+                margin: 0
+                draw_text +: {
+                    color: #7A7A7A
+                    text_style: REGULAR_TEXT { font_size: 9.5 }
+                }
+                text: "Enable Matrix app service support here. Robrix stays a normal Matrix client: it binds BotFather to a room and sends the matching slash commands."
+            }
         }
 
         toggle_row := View {
@@ -42,6 +57,7 @@ script_mod! {
             height: Fit
             flow: Right
             align: Align{x: 0.0, y: 0.5}
+            spacing: 8
             margin: Inset{left: 5, bottom: 2}
 
             app_service_switch := Toggle {
@@ -53,6 +69,16 @@ script_mod! {
                 draw_bg +: {
                     size: 20.0
                 }
+            }
+
+            switch_state_label := Label {
+                width: Fit
+                height: Fit
+                draw_text +: {
+                    color: #999
+                    text_style: REGULAR_TEXT { font_size: 10.5 }
+                }
+                text: "Disabled"
             }
         }
     }
@@ -107,6 +133,25 @@ impl WidgetMatchEvent for BotSettings {
 }
 
 impl BotSettings {
+    fn set_switch_state_label(&mut self, cx: &mut Cx, enabled: bool) {
+        let mut switch_state_label = self.view.label(cx, ids!(switch_state_label));
+        if enabled {
+            script_apply_eval!(cx, switch_state_label, {
+                text: #(tr_key(self.app_language, "settings.labs.app_service.status.enabled")),
+                draw_text +: {
+                    color: mod.widgets.COLOR_FG_ACCEPT_GREEN
+                }
+            });
+        } else {
+            script_apply_eval!(cx, switch_state_label, {
+                text: #(tr_key(self.app_language, "settings.labs.app_service.status.disabled")),
+                draw_text +: {
+                    color: #999
+                }
+            });
+        }
+    }
+
     fn set_app_language(&mut self, cx: &mut Cx, app_language: AppLanguage) {
         self.app_language = app_language;
         self.sync_app_language(cx);
@@ -119,6 +164,10 @@ impl BotSettings {
         self.view
             .label(cx, ids!(description))
             .set_text(cx, tr_key(self.app_language, "settings.labs.app_service.description"));
+        self.set_switch_state_label(
+            cx,
+            self.view.check_box(cx, ids!(app_service_switch)).active(cx),
+        );
         self.view.redraw(cx);
     }
 
@@ -126,6 +175,7 @@ impl BotSettings {
         self.view
             .check_box(cx, ids!(app_service_switch))
             .set_active(cx, bot_settings.enabled);
+        self.set_switch_state_label(cx, bot_settings.enabled);
         self.view.redraw(cx);
     }
 

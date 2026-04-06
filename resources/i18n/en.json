@@ -210,7 +210,7 @@
   "settings.account.modal.delete_avatar.accept": "Delete",
 
   "settings.labs.app_service.title": "App Service",
-  "settings.labs.app_service.description": "Enable Matrix app service support here. Robrix stays a normal Matrix client: it binds BotFather to a room and sends the matching slash commands.",
+  "settings.labs.app_service.description": "Enable Matrix app service support here. ",
   "settings.labs.app_service.enable_label": "Enable App Service",
   "settings.labs.app_service.manage_hint": "Manage BotFather and child bots in DM and room bind dialogs. Settings here only control whether App Service features are enabled.",
   "settings.labs.app_service.botfather_user_id": "BotFather User ID:",
