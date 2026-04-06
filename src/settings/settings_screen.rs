@@ -1,7 +1,8 @@
 
 use makepad_widgets::*;
+use url::Url;
 
-use crate::{app::{AppState, BotSettingsState}, home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, i18n::{AppLanguage, I18nKey, language_dropdown_labels, tr}, persistence, profile::user_profile::UserProfile, settings::{account_settings::AccountSettingsWidgetExt, bot_settings::BotSettingsWidgetExt, translation_settings::TranslationSettingsWidgetExt}, shared::{expand_arrow::ExpandArrow, popup_list::{PopupKind, enqueue_popup_notification}, styles::{apply_neutral_button_style, apply_primary_button_style}}, sliding_sync::current_user_id};
+use crate::{app::{AppState, BotSettingsState}, home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, i18n::{AppLanguage, I18nKey, language_dropdown_labels, tr, tr_key}, persistence, profile::user_profile::UserProfile, settings::{account_settings::AccountSettingsWidgetExt, bot_settings::BotSettingsWidgetExt, translation_settings::TranslationSettingsWidgetExt}, shared::{expand_arrow::ExpandArrow, popup_list::{PopupKind, enqueue_popup_notification}, styles::{apply_neutral_button_style, apply_primary_button_style}}, sliding_sync::current_user_id};
 
 script_mod! {
     use mod.prelude.widgets.*
@@ -205,6 +206,191 @@ script_mod! {
                             }
                             text: "The app will reload after selecting another language"
                         }
+
+                        LineH { width: 400, padding: 10, margin: Inset{top: 12, bottom: 5} }
+
+                        preferences_proxy_title := TitleLabel {
+                            text: "Proxy"
+                            draw_text +: {
+                                color: (COLOR_ACTIVE_PRIMARY)
+                            }
+                        }
+
+                        preferences_proxy_use_card := RoundedView {
+                            width: Fill, height: Fit,
+                            flow: Right
+                            align: Align{x: 1.0, y: 0.5}
+                            show_bg: true
+                            draw_bg +: {
+                                color: #F5F5F5
+                                border_radius: 8.0
+                                border_size: 1.0
+                                border_color: #DADADA
+                            }
+                            padding: Inset{top: 12, bottom: 12, left: 12, right: 12}
+                            margin: Inset{left: 5, right: 8, top: 2}
+
+                            preferences_proxy_use_label := Label {
+                                width: Fill, height: Fit
+                                draw_text +: {
+                                    color: (COLOR_TEXT)
+                                    text_style: TITLE_TEXT {font_size: 12}
+                                }
+                                text: "Use proxy"
+                            }
+
+                            preferences_proxy_use_toggle := Toggle {
+                                width: 52, height: 28
+                                text: ""
+                                active: false
+                                icon_walk: Walk{width: 0, height: 0, margin: 0}
+                                label_walk: Walk{width: 0, height: 0, margin: 0}
+                                draw_bg +: {
+                                    size: 18.0
+                                    color: #E3E7EF
+                                    color_hover: #E3E7EF
+                                    color_down: #D5DBE6
+                                    color_active: (COLOR_ACTIVE_PRIMARY)
+                                    border_radius: 14.0
+                                    border_size: 1.5
+                                    border_color: #7E879A
+                                    border_color_hover: #7E879A
+                                    border_color_down: #6F788D
+                                    border_color_active: (COLOR_ACTIVE_PRIMARY_DARKER)
+                                    mark_color: #2D3A57
+                                    mark_color_hover: #2D3A57
+                                    mark_color_down: #2D3A57
+                                    mark_color_active: #FFFFFF
+                                    mark_color_active_hover: #FFFFFF
+                                }
+                            }
+                        }
+
+                        preferences_proxy_fields_section := RoundedView {
+                            visible: false
+                            width: Fill, height: Fit,
+                            flow: Down
+                            spacing: 0
+                            show_bg: true
+                            draw_bg +: {
+                                color: #F5F5F5
+                                border_radius: 8.0
+                                border_size: 1.0
+                                border_color: #DADADA
+                            }
+                            padding: Inset{top: 4, left: 12, right: 12, bottom: 8}
+                            margin: Inset{left: 5, right: 8, top: 4}
+
+                            preferences_proxy_address_row := View {
+                                width: Fill, height: Fit,
+                                flow: Right
+                                align: Align{y: 0.5}
+                                spacing: 8.0
+                                padding: Inset{top: 8, bottom: 8}
+
+                                preferences_proxy_address_label := Label {
+                                    width: 90, height: Fit
+                                    draw_text +: {
+                                        color: (COLOR_TEXT)
+                                        text_style: TITLE_TEXT {font_size: 12}
+                                    }
+                                    text: "Address"
+                                }
+
+                                preferences_proxy_address_input := RobrixTextInput {
+                                    width: Fill, height: Fit,
+                                    flow: Right,
+                                    empty_text: "127.0.0.1"
+                                    padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                }
+                            }
+
+                            LineH { draw_bg.color: #DDDDDD }
+
+                            preferences_proxy_port_row := View {
+                                width: Fill, height: Fit,
+                                flow: Right
+                                align: Align{y: 0.5}
+                                spacing: 8.0
+                                padding: Inset{top: 8, bottom: 8}
+
+                                preferences_proxy_port_label := Label {
+                                    width: 90, height: Fit
+                                    draw_text +: {
+                                        color: (COLOR_TEXT)
+                                        text_style: TITLE_TEXT {font_size: 12}
+                                    }
+                                    text: "Port"
+                                }
+
+                                preferences_proxy_port_input := RobrixTextInput {
+                                    width: Fill, height: Fit,
+                                    flow: Right,
+                                    empty_text: "7890"
+                                    padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                }
+                            }
+
+                            LineH { draw_bg.color: #DDDDDD }
+
+                            preferences_proxy_account_row := View {
+                                width: Fill, height: Fit,
+                                flow: Right
+                                align: Align{y: 0.5}
+                                spacing: 8.0
+                                padding: Inset{top: 8, bottom: 8}
+
+                                preferences_proxy_account_label := Label {
+                                    width: 90, height: Fit
+                                    draw_text +: {
+                                        color: (COLOR_TEXT)
+                                        text_style: TITLE_TEXT {font_size: 12}
+                                    }
+                                    text: "Account"
+                                }
+
+                                preferences_proxy_account_input := RobrixTextInput {
+                                    width: Fill, height: Fit,
+                                    flow: Right,
+                                    empty_text: ""
+                                    padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                }
+                            }
+
+                            LineH { draw_bg.color: #DDDDDD }
+
+                            preferences_proxy_password_row := View {
+                                width: Fill, height: Fit,
+                                flow: Right
+                                align: Align{y: 0.5}
+                                spacing: 8.0
+                                padding: Inset{top: 8, bottom: 8}
+
+                                preferences_proxy_password_label := Label {
+                                    width: 90, height: Fit
+                                    draw_text +: {
+                                        color: (COLOR_TEXT)
+                                        text_style: TITLE_TEXT {font_size: 12}
+                                    }
+                                    text: "Password"
+                                }
+
+                                preferences_proxy_password_input := RobrixTextInput {
+                                    width: Fill, height: Fit,
+                                    flow: Right,
+                                    empty_text: ""
+                                    is_password: true,
+                                    padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                }
+                            }
+                        }
+
+                        preferences_proxy_save_button := RobrixIconButton {
+                            width: Fit, height: Fit
+                            padding: Inset{left: 15, right: 15, top: 8, bottom: 8}
+                            margin: Inset{left: 5, top: 5, bottom: 4}
+                            text: "Save Proxy"
+                        }
                     }
 
                     labs_settings_section := View {
@@ -259,11 +445,14 @@ pub struct SettingsScreen {
 
     #[rust] selected_category: SettingsCategory,
     #[rust] app_language: AppLanguage,
+    #[rust] preferences_use_proxy_enabled: bool,
+    #[rust] preferences_proxy_layout_width: f64,
     #[rust] language_popup_visible: bool,
 }
 
 impl Widget for SettingsScreen {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.sync_preferences_proxy_layout(cx);
         let app_language = scope.data.get::<AppState>()
             .map(|app_state| app_state.app_language)
             .unwrap_or_default();
@@ -349,6 +538,48 @@ impl Widget for SettingsScreen {
         if let Event::Actions(actions) = event {
             // Handle language selector click — moved to finger_up below
 
+            if let Some(enabled) = self.view.check_box(cx, ids!(preferences_proxy_use_toggle)).changed(actions) {
+                self.set_preferences_use_proxy_enabled(cx, enabled);
+            }
+
+            if self.view.button(cx, ids!(preferences_proxy_save_button)).clicked(actions) {
+                match self.build_proxy_url_from_preferences(cx) {
+                    Ok(proxy_url) => {
+                        match crate::proxy_config::save_proxy_url(proxy_url.as_deref()) {
+                            Ok(_) => {
+                                enqueue_popup_notification(
+                                    tr_key(self.app_language, "settings.preferences.proxy.popup.saved").to_string(),
+                                    PopupKind::Success,
+                                    Some(4.0),
+                                );
+                            }
+                            Err(proxy_error) => {
+                                enqueue_popup_notification(
+                                    format!(
+                                        "{}\n\n{}",
+                                        tr_key(self.app_language, "settings.preferences.proxy.popup.invalid"),
+                                        proxy_error
+                                    ),
+                                    PopupKind::Error,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                    Err(proxy_error) => {
+                        enqueue_popup_notification(
+                            format!(
+                                "{}\n\n{}",
+                                tr_key(self.app_language, "settings.preferences.proxy.popup.invalid"),
+                                proxy_error
+                            ),
+                            PopupKind::Error,
+                            None,
+                        );
+                    }
+                }
+            }
+
             if self.view.button(cx, ids!(category_account_button)).clicked(actions) {
                 self.set_selected_category(cx, SettingsCategory::Account);
             }
@@ -409,6 +640,27 @@ impl Widget for SettingsScreen {
 }
 
 impl SettingsScreen {
+    fn sync_preferences_proxy_layout(&mut self, cx: &mut Cx) {
+        let rect = self.view.area().rect(cx);
+        if rect.size.x <= 1.0 {
+            return;
+        }
+        let available_width = (rect.size.x - 42.0).max(260.0);
+        let card_width = available_width.min(360.0);
+        if (self.preferences_proxy_layout_width - card_width).abs() <= 0.5 {
+            return;
+        }
+        self.preferences_proxy_layout_width = card_width;
+        let mut proxy_use_card = self.view.view(cx, ids!(preferences_proxy_use_card));
+        script_apply_eval!(cx, proxy_use_card, {
+            width: #(card_width)
+        });
+        let mut proxy_fields_section = self.view.view(cx, ids!(preferences_proxy_fields_section));
+        script_apply_eval!(cx, proxy_fields_section, {
+            width: #(card_width)
+        });
+    }
+
     fn set_app_language(&mut self, cx: &mut Cx, app_language: AppLanguage) {
         self.app_language = app_language;
         self.sync_app_language(cx);
@@ -436,6 +688,39 @@ impl SettingsScreen {
         self.view
             .label(cx, ids!(preferences_language_hint_label))
             .set_text(cx, tr(self.app_language, I18nKey::LanguageReloadHint));
+        self.view
+            .label(cx, ids!(preferences_proxy_title))
+            .set_text(cx, tr_key(self.app_language, "settings.preferences.proxy.title"));
+        self.view
+            .label(cx, ids!(preferences_proxy_use_label))
+            .set_text(cx, tr_key(self.app_language, "settings.preferences.proxy.use_proxy"));
+        self.view
+            .label(cx, ids!(preferences_proxy_address_label))
+            .set_text(cx, tr_key(self.app_language, "settings.preferences.proxy.address"));
+        self.view
+            .label(cx, ids!(preferences_proxy_port_label))
+            .set_text(cx, tr_key(self.app_language, "settings.preferences.proxy.port"));
+        self.view
+            .label(cx, ids!(preferences_proxy_account_label))
+            .set_text(cx, tr_key(self.app_language, "settings.preferences.proxy.account"));
+        self.view
+            .label(cx, ids!(preferences_proxy_password_label))
+            .set_text(cx, tr_key(self.app_language, "settings.preferences.proxy.password"));
+        self.view
+            .text_input(cx, ids!(preferences_proxy_address_input))
+            .set_empty_text(cx, tr_key(self.app_language, "settings.preferences.proxy.input.address").to_string());
+        self.view
+            .text_input(cx, ids!(preferences_proxy_port_input))
+            .set_empty_text(cx, tr_key(self.app_language, "settings.preferences.proxy.input.port").to_string());
+        self.view
+            .text_input(cx, ids!(preferences_proxy_account_input))
+            .set_empty_text(cx, tr_key(self.app_language, "settings.preferences.proxy.input.account").to_string());
+        self.view
+            .text_input(cx, ids!(preferences_proxy_password_input))
+            .set_empty_text(cx, tr_key(self.app_language, "settings.preferences.proxy.input.password").to_string());
+        self.view
+            .button(cx, ids!(preferences_proxy_save_button))
+            .set_text(cx, tr_key(self.app_language, "settings.preferences.proxy.button.save"));
         self.update_language_button_text(cx);
         self.view
             .account_settings(cx, ids!(account_settings))
@@ -447,6 +732,119 @@ impl SettingsScreen {
             .translation_settings(cx, ids!(translation_settings))
             .set_app_language(cx, self.app_language);
         self.view.redraw(cx);
+    }
+
+    fn set_preferences_use_proxy_enabled(&mut self, cx: &mut Cx, enabled: bool) {
+        self.preferences_use_proxy_enabled = enabled;
+        self.view
+            .check_box(cx, ids!(preferences_proxy_use_toggle))
+            .set_active(cx, enabled);
+        self.view
+            .view(cx, ids!(preferences_proxy_fields_section))
+            .set_visible(cx, enabled);
+        self.view.redraw(cx);
+    }
+
+    fn load_saved_proxy_to_preferences_form(&mut self, cx: &mut Cx) {
+        let saved_proxy = crate::proxy_config::load_saved_proxy_url();
+        let Some(saved_proxy) = saved_proxy else {
+            self.set_preferences_use_proxy_enabled(cx, false);
+            self.view.text_input(cx, ids!(preferences_proxy_address_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(preferences_proxy_port_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(preferences_proxy_account_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(preferences_proxy_password_input)).set_text(cx, "");
+            return;
+        };
+
+        let Ok(parsed_url) = Url::parse(&saved_proxy) else {
+            self.set_preferences_use_proxy_enabled(cx, true);
+            self.view.text_input(cx, ids!(preferences_proxy_address_input)).set_text(cx, &saved_proxy);
+            self.view.text_input(cx, ids!(preferences_proxy_port_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(preferences_proxy_account_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(preferences_proxy_password_input)).set_text(cx, "");
+            return;
+        };
+
+        self.set_preferences_use_proxy_enabled(cx, true);
+        self.view
+            .text_input(cx, ids!(preferences_proxy_address_input))
+            .set_text(cx, parsed_url.host_str().unwrap_or_default());
+        self.view
+            .text_input(cx, ids!(preferences_proxy_port_input))
+            .set_text(cx, &parsed_url.port().map(|p| p.to_string()).unwrap_or_default());
+        self.view
+            .text_input(cx, ids!(preferences_proxy_account_input))
+            .set_text(cx, parsed_url.username());
+        self.view
+            .text_input(cx, ids!(preferences_proxy_password_input))
+            .set_text(cx, parsed_url.password().unwrap_or_default());
+    }
+
+    fn build_proxy_url_from_preferences(&mut self, cx: &mut Cx) -> Result<Option<String>, String> {
+        if !self.preferences_use_proxy_enabled {
+            return Ok(None);
+        }
+
+        let address = self.view.text_input(cx, ids!(preferences_proxy_address_input)).text();
+        let port_text = self.view.text_input(cx, ids!(preferences_proxy_port_input)).text();
+        let account = self.view.text_input(cx, ids!(preferences_proxy_account_input)).text();
+        let password = self.view.text_input(cx, ids!(preferences_proxy_password_input)).text();
+
+        let address = address.trim().to_owned();
+        let port_text = port_text.trim().to_owned();
+        let account = account.trim().to_owned();
+        let password = password.trim().to_owned();
+
+        if address.is_empty() {
+            return Err(tr_key(self.app_language, "settings.preferences.proxy.error.missing_address").to_string());
+        }
+        if port_text.is_empty() {
+            return Err(tr_key(self.app_language, "settings.preferences.proxy.error.missing_port").to_string());
+        }
+        let port: u16 = port_text
+            .parse()
+            .map_err(|_| tr_key(self.app_language, "settings.preferences.proxy.error.invalid_port").to_string())?;
+
+        let mut proxy_url = if address.contains("://") {
+            Url::parse(&address)
+                .map_err(|e| format!("Invalid proxy URL: {e}"))?
+        } else {
+            let mut url = Url::parse("http://127.0.0.1")
+                .map_err(|e| format!("Failed to initialize proxy URL builder: {e}"))?;
+            url.set_host(Some(&address))
+                .map_err(|e| format!("Invalid proxy address `{address}`: {e}"))?;
+            url
+        };
+
+        proxy_url
+            .set_port(Some(port))
+            .map_err(|()| format!("Invalid proxy port `{port}`"))?;
+
+        if account.is_empty() {
+            proxy_url
+                .set_username("")
+                .map_err(|()| String::from("Invalid proxy account value"))?;
+            proxy_url
+                .set_password(None)
+                .map_err(|()| String::from("Invalid proxy password value"))?;
+        } else {
+            proxy_url
+                .set_username(&account)
+                .map_err(|()| String::from("Invalid proxy account value"))?;
+            if password.is_empty() {
+                proxy_url
+                    .set_password(None)
+                    .map_err(|()| String::from("Invalid proxy password value"))?;
+            } else {
+                proxy_url
+                    .set_password(Some(&password))
+                    .map_err(|()| String::from("Invalid proxy password value"))?;
+            }
+        }
+
+        let proxy_url = proxy_url.to_string();
+        crate::proxy_config::validate_proxy_url(&proxy_url)?;
+        Ok(Some(proxy_url))
     }
 
     fn update_language_button_text(&mut self, cx: &mut Cx) {
@@ -509,9 +907,11 @@ impl SettingsScreen {
         };
         self.view.account_settings(cx, ids!(account_settings)).populate(cx, profile);
         self.view.bot_settings(cx, ids!(bot_settings)).populate(cx, bot_settings);
+        self.load_saved_proxy_to_preferences_form(cx);
         self.view.translation_settings(cx, ids!(translation_settings)).populate(cx, translation_config);
         self.set_app_language(cx, app_language);
         self.set_selected_category(cx, SettingsCategory::Account);
+        self.sync_preferences_proxy_layout(cx);
         self.view.button(cx, ids!(close_button)).reset_hover(cx);
         cx.set_key_focus(self.view.area());
         self.redraw(cx);
