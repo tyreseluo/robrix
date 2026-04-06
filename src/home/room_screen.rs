@@ -328,6 +328,42 @@ fn detected_bot_binding_for_members(
     None
 }
 
+fn is_likely_bot_user_id(
+    user_id: &UserId,
+    resolved_parent_bot_user_id: Option<&UserId>,
+) -> bool {
+    if resolved_parent_bot_user_id.is_some_and(|parent| parent == user_id) {
+        return true;
+    }
+
+    let localpart = user_id.localpart().to_ascii_lowercase();
+    localpart == "bot"
+        || localpart == "botfather"
+        || localpart.starts_with("bot_")
+        || localpart.starts_with("bot-")
+        || localpart.starts_with("bot.")
+        || localpart.ends_with("_bot")
+        || (localpart.ends_with("bot") && localpart.len() > 3)
+}
+
+fn is_likely_bot_member(
+    room_member: &RoomMember,
+    resolved_parent_bot_user_id: Option<&UserId>,
+) -> bool {
+    if is_likely_bot_user_id(room_member.user_id(), resolved_parent_bot_user_id) {
+        return true;
+    }
+
+    room_member.display_name().is_some_and(|display_name| {
+        let display_name = display_name.trim().to_ascii_lowercase();
+        display_name == "bot"
+            || display_name == "botfather"
+            || display_name.starts_with("bot ")
+            || display_name.ends_with(" bot")
+            || display_name.contains(" bot ")
+    })
+}
+
 fn extract_bot_user_ids_from_listbots_reply(
     text: &str,
     default_server_name: Option<&OwnedServerName>,
