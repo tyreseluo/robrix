@@ -1880,6 +1880,7 @@ struct RoomInfoPeopleEntryInfo {
     user_id: OwnedUserId,
     display_name: String,
     level: String,
+    is_bot: bool,
     avatar_uri: Option<OwnedMxcUri>,
     avatar_fallback_text: String,
 }
@@ -1972,7 +1973,12 @@ impl Widget for RoomInfoPeopleEntry {
 impl RoomInfoPeopleEntry {
     fn set_entry(&mut self, cx: &mut Cx, entry: &RoomInfoPeopleEntryInfo) {
         self.user_id = Some(entry.user_id.clone());
-        self.label(cx, ids!(display_name)).set_text(cx, &entry.display_name);
+        let display_name = if entry.is_bot {
+            format!("{} [bot]", entry.display_name)
+        } else {
+            entry.display_name.clone()
+        };
+        self.label(cx, ids!(display_name)).set_text(cx, &display_name);
         self.label(cx, ids!(level)).set_text(cx, &entry.level);
         self.label(cx, ids!(level)).set_visible(cx, !entry.level.is_empty());
 
@@ -2858,6 +2864,28 @@ impl Widget for RoomScreen {
                             PopupKind::Info,
                             Some(4.0),
                         );
+                        if let Some(app_state) = scope.data.get::<AppState>()
+                            && app_state.bot_settings.enabled
+                        {
+                            if let Ok(bot_user_id) = app_state
+                                .bot_settings
+                                .resolved_bot_user_id_for_room(room_id, current_user_id().as_deref())
+                            {
+                                if &bot_user_id == user_id
+                                    && !app_state
+                                        .bot_settings
+                                        .bound_bot_user_id(room_id.as_ref())
+                                        .is_some_and(|existing_bot_user_id| existing_bot_user_id.as_str() == user_id.as_str())
+                                {
+                                    cx.action(AppStateAction::BotRoomBindingUpdated {
+                                        room_id: room_id.clone(),
+                                        bound: true,
+                                        bot_user_id: Some(user_id.clone()),
+                                        warning: None,
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
                 if let Some(InviteResultAction::Failed { room_id, user_id, error }) = action.downcast_ref() {
@@ -5217,6 +5245,7 @@ impl RoomScreen {
                         let display_name = member.display_name()
                             .map(ToOwned::to_owned)
                             .unwrap_or_else(|| member.user_id().to_string());
+                        let is_bot = is_likely_bot_member(member, None);
                         let level = match member.suggested_role_for_power_level() {
                             RoomMemberRole::Creator => String::from("Creator"),
                             RoomMemberRole::Administrator => String::from("Admin"),
@@ -5230,6 +5259,7 @@ impl RoomScreen {
                             user_id: member.user_id().to_owned(),
                             display_name,
                             level,
+                            is_bot,
                             avatar_uri: member.avatar_url().map(ToOwned::to_owned),
                             avatar_fallback_text,
                         }

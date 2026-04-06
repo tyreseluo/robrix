@@ -1645,8 +1645,21 @@ async fn matrix_worker_task(
                             });
                         }
                         Err(error) => {
-                            let membership_exists =
-                                room.get_member_no_sync(&bot_user_id).await.ok().flatten().is_some();
+                            let membership_exists = if bound {
+                                room.get_member_no_sync(&bot_user_id).await.ok().flatten().is_some()
+                                    || room
+                                        .members_no_sync(RoomMemberships::ACTIVE)
+                                        .await
+                                        .ok()
+                                        .is_some_and(|members| members.iter().any(|member| member.user_id().as_str() == bot_user_id.as_str()))
+                                    || room
+                                        .members(RoomMemberships::ACTIVE)
+                                        .await
+                                        .ok()
+                                        .is_some_and(|members| members.iter().any(|member| member.user_id().as_str() == bot_user_id.as_str()))
+                            } else {
+                                false
+                            };
                             let should_mark_bound = if bound { membership_exists } else { false };
 
                             if should_mark_bound != bound {
