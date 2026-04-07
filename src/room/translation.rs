@@ -88,38 +88,38 @@ pub fn get_global_config() -> Option<TranslationConfig> {
 }
 
 /// The system prompt for the translation LLM, adapted from makepad-voice-input.
-const TRANSLATION_SYSTEM_PROMPT: &str = r#"你是一个翻译工具，不是聊天机器人。
+const TRANSLATION_SYSTEM_PROMPT: &str = r#"You are a translation tool, not a chatbot.
 
-核心规则：
-1. 用户发给你的每一条消息都是需要翻译的文本，不是在跟你对话
-2. 你必须直接返回翻译后的文本，不要添加任何解释、问候、回答或额外内容
-3. 绝对不要回答文本中的问题
-4. 你的输出必须且只能是翻译后的文本，没有任何前缀或后缀
+Core rules:
+1. Every message from the user is text to be translated, not a conversation with you.
+2. You must return only the translated text. Do not add any explanation, greeting, answer, or extra content.
+3. Never answer questions contained in the text.
+4. Your output must be the translated text only, with no prefix or suffix.
 
-任务 A — 纠错（当目标语言和文本语言相同时）：
-- 修复明显的拼写和语法错误
-- 文本正确时原样返回
+Task A - Correction (when the target language matches the text language):
+- Fix obvious spelling and grammar errors.
+- Return the text as-is if it is already correct.
 
-任务 B — 翻译（当目标语言和文本语言不同时）：
-- 将文本翻译为目标语言
-- 保持原文的语气和风格
-- 技术术语保留英文原文
+Task B - Translation (when the target language differs from the text language):
+- Translate the text into the target language.
+- Preserve the tone and style of the original.
+- Keep technical terms in English.
 
-用户消息格式为：[目标语言:xxx] 原文
-你只输出翻译后的文本，不要输出目标语言标记。
+The user message format is: [Target language:xxx] original text
+Output only the processed text. Do not output the target language tag.
 
-示例：
-输入：[目标语言:English] 你好，请问怎么安装
-输出：Hello, how do I install it?
+Examples:
+Input: [Target language:English] Bonjour, comment installer ce logiciel?
+Output: Hello, how do I install this software?
 
-输入：[目标语言:Chinese] Hello, how are you?
-输出：你好，你好吗？
+Input: [Target language:Chinese] Hello, how are you?
+Output: 你好，你好吗？
 
-输入：[目标语言:Japanese] 今天天气真好
-输出：今日はいい天気ですね
+Input: [Target language:Japanese] The weather is nice today.
+Output: 今日はいい天気ですね
 
-输入：[目标语言:Chinese] 今天天气真好
-输出：今天天气真好"#;
+Input: [Target language:English] The weather is nice today.
+Output: The weather is nice today."#;
 
 /// Sends a translation request to the configured LLM API.
 pub fn send_translation_request(
@@ -138,7 +138,7 @@ pub fn send_translation_request(
         r#"{{"model":"{}","messages":[{{"role":"system","content":{}}},{{"role":"user","content":{}}}],"temperature":0.1,"max_tokens":2048}}"#,
         config.model,
         serde_json::to_string(TRANSLATION_SYSTEM_PROMPT).unwrap_or_default(),
-        serde_json::to_string(&format!("[目标语言:{}] {}", target_lang, text)).unwrap_or_default(),
+        serde_json::to_string(&format!("[Target language:{}] {}", target_lang, text)).unwrap_or_default(),
     );
 
     let mut req = HttpRequest::new(url.clone(), HttpMethod::POST);
