@@ -12,10 +12,10 @@ use crate::{
     avatar_cache::{self, AvatarCacheEntry, clear_avatar_cache}, home::{
         add_room::{CreateRoomModalAction, CreateRoomModalWidgetRefExt},
         bot_binding_modal::{BotBindingModalAction, BotBindingModalWidgetRefExt},
-        event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt, mark_invite_modal_closed}, invite_screen::InviteScreenWidgetRefExt, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
+        event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt, mark_invite_modal_closed}, invite_screen::InviteScreenWidgetRefExt, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, TimelineUpdate, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
     }, i18n::{AppLanguage, tr_fmt, tr_key}, join_leave_room_modal::{
         JoinLeaveModalKind, JoinLeaveRoomModalAction, JoinLeaveRoomModalWidgetRefExt
-    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::RoomFilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
+    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, file_upload_modal::{FilePreviewerAction, FileUploadModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::RoomFilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request, get_timeline_update_sender}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
         VerificationModalAction,
         VerificationModalWidgetRefExt,
     }
@@ -129,7 +129,15 @@ script_mod! {
                                 image_viewer_modal_inner := ImageViewer {}
                             }
                         }
-                        
+
+                        file_upload_modal := Modal {
+                            content +: {
+                                width: Fill, height: Fill,
+                                align: Align{x: 0.5, y: 0.5},
+                                file_upload_modal_inner := FileUploadModal {}
+                            }
+                        }
+
                         // Context menus should be shown in front of other UI elements,
                         // but behind verification modals.
                         new_message_context_menu := NewMessageContextMenu { }
@@ -1208,6 +1216,33 @@ impl MatchEvent for App {
                 }
                 _ => {}
             }
+            // Handle file upload modal actions
+            match action.downcast_ref() {
+                Some(FilePreviewerAction::Show(file_data)) => {
+                    self.ui.file_upload_modal(cx, ids!(file_upload_modal_inner))
+                        .set_file_data(cx, file_data.clone());
+                    self.ui.modal(cx, ids!(file_upload_modal)).open(cx);
+                    continue;
+                }
+                Some(FilePreviewerAction::Hide) | Some(FilePreviewerAction::Cancelled) => {
+                    self.ui.modal(cx, ids!(file_upload_modal)).close(cx);
+                    continue;
+                }
+                Some(FilePreviewerAction::UploadConfirmed(file_data)) => {
+                    // Send the file upload event to the current room's timeline
+                    if let Some(selected_room) = &self.app_state.selected_room {
+                        if let Some(timeline_kind) = selected_room.timeline_kind() {
+                            if let Some(sender) = get_timeline_update_sender(&timeline_kind) {
+                                let _ = sender.send(TimelineUpdate::FileUploadConfirmed(file_data.clone()));
+                                SignalToUI::set_ui_signal();
+                            }
+                        }
+                    }
+                    self.ui.modal(cx, ids!(file_upload_modal)).close(cx);
+                    continue;
+                }
+                _ => {}
+            }
             // Handle actions to open/close the TSP verification modal.
             #[cfg(feature = "tsp")] {
                 use std::ops::Deref;
@@ -1409,6 +1444,7 @@ impl AppMain for App {
         crate::home::location_preview::script_mod(vm);
         crate::home::tombstone_footer::script_mod(vm);
         crate::home::editing_pane::script_mod(vm);
+        crate::home::upload_progress::script_mod(vm);
         crate::room::script_mod(vm);
         crate::join_leave_room_modal::script_mod(vm);
         crate::verification_modal::script_mod(vm);
@@ -2327,6 +2363,26 @@ impl SelectedRoom {
             SelectedRoom::InvitedRoom { room_name_id } => room_name_id.to_string(),
             SelectedRoom::Space { space_name_id } => format!("[Space] {space_name_id}"),
             SelectedRoom::Thread { room_name_id, .. } => format!("[Thread] {room_name_id}"),
+        }
+    }
+
+    /// Returns the `TimelineKind` for this selected room.
+    ///
+    /// Returns `None` for `InvitedRoom` and `Space` variants, as they don't have timelines.
+    pub fn timeline_kind(&self) -> Option<TimelineKind> {
+        match self {
+            SelectedRoom::JoinedRoom { room_name_id } => {
+                Some(TimelineKind::MainRoom {
+                    room_id: room_name_id.room_id().clone(),
+                })
+            }
+            SelectedRoom::Thread { room_name_id, thread_root_event_id } => {
+                Some(TimelineKind::Thread {
+                    room_id: room_name_id.room_id().clone(),
+                    thread_root_event_id: thread_root_event_id.clone(),
+                })
+            }
+            SelectedRoom::InvitedRoom { .. } | SelectedRoom::Space { .. } => None,
         }
     }
 }
