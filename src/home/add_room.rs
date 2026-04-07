@@ -146,11 +146,6 @@ script_mod! {
         padding: Inset{top: 5, left: 15, right: 15, bottom: 0},
 
         title := TitleLabel {
-            flow: Flow.Right{wrap: true},
-            draw_text +: {
-                text_style: TITLE_TEXT {font_size: 13},
-                color: #000
-            }
             text: "Add/Explore Rooms and Spaces"
             draw_text +: {
                 text_style: theme.font_regular {font_size: 18},
@@ -1150,9 +1145,20 @@ impl Widget for AddRoomScreen {
                                     Some(4.0),
                                 );
                             } else {
+                                let create_encrypted = scope
+                                    .data
+                                    .get::<AppState>()
+                                    .map(|app_state| {
+                                        app_state.bot_settings.should_create_encrypted_dm(
+                                            user_id.as_ref(),
+                                            current_user_id().as_deref(),
+                                        )
+                                    })
+                                    .unwrap_or(true);
                                 self.adding_friend = true;
                                 add_friend_button.set_enabled(cx, false);
                                 submit_async_request(MatrixRequest::OpenOrCreateDirectMessage {
+                                    create_encrypted,
                                     user_profile: UserProfile {
                                         user_id,
                                         username: None,

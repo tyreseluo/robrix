@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     avatar_cache::{self, AvatarCacheEntry, clear_avatar_cache}, home::{
         add_room::{CreateRoomModalAction, CreateRoomModalWidgetRefExt},
-        event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt}, invite_screen::InviteScreenWidgetRefExt, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
+        bot_binding_modal::{BotBindingModalAction, BotBindingModalWidgetRefExt},
+        event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt, mark_invite_modal_closed}, invite_screen::InviteScreenWidgetRefExt, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
     }, i18n::{AppLanguage, tr_fmt, tr_key}, join_leave_room_modal::{
         JoinLeaveModalKind, JoinLeaveRoomModalAction, JoinLeaveRoomModalWidgetRefExt
     }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::RoomFilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
@@ -89,30 +90,20 @@ script_mod! {
                     draw_bg.color: #F3F3F3
                     caption_label +: {
                         label +: {
-                            align: Align{x: 0.5},
                             draw_text +: { color: #0 }
                             text: "Robrix"
                         }
-                    }
-                    windows_buttons +: {
-                         // Note: these are the background colors of the buttons used in Windows:
-                        // * idle: Clear, for all three buttons.
-                        // * hover: #E9E9E9 for minimize and maximize, #E81123 for close.
-                        // * down: either darker (on light mode) or lighter (on dark mode).
-                        //
-                        // However, the DesktopButton widget doesn't support drawing a background color yet,
-                        // so these colors are the colors of the icon itself, not the background highlight.
-                        // When it supports that, we will keep the icon color always black,
-                        // and change the background color instead based on the above colors.
-                        min +: { draw_bg +: {color: #0, color_hover: #9, color_down: #3} }
-                        max +: { draw_bg +: {color: #0, color_hover: #9, color_down: #3} }
-                        close +: { draw_bg +: {color: #0, color_hover: #E81123, color_down: #FF0015} }
                     }
                 }
             
 
                 body +: {
-                    padding: 0,
+                    padding: Inset{
+                        top: (mod.widgets.SAFE_INSET_PAD_TOP),
+                        bottom: (mod.widgets.SAFE_INSET_PAD_BOTTOM),
+                        left: (mod.widgets.SAFE_INSET_PAD_LEFT),
+                        right: (mod.widgets.SAFE_INSET_PAD_RIGHT),
+                    }
 
                     View {
                         width: Fill, height: Fill,
@@ -160,6 +151,11 @@ script_mod! {
                         invite_modal := Modal {
                             content +: {
                                 invite_modal_inner := InviteModal {}
+                            }
+                        }
+                        bot_binding_modal := Modal {
+                            content +: {
+                                bot_binding_modal_inner := BotBindingModal {}
                             }
                         }
                         room_filter_modal := Modal {
@@ -617,15 +613,6 @@ impl MatchEvent for App {
             error!("Failed to load window state: {}", e);
         }
 
-        // Hide the caption bar on macOS and Linux, which use native window chrome.
-        // On Windows (with custom chrome), the caption bar is needed.
-        if matches!(cx.os_type(), OsType::Macos | OsType::LinuxWindow(_) | OsType::LinuxDirect) {
-            let mut window = self.ui.window(cx, ids!(main_window));
-            script_apply_eval!(cx, window, {
-                show_caption_bar: false
-            });
-        }
-
         self.update_login_visibility(cx);
         self.sync_app_language(cx);
 
@@ -697,6 +684,10 @@ impl MatchEvent for App {
                     }
                     RoomFilterResultTarget::RemoteUser(user_profile) => {
                         submit_async_request(MatrixRequest::OpenOrCreateDirectMessage {
+                            create_encrypted: self.app_state.bot_settings.should_create_encrypted_dm(
+                                user_profile.user_id.as_ref(),
+                                current_user_id().as_deref(),
+                            ),
                             user_profile,
                             allow_create: false,
                         });
@@ -728,6 +719,14 @@ impl MatchEvent for App {
                 });
             }
             return;
+        }
+
+        if let Some(room_screen_id) = self.clicked_mobile_room_info_button(cx, actions) {
+            let room_screen_widget_uid = self.ui.room_screen(cx, &[room_screen_id]).widget_uid();
+            cx.widget_action(
+                room_screen_widget_uid,
+                MessageAction::ShowRoomInfoPane,
+            );
         }
 
         for action in actions {
@@ -848,7 +847,8 @@ impl MatchEvent for App {
                     self.update_login_visibility(cx);
                     self.ui.redraw(cx);
                 }
-                continue;
+                // Do NOT continue here — let the action propagate to the LoginScreen widget,
+                // which will open the login_status_modal to show the failure message.
             }
 
             if let RoomFilterAction::Changed(keywords) = action.as_widget_action().cast_ref() {
@@ -890,7 +890,9 @@ impl MatchEvent for App {
                     if self.room_filter_modal_results.is_empty() {
                         self.set_room_filter_modal_empty_state(
                             cx,
-                            &format!("No server results for \"{}\".", query),
+                            &tr_fmt(self.app_state.app_language, "app.room_filter.no_server_results", &[
+                                ("query", query),
+                            ]),
                             true,
                         );
                     } else {
@@ -908,7 +910,9 @@ impl MatchEvent for App {
                     self.refresh_room_filter_modal_result_buttons(cx);
                     self.set_room_filter_modal_empty_state(
                         cx,
-                        &format!("Server search failed: {}", error),
+                        &tr_fmt(self.app_state.app_language, "app.room_filter.search_remote_failed", &[
+                            ("error", error),
+                        ]),
                         true,
                     );
                     continue;
@@ -928,7 +932,7 @@ impl MatchEvent for App {
             if let MessageAction::OpenMessageContextMenu { details, abs_pos } = action.as_widget_action().cast() {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let new_message_context_menu = self.ui.new_message_context_menu(cx, ids!(new_message_context_menu));
-                let expected_dimensions = new_message_context_menu.show(cx, details);
+                let expected_dimensions = new_message_context_menu.show(cx, details, self.app_state.app_language);
                 // Ensure the context menu does not spill over the window's bounds.
                 let rect = self.ui.window(cx, ids!(main_window)).area().rect(cx);
                 let pos_x = min(abs_pos.x, rect.size.x - expected_dimensions.x);
@@ -1044,28 +1048,28 @@ impl MatchEvent for App {
                     }
                     let message = match (*bound, bot_user_id.as_ref(), warning.as_deref()) {
                         (true, Some(bot_user_id), Some(warning)) => {
-                            format!("BotFather {bot_user_id} is available for room {room_id}, but inviting it reported a warning: {warning}")
+                            format!("Bot {bot_user_id} is available for room {room_id}, but adding it reported a warning: {warning}")
                         }
                         (true, Some(bot_user_id), None) => {
-                            format!("Bound room {room_id} to BotFather {bot_user_id}.")
+                            format!("Added bot {bot_user_id} to room {room_id}.")
                         }
                         (false, Some(bot_user_id), Some(warning)) => {
-                            format!("Unbound BotFather {bot_user_id} from room {room_id}, with warning: {warning}")
+                            format!("Removed bot {bot_user_id} from room {room_id}, with warning: {warning}")
                         }
                         (false, Some(bot_user_id), None) => {
-                            format!("Unbound BotFather {bot_user_id} from room {room_id}.")
+                            format!("Removed bot {bot_user_id} from room {room_id}.")
                         }
                         (false, None, Some(warning)) => {
-                            format!("Unbound room {room_id} from BotFather, with warning: {warning}")
+                            format!("Removed bot from room {room_id}, with warning: {warning}")
                         }
                         (false, None, None) => {
-                            format!("Unbound room {room_id} from BotFather.")
+                            format!("Removed bot from room {room_id}.")
                         }
                         (true, None, Some(warning)) => {
-                            format!("BotFather is available for room {room_id}, with warning: {warning}")
+                            format!("Bot is available for room {room_id}, with warning: {warning}")
                         }
                         (true, None, None) => {
-                            format!("Bound room {room_id} to BotFather.")
+                            format!("Added bot to room {room_id}.")
                         }
                     };
                     submit_async_request(MatrixRequest::SendMessage {
@@ -1102,6 +1106,20 @@ impl MatchEvent for App {
                         }
                     }
                     self.ui.redraw(cx);
+                    continue;
+                }
+                Some(AppStateAction::KnownBotUserIdsDiscovered { bot_user_ids }) => {
+                    if self
+                        .app_state
+                        .bot_settings
+                        .record_known_bot_user_ids(bot_user_ids.iter().cloned())
+                    {
+                        if let Some(user_id) = current_user_id() {
+                            if let Err(e) = persistence::save_app_state(self.app_state.clone(), user_id) {
+                                error!("Failed to persist discovered bot user IDs. Error: {e}");
+                            }
+                        }
+                    }
                     continue;
                 }
                 Some(AppStateAction::NavigateToRoom { room_to_close, destination_room }) => {
@@ -1152,7 +1170,7 @@ impl MatchEvent for App {
                 Some(JoinLeaveRoomModalAction::Open { kind, show_tip }) => {
                     self.ui
                         .join_leave_room_modal(cx, ids!(join_leave_modal_inner))
-                        .set_kind(cx, kind.clone(), *show_tip);
+                        .set_kind(cx, kind.clone(), *show_tip, self.app_state.app_language);
                     self.ui.modal(cx, ids!(join_leave_modal)).open(cx);
                     continue;
                 }
@@ -1242,7 +1260,29 @@ impl MatchEvent for App {
                     continue;
                 }
                 Some(InviteModalAction::Close) => {
+                    mark_invite_modal_closed();
                     self.ui.modal(cx, ids!(invite_modal)).close(cx);
+                    continue;
+                }
+                _ => {}
+            }
+
+            // Handle BotBindingModalAction to open/close the bot binding modal.
+            match action.downcast_ref() {
+                Some(BotBindingModalAction::Open(room_name_id)) => {
+                    self.ui
+                        .bot_binding_modal(cx, ids!(bot_binding_modal_inner))
+                        .show(
+                            cx,
+                            room_name_id.clone(),
+                            &self.app_state.bot_settings,
+                            self.app_state.app_language,
+                        );
+                    self.ui.modal(cx, ids!(bot_binding_modal)).open(cx);
+                    continue;
+                }
+                Some(BotBindingModalAction::Close) => {
+                    self.ui.modal(cx, ids!(bot_binding_modal)).close(cx);
                     continue;
                 }
                 _ => {}
@@ -1283,6 +1323,10 @@ impl MatchEvent for App {
                 }
                 Some(DirectMessageRoomAction::DidNotExist { user_profile }) => {
                     let user_profile = user_profile.clone();
+                    let create_encrypted = self.app_state.bot_settings.should_create_encrypted_dm(
+                        user_profile.user_id.as_ref(),
+                        current_user_id().as_deref(),
+                    );
                     let body_text = match &user_profile.username {
                         Some(un) if !un.is_empty() => format!(
                             "You don't have an existing direct message room with {} ({}).\n\n\
@@ -1304,6 +1348,7 @@ impl MatchEvent for App {
                             accept_button_text: Some("Create DM".into()),
                             on_accept_clicked: Some(Box::new(move |_cx| {
                                 submit_async_request(MatrixRequest::OpenOrCreateDirectMessage {
+                                    create_encrypted,
                                     user_profile,
                                     allow_create: true,
                                 });
@@ -1515,6 +1560,22 @@ impl App {
         }
         if options_view.button(cx, ids!(remote_search_spaces_button)).clicked(actions) {
             return Some(RemoteDirectorySearchKind::Spaces);
+        }
+        None
+    }
+
+    fn clicked_mobile_room_info_button(&self, cx: &mut Cx, actions: &Actions) -> Option<LiveId> {
+        for (view_id, room_screen_id) in Self::ROOM_VIEW_IDS.iter().zip(Self::ROOM_SCREEN_IDS.iter()) {
+            let button_path = &[
+                *view_id,
+                live_id!(header),
+                live_id!(content),
+                live_id!(button_container),
+                live_id!(right_button),
+            ];
+            if self.ui.button(cx, button_path).clicked(actions) {
+                return Some(*room_screen_id);
+            }
         }
         None
     }
@@ -1860,6 +1921,18 @@ impl App {
         // Set the header title for the view being pushed.
         let title_path = &[view_id, live_id!(header), live_id!(content), live_id!(title_container), live_id!(title)];
         self.ui.label(cx, title_path).set_text(cx, &selected_room.display_name());
+        let right_button_path = &[view_id, live_id!(header), live_id!(content), live_id!(button_container), live_id!(right_button)];
+        let show_info_button = matches!(
+            selected_room,
+            SelectedRoom::JoinedRoom { .. }
+            | SelectedRoom::Thread { .. }
+        );
+        let right_button = self.ui.button(cx, right_button_path);
+        right_button.set_visible(cx, show_info_button);
+        if show_info_button {
+            right_button.set_text(cx, "");
+            right_button.reset_hover(cx);
+        }
 
         // Save the current selected_room onto the navigation stack before replacing it.
         if let Some(prev) = self.app_state.selected_room.take() {
@@ -1917,16 +1990,20 @@ pub struct BotSettingsState {
     pub enabled: bool,
     /// The configured botfather user, either as a full MXID or localpart.
     pub botfather_user_id: String,
-    /// Rooms that Robrix currently considers bound to BotFather,
-    /// paired with the exact BotFather MXID used for that room.
+    /// Bots discovered from BotFather `/listbots` replies.
+    pub known_bot_user_ids: Vec<OwnedUserId>,
+    /// Rooms that Robrix currently considers bot-bound,
+    /// paired with the exact bot MXID used for that room.
     pub room_bindings: Vec<RoomBotBindingState>,
 }
 
-/// A persisted room-level BotFather binding.
+/// A persisted room-level bot binding.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RoomBotBindingState {
     pub room_id: OwnedRoomId,
     pub bot_user_id: OwnedUserId,
+    #[serde(default)]
+    pub remark: String,
 }
 
 impl Default for BotSettingsState {
@@ -1934,6 +2011,7 @@ impl Default for BotSettingsState {
         Self {
             enabled: false,
             botfather_user_id: Self::DEFAULT_BOTFATHER_LOCALPART.to_string(),
+            known_bot_user_ids: Vec::new(),
             room_bindings: Vec::new(),
         }
     }
@@ -1942,21 +2020,102 @@ impl Default for BotSettingsState {
 impl BotSettingsState {
     pub const DEFAULT_BOTFATHER_LOCALPART: &'static str = "bot";
 
-    fn room_binding_index(&self, room_id: &RoomId) -> Result<usize, usize> {
+    fn room_binding_index(
+        &self,
+        room_id: &RoomId,
+        bot_user_id: &UserId,
+    ) -> Result<usize, usize> {
         self.room_bindings
-            .binary_search_by(|binding| binding.room_id.as_str().cmp(room_id.as_str()))
+            .binary_search_by(|binding|
+                (
+                    binding.room_id.as_str(),
+                    binding.bot_user_id.as_str(),
+                ).cmp(&(room_id.as_str(), bot_user_id.as_str()))
+            )
+    }
+
+    fn room_binding_range(&self, room_id: &RoomId) -> std::ops::Range<usize> {
+        let start = self
+            .room_bindings
+            .partition_point(|binding| binding.room_id.as_str() < room_id.as_str());
+        let end = self
+            .room_bindings
+            .iter()
+            .skip(start)
+            .position(|binding| binding.room_id.as_str() != room_id.as_str())
+            .map_or(self.room_bindings.len(), |offset| start + offset);
+        start..end
     }
 
     /// Returns `true` if the given room is currently marked as bound locally.
     pub fn is_room_bound(&self, room_id: &RoomId) -> bool {
-        self.room_binding_index(room_id).is_ok()
+        !self.bound_bot_user_ids(room_id).is_empty()
     }
 
     /// Returns the persisted BotFather MXID for the given room, if any.
     pub fn bound_bot_user_id(&self, room_id: &RoomId) -> Option<&UserId> {
-        self.room_binding_index(room_id)
-            .ok()
-            .map(|index| self.room_bindings[index].bot_user_id.as_ref())
+        let room_binding_range = self.room_binding_range(room_id);
+        self.room_bindings
+            .get(room_binding_range.start)
+            .map(|binding| binding.bot_user_id.as_ref())
+    }
+
+    /// Returns all persisted bot MXIDs for the given room.
+    pub fn bound_bot_user_ids(&self, room_id: &RoomId) -> Vec<OwnedUserId> {
+        self.room_bindings[self.room_binding_range(room_id)]
+            .iter()
+            .map(|binding| binding.bot_user_id.clone())
+            .collect()
+    }
+
+    /// Returns all bot bindings for the given room.
+    pub fn room_bindings_for(&self, room_id: &RoomId) -> Vec<RoomBotBindingState> {
+        self.room_bindings[self.room_binding_range(room_id)]
+            .to_vec()
+    }
+
+    /// Returns all known bound bot MXIDs across every room, deduplicated.
+    pub fn all_bound_bot_user_ids(&self) -> Vec<OwnedUserId> {
+        let mut all_bots = self
+            .room_bindings
+            .iter()
+            .map(|binding| binding.bot_user_id.clone())
+            .collect::<Vec<_>>();
+        all_bots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        all_bots.dedup_by(|a, b| a.as_str() == b.as_str());
+        all_bots
+    }
+
+    /// Returns bot MXIDs discovered from BotFather `/listbots` replies.
+    pub fn known_bot_user_ids(&self) -> Vec<OwnedUserId> {
+        self.known_bot_user_ids.clone()
+    }
+
+    /// Merges the given discovered bot IDs into the known bot list.
+    ///
+    /// Returns `true` if the list changed.
+    pub fn record_known_bot_user_ids(
+        &mut self,
+        discovered_bot_user_ids: impl IntoIterator<Item = OwnedUserId>,
+    ) -> bool {
+        let mut changed = false;
+        for bot_user_id in discovered_bot_user_ids {
+            if !self
+                .known_bot_user_ids
+                .iter()
+                .any(|existing| existing.as_str() == bot_user_id.as_str())
+            {
+                self.known_bot_user_ids.push(bot_user_id);
+                changed = true;
+            }
+        }
+        if changed {
+            self.known_bot_user_ids
+                .sort_by(|lhs, rhs| lhs.as_str().cmp(rhs.as_str()));
+            self.known_bot_user_ids
+                .dedup_by(|lhs, rhs| lhs.as_str() == rhs.as_str());
+        }
+        changed
     }
 
     /// Updates the local bound/unbound state for the given room.
@@ -1968,21 +2127,41 @@ impl BotSettingsState {
     ) {
         if bound {
             let Some(bot_user_id) = bot_user_id else { return };
-            match self.room_binding_index(room_id.as_ref()) {
-                Ok(existing_index) => {
-                    self.room_bindings[existing_index].bot_user_id = bot_user_id;
-                }
+            match self.room_binding_index(room_id.as_ref(), bot_user_id.as_ref()) {
+                Ok(_) => {}
                 Err(insert_index) => {
                     self.room_bindings.insert(insert_index, RoomBotBindingState {
                         room_id,
                         bot_user_id,
+                        remark: String::new(),
                     });
                 }
             }
         } else {
-            if let Ok(existing_index) = self.room_binding_index(room_id.as_ref()) {
-                self.room_bindings.remove(existing_index);
+            if let Some(bot_user_id) = bot_user_id {
+                if let Ok(existing_index) = self.room_binding_index(room_id.as_ref(), bot_user_id.as_ref()) {
+                    self.room_bindings.remove(existing_index);
+                }
+            } else {
+                self.room_bindings.retain(|binding| binding.room_id != room_id);
             }
+        }
+    }
+
+    /// Updates the remark for a specific room bot binding.
+    ///
+    /// Returns `true` if a binding existed and was updated.
+    pub fn set_room_bot_remark(
+        &mut self,
+        room_id: &RoomId,
+        bot_user_id: &UserId,
+        remark: String,
+    ) -> bool {
+        if let Ok(index) = self.room_binding_index(room_id, bot_user_id) {
+            self.room_bindings[index].remark = remark;
+            true
+        } else {
+            false
         }
     }
 
@@ -2032,6 +2211,20 @@ impl BotSettingsState {
         }
 
         self.resolved_bot_user_id(current_user_id)
+    }
+
+    /// Returns `true` if new DM rooms for this target user should be encrypted.
+    ///
+    /// BotFather DM rooms are created unencrypted so that appservice bots that do
+    /// not support E2EE can still receive and reply to messages.
+    pub fn should_create_encrypted_dm(
+        &self,
+        target_user_id: &UserId,
+        current_user_id: Option<&UserId>,
+    ) -> bool {
+        self.resolved_bot_user_id(current_user_id)
+            .map(|bot_user_id| bot_user_id.as_str() != target_user_id.as_str())
+            .unwrap_or(true)
     }
 }
 
@@ -2187,6 +2380,10 @@ pub enum AppStateAction {
     BotRoomBindingDetected {
         room_id: OwnedRoomId,
         bot_user_id: OwnedUserId,
+    },
+    /// Bot IDs discovered from BotFather replies (for example, `/listbots`).
+    KnownBotUserIdsDiscovered {
+        bot_user_ids: Vec<OwnedUserId>,
     },
     /// The given room was successfully loaded from the homeserver
     /// and is now known to our client.
