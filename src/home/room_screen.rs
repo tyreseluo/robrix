@@ -4751,7 +4751,6 @@ impl RoomScreen {
                     }
                 }
                 TimelineUpdate::FileUploadUpdate { current, total } => {
-                    println!("TimelineUpdate::FileUploadUpdate: {}/{}", current, total);
                     self.view.room_input_bar(cx, ids!(room_input_bar))
                         .set_upload_progress(cx, current, total);
                 }
