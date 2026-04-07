@@ -616,6 +616,15 @@ impl MatchEvent for App {
         let _app_data_dir = crate::app_data_dir();
         log!("App::handle_startup(): app_data_dir: {:?}", _app_data_dir);
 
+        // Hide the caption bar on macOS and Linux, which use native window chrome.
+        // On Windows (with custom chrome), the caption bar is needed.
+        if matches!(cx.os_type(), OsType::Macos | OsType::LinuxWindow(_) | OsType::LinuxDirect) {
+            let mut window = self.ui.window(cx, ids!(main_window));
+            script_apply_eval!(cx, window, {
+                show_caption_bar: false
+            });
+        }
+
         if let Err(e) = persistence::load_window_state(self.ui.window(cx, ids!(main_window)), cx) {
             error!("Failed to load window state: {}", e);
         }
@@ -754,6 +763,7 @@ impl MatchEvent for App {
 
             match action.downcast_ref() {
                 Some(LogoutAction::LogoutSuccess) => {
+                    self.save_logged_in_window_size(cx);
                     self.app_state.logged_in = false;
                     self.ui.modal(cx, ids!(logout_confirm_modal)).close(cx);
                     self.update_login_visibility(cx);
@@ -761,10 +771,12 @@ impl MatchEvent for App {
                     continue;
                 }
                 Some(LogoutAction::ClearAppState { on_clear_appstate }) =>  {
+                    self.save_logged_in_window_size(cx);
                     // Clear user profile cache, invited_rooms timeline states 
                     clear_all_app_state(cx);
                     // Reset all app state to its default.
                     self.app_state = Default::default();
+                    self.enforce_login_window_size(cx);
                     on_clear_appstate.notify_one();
                     continue;
                 }
@@ -775,6 +787,7 @@ impl MatchEvent for App {
                 log!("Received LoginAction::LoginSuccess, hiding login view.");
                 self.app_state.logged_in = true;
                 self.app_state.adding_account = false;
+                self.restore_logged_in_window_size(cx);
                 self.update_login_visibility(cx);
                 self.ui.redraw(cx);
                 continue;
@@ -783,8 +796,10 @@ impl MatchEvent for App {
             // Handle request to show login screen for adding another account
             if let Some(LoginAction::ShowAddAccountScreen) = action.downcast_ref() {
                 log!("Received LoginAction::ShowAddAccountScreen, showing login view for adding account.");
+                self.save_logged_in_window_size(cx);
                 self.app_state.adding_account = true;
                 self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, true);
+                self.enforce_login_window_size(cx);
                 self.ui.redraw(cx);
                 continue;
             }
@@ -794,6 +809,7 @@ impl MatchEvent for App {
                 log!("Received LoginAction::AddAccountSuccess, hiding login view.");
                 self.app_state.adding_account = false;
                 self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, false);
+                self.restore_logged_in_window_size(cx);
                 self.ui.redraw(cx);
                 continue;
             }
@@ -803,6 +819,7 @@ impl MatchEvent for App {
                 log!("Received LoginAction::CancelAddAccount, hiding login view.");
                 self.app_state.adding_account = false;
                 self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, false);
+                self.restore_logged_in_window_size(cx);
                 self.ui.redraw(cx);
                 continue;
             }
@@ -850,6 +867,7 @@ impl MatchEvent for App {
             if let Some(LoginAction::LoginFailure(_)) = action.downcast_ref() {
                 if self.app_state.logged_in {
                     log!("Received LoginAction::LoginFailure while logged in; showing login screen.");
+                    self.save_logged_in_window_size(cx);
                     self.app_state.logged_in = false;
                     self.update_login_visibility(cx);
                     self.ui.redraw(cx);
@@ -1462,8 +1480,10 @@ impl AppMain for App {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
         if let Event::Shutdown = event {
             let window_ref = self.ui.window(cx, ids!(main_window));
-            if let Err(e) = persistence::save_window_state(window_ref, cx) {
-                error!("Failed to save window state. Error: {e}");
+            if self.should_persist_window_state() {
+                if let Err(e) = persistence::save_window_state(window_ref, cx) {
+                    error!("Failed to save window state. Error: {e}");
+                }
             }
             if let Some(user_id) = current_user_id() {
                 let app_state = self.app_state.clone();
@@ -1490,6 +1510,12 @@ impl AppMain for App {
                     error!("Failed to save TSP wallet state before app shutdown. Error: Timed Out.");
                 }
             }
+        }
+
+        if matches!(event, Event::WindowGeomChange(_))
+            && (!self.app_state.logged_in || self.app_state.adding_account)
+        {
+            self.enforce_login_window_size(cx);
         }
         
         // Forward events to the MatchEvent trait implementation.
@@ -1538,6 +1564,10 @@ impl App {
         live_id!(result_item_4), live_id!(result_item_5),
         live_id!(result_item_6), live_id!(result_item_7),
     ];
+    const DEFAULT_WINDOW_WIDTH_DESKTOP: f64 = 1280.0;
+    const DEFAULT_WINDOW_HEIGHT_DESKTOP: f64 = 800.0;
+    const LOGIN_WINDOW_WIDTH_DESKTOP: f64 = 375.0;
+    const LOGIN_WINDOW_HEIGHT_DESKTOP: f64 = 812.0;
 
     fn sync_app_language(&self, cx: &mut Cx) {
         let app_language = self.app_state.app_language;
@@ -1574,9 +1604,72 @@ impl App {
             self.ui
                 .modal(cx, ids!(login_screen_view.login_screen.login_status_modal))
                 .close(cx);
+        } else {
+            self.enforce_login_window_size(cx);
         }
         self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, show_login);
         self.ui.view(cx, ids!(home_screen_view)).set_visible(cx, !show_login);
+    }
+
+    fn restore_logged_in_window_size(&self, cx: &mut Cx) {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            let window_ref = self.ui.window(cx, ids!(main_window));
+            if let Err(e) = persistence::load_window_state(window_ref.clone(), cx) {
+                error!("Failed to load window state after login: {}", e);
+            }
+            let restored_size = window_ref.get_inner_size(cx);
+            if Self::is_login_window_size(restored_size) {
+                let current_position = window_ref.get_position(cx);
+                window_ref.configure_window(
+                    cx,
+                    dvec2(Self::DEFAULT_WINDOW_WIDTH_DESKTOP, Self::DEFAULT_WINDOW_HEIGHT_DESKTOP),
+                    current_position,
+                    false,
+                    "Robrix".to_string(),
+                );
+            }
+        }
+    }
+
+    fn save_logged_in_window_size(&self, cx: &mut Cx) {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            if self.should_persist_window_state() {
+                if let Err(e) = persistence::save_window_state(self.ui.window(cx, ids!(main_window)), cx) {
+                    error!("Failed to save window state before showing login screen: {e}");
+                }
+            }
+        }
+    }
+
+    fn should_persist_window_state(&self) -> bool {
+        self.app_state.logged_in && !self.app_state.adding_account
+    }
+
+    fn is_login_window_size(size: DVec2) -> bool {
+        const EPSILON: f64 = 0.5;
+        (size.x - Self::LOGIN_WINDOW_WIDTH_DESKTOP).abs() <= EPSILON
+            && (size.y - Self::LOGIN_WINDOW_HEIGHT_DESKTOP).abs() <= EPSILON
+    }
+
+    fn enforce_login_window_size(&self, cx: &mut Cx) {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            let window_ref = self.ui.window(cx, ids!(main_window));
+            let current_size = window_ref.get_inner_size(cx);
+            if Self::is_login_window_size(current_size) {
+                return;
+            }
+            let current_position = window_ref.get_position(cx);
+            window_ref.configure_window(
+                cx,
+                dvec2(Self::LOGIN_WINDOW_WIDTH_DESKTOP, Self::LOGIN_WINDOW_HEIGHT_DESKTOP),
+                current_position,
+                false,
+                "Robrix".to_string(),
+            );
+        }
     }
 
     fn clicked_room_filter_result_index(&self, cx: &mut Cx, actions: &Actions) -> Option<usize> {

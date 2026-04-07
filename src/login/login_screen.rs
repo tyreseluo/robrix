@@ -212,38 +212,6 @@ script_mod! {
                         }
                     }
 
-                    View {
-                        width: 275, height: Fit,
-                        flow: Down,
-
-                        proxy_settings_row := View {
-                            width: 275, height: Fit,
-                            flow: Right,
-                            align: Align{x: 1.0, y: 0.5}
-                            margin: Inset{top: -4, bottom: -4}
-                            spacing: 8.0
-
-                            proxy_settings_hint_label := Label {
-                                width: Fit, height: Fit
-                                draw_text +: {
-                                    color: #8C8C8C
-                                    text_style: REGULAR_TEXT {font_size: 10}
-                                }
-                                text: "Proxy settings"
-                            }
-
-                            proxy_settings_button := RobrixNeutralIconButton {
-                                width: Fit, height: Fit
-                                align: Align{x: 1.0, y: 0.5}
-                                padding: 8
-                                text: ""
-                                icon_walk: Walk{width: 14, height: 14, margin: 0}
-                                draw_icon.svg: (ICON_SETTINGS)
-                            }
-                        }
-                    }
-                    
-
                     login_button := RobrixIconButton {
                         width: 275,
                         height: 40
@@ -354,6 +322,32 @@ script_mod! {
                     }
                 }
 
+                proxy_settings_button_anchor := View {
+                    width: Fill, height: Fill
+                    flow: Down
+                    align: Align{x: 0.0, y: 0.0}
+
+                    View {
+                        width: Fill, height: Fit
+                        flow: Right
+                        padding: Inset{top: 10, right: 10}
+
+                        View {
+                            width: Fill, height: Fit
+                        }
+
+                        proxy_settings_button := RobrixNeutralIconButton {
+                            width: Fit, height: Fit
+                            spacing: 0
+                            padding: 8
+                            text: ""
+                            label_walk: Walk{width: 0, height: 0, margin: 0}
+                            icon_walk: Walk{width: 14, height: 14, margin: 0}
+                            draw_icon.svg: (ICON_SETTINGS)
+                        }
+                    }
+                }
+
                 // The modal that pops up to display login status messages,
                 // such as when the user is logging in or when there is an error.
                 login_status_modal := Modal {
@@ -396,7 +390,7 @@ script_mod! {
 
                                 proxy_settings_close_button := RobrixNeutralIconButton {
                                     width: Fit, height: Fit
-                                    padding: 8
+                                    padding: Inset{left: 7, right: 4, top: 7, bottom: 7}
                                     text: ""
                                     icon_walk: Walk{width: 14, height: 14, margin: 0}
                                     draw_icon.svg: (ICON_CLOSE)
@@ -425,85 +419,29 @@ script_mod! {
                                     text: "Use proxy"
                                 }
 
-                                proxy_use_switch := View {
-                                    width: 52, height: 28,
-                                    flow: Overlay
-
-                                    proxy_use_switch_track_off := RoundedView {
-                                        width: Fill, height: Fill,
-                                        show_bg: true,
-                                        draw_bg +: {
-                                            color: #D0D0D0
-                                            border_radius: 14.0
-                                            border_size: 0.0
-                                        }
-                                        align: Align{y: 0.5}
-                                        flow: Overlay
-                                        padding: Inset{left: 3, right: 3, top: 3, bottom: 3}
-
-                                        View {
-                                            width: Fill, height: Fill,
-                                            align: Align{x: 0.0, y: 0.5}
-                                            knob_off := RoundedView {
-                                                width: 22, height: 22
-                                                show_bg: true
-                                                draw_bg +: {
-                                                    color: #FFFFFF
-                                                    border_radius: 11.0
-                                                    border_size: 1.0
-                                                    border_color: #CFCFCF
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    proxy_use_switch_track_on := RoundedView {
-                                        visible: false
-                                        width: Fill, height: Fill,
-                                        show_bg: true,
-                                        draw_bg +: {
-                                            color: (COLOR_ACTIVE_PRIMARY)
-                                            border_radius: 14.0
-                                            border_size: 0.0
-                                        }
-                                        align: Align{y: 0.5}
-                                        flow: Overlay
-                                        padding: Inset{left: 3, right: 3, top: 3, bottom: 3}
-
-                                        View {
-                                            width: Fill, height: Fill,
-                                            align: Align{x: 1.0, y: 0.5}
-                                            knob_on := RoundedView {
-                                                width: 22, height: 22
-                                                show_bg: true
-                                                draw_bg +: {
-                                                    color: #FFFFFF
-                                                    border_radius: 11.0
-                                                    border_size: 1.0
-                                                    border_color: #4CCB88
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    proxy_use_switch_hit := Button {
-                                        width: Fill, height: Fill
-                                        text: ""
-                                        spacing: 0
-                                        icon_walk: Walk{width: 0, height: 0}
-                                        draw_bg +: {
-                                            color: #0000
-                                            color_hover: #0000000A
-                                            color_down: #00000010
-                                            border_size: 0.0
-                                            border_radius: 14.0
-                                            border_color: #0000
-                                        }
-                                        draw_text +: {
-                                            color: #0000
-                                            color_hover: #0000
-                                            color_down: #0000
-                                        }
+                                proxy_use_toggle := Toggle {
+                                    width: 52, height: 28
+                                    text: ""
+                                    active: false
+                                    icon_walk: Walk{width: 0, height: 0, margin: 0}
+                                    label_walk: Walk{width: 0, height: 0, margin: 0}
+                                    draw_bg +: {
+                                        size: 18.0
+                                        color: #E3E7EF
+                                        color_hover: #E3E7EF
+                                        color_down: #D5DBE6
+                                        color_active: (COLOR_ACTIVE_PRIMARY)
+                                        border_radius: 14.0
+                                        border_size: 1.5
+                                        border_color: #7E879A
+                                        border_color_hover: #7E879A
+                                        border_color_down: #6F788D
+                                        border_color_active: (COLOR_ACTIVE_PRIMARY_DARKER)
+                                        mark_color: #2D3A57
+                                        mark_color_hover: #2D3A57
+                                        mark_color_down: #2D3A57
+                                        mark_color_active: #FFFFFF
+                                        mark_color_active_hover: #FFFFFF
                                     }
                                 }
                             }
@@ -660,6 +598,16 @@ pub struct LoginScreen {
 }
 
 impl LoginScreen {
+    fn sync_proxy_settings_modal_layout(&mut self, cx: &mut Cx) {
+        let rect = self.view.area().rect(cx);
+        let available_width = (rect.size.x - 24.0).max(260.0);
+        let modal_width = available_width.min(380.0);
+        let mut proxy_settings_modal_inner = self.view.view(cx, ids!(proxy_settings_modal_inner));
+        script_apply_eval!(cx, proxy_settings_modal_inner, {
+            width: #(modal_width)
+        });
+    }
+
     fn sync_mode_texts(&mut self, cx: &mut Cx) {
         self.view.label(cx, ids!(title)).set_text(cx,
             if self.signup_mode {
@@ -711,8 +659,6 @@ impl LoginScreen {
             .set_empty_text(cx, tr_key(self.app_language, "login.proxy_settings.input.password").to_string());
         self.view.label(cx, ids!(homeserver_hint_label))
             .set_text(cx, tr_key(self.app_language, "login.label.homeserver_optional"));
-        self.view.label(cx, ids!(proxy_settings_hint_label))
-            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.entry"));
         self.view.label(cx, ids!(proxy_settings_title))
             .set_text(cx, tr_key(self.app_language, "login.proxy_settings.title"));
         self.view.label(cx, ids!(proxy_use_label))
@@ -738,11 +684,8 @@ impl LoginScreen {
     fn set_use_proxy_enabled(&mut self, cx: &mut Cx, enabled: bool) {
         self.use_proxy_enabled = enabled;
         self.view
-            .view(cx, ids!(proxy_use_switch_track_on))
-            .set_visible(cx, enabled);
-        self.view
-            .view(cx, ids!(proxy_use_switch_track_off))
-            .set_visible(cx, !enabled);
+            .check_box(cx, ids!(proxy_use_toggle))
+            .set_active(cx, enabled);
         self.view
             .view(cx, ids!(proxy_fields_section))
             .set_visible(cx, enabled);
@@ -872,6 +815,7 @@ impl ScriptHook for LoginScreen {
         vm.with_cx_mut(|cx| {
             self.load_saved_proxy_to_form(cx);
             self.set_app_language(cx, self.app_language);
+            self.sync_proxy_settings_modal_layout(cx);
         });
     }
 }
@@ -884,6 +828,9 @@ impl Widget for LoginScreen {
             .unwrap_or_default();
         if self.app_language != app_language {
             self.set_app_language(cx, app_language);
+        }
+        if matches!(event, Event::WindowGeomChange(_)) {
+            self.sync_proxy_settings_modal_layout(cx);
         }
         self.view.handle_event(cx, event, scope);
         self.widget_match_event(cx, event, scope);
@@ -915,6 +862,7 @@ impl WidgetMatchEvent for LoginScreen {
         let proxy_settings_modal = self.view.modal(cx, ids!(proxy_settings_modal));
 
         if self.view.button(cx, ids!(proxy_settings_button)).clicked(actions) {
+            self.sync_proxy_settings_modal_layout(cx);
             proxy_settings_modal.open(cx);
             self.redraw(cx);
         }
@@ -924,8 +872,8 @@ impl WidgetMatchEvent for LoginScreen {
             self.redraw(cx);
         }
 
-        if self.view.button(cx, ids!(proxy_use_switch_hit)).clicked(actions) {
-            self.set_use_proxy_enabled(cx, !self.use_proxy_enabled);
+        if let Some(enabled) = self.view.check_box(cx, ids!(proxy_use_toggle)).changed(actions) {
+            self.set_use_proxy_enabled(cx, enabled);
         }
 
         if self.view.button(cx, ids!(proxy_settings_save_button)).clicked(actions) {
