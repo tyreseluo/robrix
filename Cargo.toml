@@ -43,9 +43,11 @@ futures-util = "0.3"
 hashbrown = { version = "0.16", features = ["raw-entry"] }
 htmlize = "1.0.5"
 indexmap = "2.6.0"
+image = "0.25"
 imghdr = "0.7.0"
 linkify = "0.10.0"
 mime = "0.3"
+mime_guess = "2.0"
 matrix-sdk-base = { git = "https://github.com/matrix-org/matrix-rust-sdk", branch = "main" }
 matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk", branch = "main", default-features = false, features = [
     "e2e-encryption",
