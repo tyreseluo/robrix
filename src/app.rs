@@ -452,11 +452,10 @@ fn init_file_logging() -> Option<()> {
     let log_path = logs_dir.join(&log_filename);
 
     // Also create/update a symlink to the latest log file for convenience
-    let latest_log_path = logs_dir.join("robrix_latest.log");
-
-    // Remove old symlink if it exists (ignore errors)
+    // Remove old symlink if it exists and create a new one (unix only)
     #[cfg(unix)]
     {
+        let latest_log_path = logs_dir.join("robrix_latest.log");
         let _ = std::fs::remove_file(&latest_log_path);
         let _ = std::os::unix::fs::symlink(&log_filename, &latest_log_path);
     }
