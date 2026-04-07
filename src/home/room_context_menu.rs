@@ -285,13 +285,7 @@ impl RoomContextMenu {
         self.visible
     }
 
-    pub fn show(
-        &mut self,
-        cx: &mut Cx,
-        details: RoomContextMenuDetails,
-        app_language: AppLanguage,
-        opening_gesture: ContextMenuOpenGesture,
-    ) -> DVec2 {
+    pub fn show(&mut self, cx: &mut Cx, details: RoomContextMenuDetails, app_language: AppLanguage, opening_gesture: ContextMenuOpenGesture) -> DVec2 {
         self.app_language = app_language;
         let height = self.update_buttons(cx, &details);
         self.details = Some(details);
@@ -371,13 +365,7 @@ impl RoomContextMenuRef {
         inner.is_currently_shown(cx)
     }
 
-    pub fn show(
-        &self,
-        cx: &mut Cx,
-        details: RoomContextMenuDetails,
-        app_language: AppLanguage,
-        opening_gesture: ContextMenuOpenGesture,
-    ) -> DVec2 {
+    pub fn show(&self, cx: &mut Cx, details: RoomContextMenuDetails, app_language: AppLanguage, opening_gesture: ContextMenuOpenGesture) -> DVec2 {
         let Some(mut inner) = self.borrow_mut() else { return DVec2::default()};
         inner.show(cx, details, app_language, opening_gesture)
     }

@@ -932,12 +932,7 @@ impl MatchEvent for App {
             if let MessageAction::OpenMessageContextMenu { details, abs_pos, opening_gesture } = action.as_widget_action().cast() {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let new_message_context_menu = self.ui.new_message_context_menu(cx, ids!(new_message_context_menu));
-                let expected_dimensions = new_message_context_menu.show(
-                    cx,
-                    details,
-                    self.app_state.app_language,
-                    opening_gesture,
-                );
+                let expected_dimensions = new_message_context_menu.show(cx, details, self.app_state.app_language, opening_gesture);
                 // Ensure the context menu does not spill over the window's bounds.
                 let rect = self.ui.window(cx, ids!(main_window)).area().rect(cx);
                 let pos_x = min(abs_pos.x, rect.size.x - expected_dimensions.x);
@@ -960,12 +955,7 @@ impl MatchEvent for App {
             if let RoomsListAction::OpenRoomContextMenu { details, pos, opening_gesture } = action.as_widget_action().cast() {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let room_context_menu = self.ui.room_context_menu(cx, ids!(room_context_menu));
-                let expected_dimensions = room_context_menu.show(
-                    cx,
-                    details,
-                    self.app_state.app_language,
-                    opening_gesture,
-                );
+                let expected_dimensions = room_context_menu.show(cx, details, self.app_state.app_language, opening_gesture);
                 // Ensure the context menu does not spill over the window's bounds.
                 let rect = self.ui.window(cx, ids!(main_window)).area().rect(cx);
                 let pos_x = min(pos.x, rect.size.x - expected_dimensions.x);

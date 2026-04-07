@@ -526,13 +526,7 @@ impl NewMessageContextMenu {
     ///
     /// Returns the expected (approximate) dimensions of the context menu,
     /// which can be used to proactively reposition it such that it fits on screen.
-    pub fn show(
-        &mut self,
-        cx: &mut Cx,
-        details: MessageDetails,
-        app_language: AppLanguage,
-        opening_gesture: ContextMenuOpenGesture,
-    ) -> DVec2 {
+    pub fn show(&mut self, cx: &mut Cx, details: MessageDetails, app_language: AppLanguage, opening_gesture: ContextMenuOpenGesture) -> DVec2 {
         self.set_app_language(cx, app_language);
         self.details = Some(details);
         self.pending_open_gesture = Some(opening_gesture);
@@ -669,13 +663,7 @@ impl NewMessageContextMenuRef {
     }
 
     /// See [`NewMessageContextMenu::show()`].
-    pub fn show(
-        &self,
-        cx: &mut Cx,
-        details: MessageDetails,
-        app_language: AppLanguage,
-        opening_gesture: ContextMenuOpenGesture,
-    ) -> DVec2 {
+    pub fn show(&self, cx: &mut Cx, details: MessageDetails, app_language: AppLanguage, opening_gesture: ContextMenuOpenGesture) -> DVec2 {
         let Some(mut inner) = self.borrow_mut() else { return DVec2::default()};
         inner.show(cx, details, app_language, opening_gesture)
     }
