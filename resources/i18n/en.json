@@ -538,6 +538,7 @@
   "space_lobby.header.button.invite": "Invite",
   "space_lobby.status.loading_rooms_spaces": "Loading rooms and spaces...",
   "space_lobby.status.no_rooms_spaces": "No rooms or spaces found.",
+  "space_lobby.status.no_matching_rooms_spaces": "No matching rooms or spaces.",
   "space_lobby.status.loading": "Loading...",
   "space_lobby.item.button.join": "Join",
   "space_lobby.item.button.view": "View",

@@ -18,9 +18,12 @@
 
 use makepad_widgets::*;
 use matrix_sdk::room::reply::{EnforceThread, Reply};
+use ruma::events::room::message::AddMentions;
 use matrix_sdk_ui::timeline::{EmbeddedEvent, EventTimelineItem, TimelineEventItemId};
 use ruma::{events::room::message::{LocationMessageEventContent, MessageType, ReplyWithinThread, RoomMessageEventContent}, OwnedRoomId, OwnedUserId};
-use crate::{app::AppState, home::{editing_pane::{EditingPaneState, EditingPaneWidgetExt, EditingPaneWidgetRefExt}, location_preview::{LocationPreviewWidgetExt, LocationPreviewWidgetRefExt}, room_screen::{MessageAction, RoomScreenProps, populate_preview_of_timeline_item}, tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt}, upload_progress::UploadProgressViewWidgetRefExt}, i18n::{AppLanguage, tr_fmt, tr_key}, location::init_location_subscriber, room::translation::{self, TRANSLATION_REQUEST_ID}, shared::{avatar::AvatarWidgetRefExt, file_upload_modal::{FileData, FileLoadedData, FilePreviewerAction, FilePreviewerMetaData, ThumbnailData}, html_or_plaintext::HtmlOrPlaintextWidgetRefExt, mentionable_text_input::MentionableTextInputWidgetExt, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{MatrixRequest, TimelineKind, UserPowerLevels, submit_async_request}, utils};
+use crate::{app::AppState, home::{editing_pane::{EditingPaneState, EditingPaneWidgetExt, EditingPaneWidgetRefExt}, location_preview::{LocationPreviewWidgetExt, LocationPreviewWidgetRefExt}, room_screen::{MessageAction, RoomScreenProps, populate_preview_of_timeline_item}, tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt}, upload_progress::UploadProgressViewWidgetRefExt}, i18n::{AppLanguage, tr_fmt, tr_key}, location::init_location_subscriber, room::translation::{self, TRANSLATION_REQUEST_ID}, shared::{avatar::AvatarWidgetRefExt, file_upload_modal::{FileData, FileLoadedData, FilePreviewerAction}, html_or_plaintext::HtmlOrPlaintextWidgetRefExt, mentionable_text_input::MentionableTextInputWidgetExt, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{MatrixRequest, TimelineKind, UserPowerLevels, submit_async_request}, utils};
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use crate::shared::file_upload_modal::{FilePreviewerMetaData, ThumbnailData};
 
 const ROOM_INFO_CARD_MOBILE_BREAKPOINT: f32 = 700.0;
 #[cfg(test)]
@@ -1054,6 +1057,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: event_id.to_owned(),
                             enforce_thread,
+                            add_mentions: AddMentions::Yes,
                         }
                     })
                 ).or_else(||
@@ -1061,6 +1065,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: thread_root_event_id.clone(),
                             enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
+                            add_mentions: AddMentions::No,
                         }
                     )
                 );
@@ -1115,6 +1120,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: event_id.to_owned(),
                             enforce_thread,
+                            add_mentions: AddMentions::Yes,
                         }
                     })
                 ).or_else(||
@@ -1122,6 +1128,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: thread_root_event_id.clone(),
                             enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
+                            add_mentions: AddMentions::No,
                         }
                     )
                 );
@@ -1708,6 +1715,7 @@ impl RoomInputBarRef {
                 event_tl_item.event_id().map(|event_id| Reply {
                     event_id: event_id.to_owned(),
                     enforce_thread: EnforceThread::MaybeThreaded,
+                    add_mentions: ruma::events::room::message::AddMentions::Yes,
                 })
             });
 

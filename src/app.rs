@@ -15,7 +15,7 @@ use crate::{
         event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt, mark_invite_modal_closed}, invite_screen::InviteScreenWidgetRefExt, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, TimelineUpdate, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
     }, i18n::{AppLanguage, tr_fmt, tr_key}, join_leave_room_modal::{
         JoinLeaveModalKind, JoinLeaveRoomModalAction, JoinLeaveRoomModalWidgetRefExt
-    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, file_upload_modal::{FilePreviewerAction, FileUploadModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::RoomFilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request, get_timeline_update_sender}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
+    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, file_upload_modal::{FilePreviewerAction, FileUploadModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::FilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request, get_timeline_update_sender}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
         VerificationModalAction,
         VerificationModalWidgetRefExt,
     }
@@ -105,7 +105,7 @@ script_mod! {
                         right: (mod.widgets.SAFE_INSET_PAD_RIGHT),
                     }
 
-                    View {
+                    overlay_container := View {
                         width: Fill, height: Fill,
                         flow: Overlay,
 
@@ -858,7 +858,7 @@ impl MatchEvent for App {
                 // which will open the login_status_modal to show the failure message.
             }
 
-            if let RoomFilterAction::Changed(keywords) = action.as_widget_action().cast_ref() {
+            if let FilterAction::Changed(keywords) = action.as_widget_action().cast_ref() {
                 cx.stop_timer(self.room_filter_debounce_timer);
                 self.pending_room_filter_keywords = keywords.clone();
                 self.room_filter_debounce_timer = cx.start_timeout(0.12);
@@ -940,10 +940,11 @@ impl MatchEvent for App {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let new_message_context_menu = self.ui.new_message_context_menu(cx, ids!(new_message_context_menu));
                 let expected_dimensions = new_message_context_menu.show(cx, details, self.app_state.app_language);
-                // Ensure the context menu does not spill over the window's bounds.
-                let rect = self.ui.window(cx, ids!(main_window)).area().rect(cx);
-                let pos_x = min(abs_pos.x, rect.size.x - expected_dimensions.x);
-                let pos_y = min(abs_pos.y, rect.size.y - expected_dimensions.y);
+                // Use the overlay container's rect (not the window's) to correctly position
+                // the context menu relative to the body area, which excludes the caption bar.
+                let rect = self.ui.view(cx, ids!(overlay_container)).area().rect(cx);
+                let pos_x = min(abs_pos.x - rect.pos.x, rect.size.x - expected_dimensions.x);
+                let pos_y = min(abs_pos.y - rect.pos.y, rect.size.y - expected_dimensions.y);
                 let margin = Inset {
                     left: pos_x as f64,
                     top: pos_y as f64,
@@ -963,10 +964,11 @@ impl MatchEvent for App {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let room_context_menu = self.ui.room_context_menu(cx, ids!(room_context_menu));
                 let expected_dimensions = room_context_menu.show(cx, details, self.app_state.app_language);
-                // Ensure the context menu does not spill over the window's bounds.
-                let rect = self.ui.window(cx, ids!(main_window)).area().rect(cx);
-                let pos_x = min(pos.x, rect.size.x - expected_dimensions.x);
-                let pos_y = min(pos.y, rect.size.y - expected_dimensions.y);
+                // Use the overlay container's rect (not the window's) to correctly position
+                // the context menu relative to the body area, which excludes the caption bar.
+                let rect = self.ui.view(cx, ids!(overlay_container)).area().rect(cx);
+                let pos_x = min(pos.x - rect.pos.x, rect.size.x - expected_dimensions.x);
+                let pos_y = min(pos.y - rect.pos.y, rect.size.y - expected_dimensions.y);
                 let margin = Inset {
                     left: pos_x as f64,
                     top: pos_y as f64,

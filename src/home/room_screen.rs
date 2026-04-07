@@ -21,7 +21,7 @@ use matrix_sdk::{
     }
 };
 use matrix_sdk_ui::timeline::{
-    self, EmbeddedEvent, EncryptedMessage, EventTimelineItem, InReplyToDetails, MemberProfileChange, MembershipChange, MsgLikeContent, MsgLikeKind, OtherMessageLike, PollState, RoomMembershipChange, TimelineDetails, TimelineEventItemId, TimelineItem, TimelineItemContent, TimelineItemKind, VirtualTimelineItem
+    self, EmbeddedEvent, EncryptedMessage, EventTimelineItem, InReplyToDetails, LiveLocationState, MemberProfileChange, MembershipChange, MsgLikeContent, MsgLikeKind, OtherMessageLike, PollState, RoomMembershipChange, TimelineDetails, TimelineEventItemId, TimelineItem, TimelineItemContent, TimelineItemKind, VirtualTimelineItem
 };
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
@@ -3899,6 +3899,16 @@ impl Widget for RoomScreen {
                                             self.app_language,
                                             event_tl_item,
                                             utd,
+                                            item_drawn_status,
+                                        ),
+                                        MsgLikeKind::LiveLocation(live_loc) => populate_small_state_event(
+                                            cx,
+                                            list,
+                                            item_id,
+                                            &tl_state.kind,
+                                            app_language,
+                                            event_tl_item,
+                                            live_loc,
                                             item_drawn_status,
                                         ),
                                         MsgLikeKind::Other(other) => populate_small_state_event(
@@ -8105,6 +8115,27 @@ impl SmallStateEventContent for EncryptedMessage {
 }
 
 // For other message-like content (custom message-like events).
+impl SmallStateEventContent for LiveLocationState {
+    fn populate_item_content(
+        &self,
+        cx: &mut Cx,
+        _list: &mut PortalList,
+        _item_id: usize,
+        item: WidgetRef,
+        _event_tl_item: &EventTimelineItem,
+        username: &str,
+        _item_drawn_status: ItemDrawnStatus,
+        mut new_drawn_status: ItemDrawnStatus,
+    ) -> (WidgetRef, ItemDrawnStatus) {
+        item.label(cx, ids!(content)).set_text(
+            cx,
+            &format!("{username} shared a live location."),
+        );
+        new_drawn_status.content_drawn = true;
+        (item, new_drawn_status)
+    }
+}
+
 impl SmallStateEventContent for OtherMessageLike {
     fn populate_item_content(
         &self,
