@@ -9,7 +9,7 @@ keywords = ["matrix", "chat", "client", "robius", "makepad"]
 license = "MIT"
 readme = "README.md"
 categories = ["gui"]
-repository = "https://github.com/project-robius/robrix"
+repository = "https://github.com/Project-Robius-China/robrix2"
 version = "0.0.1-pre-alpha-4"
 metadata.makepad-auto-version = "zqpv-Yj-K7WNVK2I8h5Okhho46Q="
 
@@ -83,6 +83,8 @@ url = "2.5.0"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 rfd = "0.15"
+cargo-packager-updater = "0.2"
+semver = "1"
 
 ## Dependencies for TSP support.
 ## Commit "f0bc4625dcd729e07e4a36257df2f1d94c81cef4" is the most recent one without the invalid change to pin serde to 1.0.219.
