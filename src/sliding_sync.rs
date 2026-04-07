@@ -205,7 +205,7 @@ fn registration_uiaa_error_message(error: &matrix_sdk::Error) -> String {
             Some(ErrorKind::WeakPassword) => {
                 return "That password is too weak. Please choose a stronger password.".to_owned();
             }
-            Some(ErrorKind::Forbidden { .. }) => {
+            Some(ErrorKind::Forbidden) => {
                 return "This homeserver does not allow open registration.".to_owned();
             }
             Some(ErrorKind::LimitExceeded { .. }) => {
