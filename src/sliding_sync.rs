@@ -4683,7 +4683,7 @@ fn handle_load_app_state(user_id: OwnedUserId) {
                     && !app_state.saved_dock_state_home.dock_items.is_empty()
                 {
                     log!("Loaded room panel state from app data directory. Restoring now...");
-                    Cx::post_action(AppStateAction::RestoreAppStateFromPersistentState(app_state));
+                    Cx::post_action(AppStateAction::RestoreAppStateFromPersistentState(Box::new(app_state)));
                 }
             }
             Err(_e) => {

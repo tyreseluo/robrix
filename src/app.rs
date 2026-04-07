@@ -1033,7 +1033,7 @@ impl MatchEvent for App {
                 Some(AppStateAction::RestoreAppStateFromPersistentState(app_state)) => {
                     // Ignore the `logged_in` state that was stored persistently.
                     let logged_in_actual = self.app_state.logged_in;
-                    self.app_state = app_state.clone();
+                    self.app_state = *app_state.clone();
                     self.app_state.logged_in = logged_in_actual;
                     // Initialize the global translation config so RoomInputBar can access it.
                     crate::room::translation::set_global_config(&self.app_state.translation);
@@ -2429,7 +2429,7 @@ pub enum AppStateAction {
     UpgradedInviteToJoinedRoom(OwnedRoomId),
     /// The given app state was loaded from persistent storage
     /// and is ready to be restored.
-    RestoreAppStateFromPersistentState(AppState),
+    RestoreAppStateFromPersistentState(Box<AppState>),
     /// A room-level BotFather bind or unbind action completed.
     BotRoomBindingUpdated {
         room_id: OwnedRoomId,
