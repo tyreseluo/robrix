@@ -44,7 +44,7 @@ use crate::shared::mentionable_text_input::MentionableTextInputAction;
 
 use rangemap::RangeSet;
 
-use super::{event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
+use super::{ContextMenuOpenGesture, event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
 
 /// The maximum number of timeline items to search through
 /// when looking for a particular event.
@@ -8142,6 +8142,7 @@ pub enum MessageAction {
         /// The absolute position where we should show the context menu,
         /// in which the (0,0) origin coordinate is the top left corner of the app window.
         abs_pos: DVec2,
+        opening_gesture: ContextMenuOpenGesture,
     },
     /// The user requested opening the message action bar
     ActionBarOpen {
@@ -8382,6 +8383,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: fe.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                         }
                     );
                 }
@@ -8392,6 +8394,7 @@ impl Widget for Message {
                     MessageAction::OpenMessageContextMenu {
                         details: details.clone(),
                         abs_pos: lp.abs,
+                        opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                     }
                 );
             }
@@ -8423,6 +8426,7 @@ impl Widget for Message {
                             MessageAction::OpenMessageContextMenu {
                                 details: details.clone(),
                                 abs_pos: fe.abs,
+                                opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                             }
                         );
                     }
@@ -8439,6 +8443,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: lp.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                         }
                     );
                 }
@@ -8474,6 +8479,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: fe.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                         }
                     );
                 }
@@ -8484,6 +8490,7 @@ impl Widget for Message {
                     MessageAction::OpenMessageContextMenu {
                         details: details.clone(),
                         abs_pos: lp.abs,
+                        opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                     }
                 );
             }
