@@ -452,11 +452,10 @@ fn init_file_logging() -> Option<()> {
     let log_path = logs_dir.join(&log_filename);
 
     // Also create/update a symlink to the latest log file for convenience
-    let latest_log_path = logs_dir.join("robrix_latest.log");
-
-    // Remove old symlink if it exists (ignore errors)
+    // Remove old symlink if it exists and create a new one (unix only)
     #[cfg(unix)]
     {
+        let latest_log_path = logs_dir.join("robrix_latest.log");
         let _ = std::fs::remove_file(&latest_log_path);
         let _ = std::os::unix::fs::symlink(&log_filename, &latest_log_path);
     }
@@ -1033,8 +1032,10 @@ impl MatchEvent for App {
                 Some(AppStateAction::RestoreAppStateFromPersistentState(app_state)) => {
                     // Ignore the `logged_in` state that was stored persistently.
                     let logged_in_actual = self.app_state.logged_in;
-                    self.app_state = app_state.clone();
+                    self.app_state = *app_state.clone();
                     self.app_state.logged_in = logged_in_actual;
+                    // Initialize the global translation config so RoomInputBar can access it.
+                    crate::room::translation::set_global_config(&self.app_state.translation);
                     cx.action(MainDesktopUiAction::LoadDockFromAppState);
                     continue;
                 }
@@ -2016,6 +2017,9 @@ pub struct AppState {
     pub adding_account: bool,
     /// Local configuration and UI state for bot-assisted room binding.
     pub bot_settings: BotSettingsState,
+    /// Translation API configuration.
+    #[serde(default)]
+    pub translation: crate::room::translation::TranslationConfig,
 }
 
 /// Local bot integration settings persisted per Matrix account.
@@ -2424,7 +2428,7 @@ pub enum AppStateAction {
     UpgradedInviteToJoinedRoom(OwnedRoomId),
     /// The given app state was loaded from persistent storage
     /// and is ready to be restored.
-    RestoreAppStateFromPersistentState(AppState),
+    RestoreAppStateFromPersistentState(Box<AppState>),
     /// A room-level BotFather bind or unbind action completed.
     BotRoomBindingUpdated {
         room_id: OwnedRoomId,

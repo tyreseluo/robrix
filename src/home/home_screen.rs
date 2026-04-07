@@ -455,7 +455,7 @@ impl Widget for HomeScreen {
                             if let Some(settings_page) = self.update_active_page_from_selection(cx, app_state) {
                                 settings_page
                                     .settings_screen(cx, ids!(settings_screen))
-                                    .populate(cx, None, &app_state.bot_settings, app_state.app_language);
+                                    .populate(cx, None, &app_state.bot_settings, &app_state.translation, app_state.app_language);
                                 self.view.redraw(cx);
                             } else {
                                 error!("BUG: failed to set active page to show settings screen.");
