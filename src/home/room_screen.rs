@@ -4311,6 +4311,23 @@ impl RoomScreen {
                         //       and then replaces the existing timeline in ALL_ROOMS_INFO with the new one.
                     }
 
+                    // If the last appended item was sent by the current user,
+                    // scroll to bottom so the user always sees their own message.
+                    if is_append && new_items.len() > tl.items.len() {
+                        let sent_by_self = new_items.last()
+                            .and_then(|item| match item.kind() {
+                                TimelineItemKind::Event(ev) => Some(ev.sender()),
+                                _ => None,
+                            })
+                            .is_some_and(|sender| {
+                                current_user_id().is_some_and(|uid| sender == uid)
+                            });
+                        if sent_by_self {
+                            portal_list.set_first_id_and_scroll(new_items.len().saturating_sub(1), 0.0);
+                            portal_list.set_tail_range(true);
+                        }
+                    }
+
                     let prior_items_changed = clear_cache || changed_indices.start <= curr_first_id;
 
                     if new_items.len() == tl.items.len() {
