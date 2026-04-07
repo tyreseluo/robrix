@@ -1,12 +1,14 @@
 
 use makepad_widgets::*;
 
-use crate::{app::{AppState, BotSettingsState}, home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, i18n::{AppLanguage, I18nKey, language_dropdown_labels, tr}, persistence, profile::user_profile::UserProfile, settings::{account_settings::AccountSettingsWidgetExt, bot_settings::BotSettingsWidgetExt}, shared::{popup_list::{PopupKind, enqueue_popup_notification}, styles::{apply_neutral_button_style, apply_primary_button_style}}, sliding_sync::current_user_id};
+use crate::{app::{AppState, BotSettingsState}, home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, i18n::{AppLanguage, I18nKey, language_dropdown_labels, tr}, persistence, profile::user_profile::UserProfile, settings::{account_settings::AccountSettingsWidgetExt, bot_settings::BotSettingsWidgetExt, translation_settings::TranslationSettingsWidgetExt}, shared::{popup_list::{PopupKind, enqueue_popup_notification}, styles::{apply_neutral_button_style, apply_primary_button_style}}, sliding_sync::current_user_id};
 
 script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
 
+    // No custom DropDown types — inline override on the instance instead.
+    // Custom set_type_default() on DropDownFlat fails to render in this Makepad version.
 
     // The main, top-level settings screen widget.
     mod.widgets.SettingsScreen = #(SettingsScreen::register_widget(vm)) {
@@ -109,10 +111,77 @@ script_mod! {
                             text: "Application language"
                         }
 
-                        language_dropdown := DropDownFlat {
-                            width: 165
-                            height: 40
+                        language_dropdown := DropDown {
+                            width: 200
                             margin: Inset{left: 5, top: 2, bottom: 2}
+                            // draw_text.color is plain (NOT uniform) in DropDownFlat
+                            draw_text +: {
+                                color: #x333333
+                                color_hover: uniform(#x333333)
+                                color_focus: uniform(#x333333)
+                                color_down: uniform(#x333333)
+                                text_style: REGULAR_TEXT { font_size: 11 }
+                            }
+                            // draw_bg colors are all uniform() in DropDownFlat
+                            draw_bg +: {
+                                color: uniform(#xF6FAFF)
+                                color_hover: uniform(#xF0F6FF)
+                                color_focus: uniform(#xFFFFFF)
+                                color_down: uniform(#xEAF2FF)
+                                color_2: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                color_2_hover: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                color_2_focus: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                color_2_down: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                border_color: uniform(#xC8D9F2)
+                                border_color_hover: uniform(#x74A7EE)
+                                border_color_focus: uniform(#x1B6EF3)
+                                border_color_down: uniform(#x1B6EF3)
+                                border_color_2: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                border_color_2_hover: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                border_color_2_focus: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                border_color_2_down: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                arrow_color: uniform(#x555555)
+                                arrow_color_hover: uniform(#x1B6EF3)
+                                arrow_color_focus: uniform(#x1B6EF3)
+                                arrow_color_down: uniform(#x1B6EF3)
+                                border_size: uniform(1.5)
+                                border_radius: uniform(6.0)
+                            }
+                            popup_menu +: {
+                                draw_bg +: {
+                                    color: uniform(#xFDFEFF)
+                                    color_2: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                    border_color: uniform(#xD3E1F6)
+                                    border_color_2: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                    border_size: uniform(1.0)
+                                    border_radius: uniform(8.0)
+                                    color_dither: uniform(0.0)
+                                }
+                                // menu_item.draw_text.color is plain; others are uniform
+                                menu_item +: {
+                                    draw_text +: {
+                                        color: #x333333
+                                        color_hover: uniform(#x333333)
+                                        color_active: uniform(#x1B6EF3)
+                                    }
+                                    draw_bg +: {
+                                        color: uniform(#x00000000)
+                                        color_hover: uniform(#xF0F4FA)
+                                        color_active: uniform(#xDCEBFF)
+                                        color_2: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                        color_2_hover: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                        color_2_active: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                        border_color: uniform(#x00000000)
+                                        border_color_hover: uniform(#x00000000)
+                                        border_color_active: uniform(#x00000000)
+                                        border_color_2: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                        border_color_2_hover: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                        border_color_2_active: uniform(vec4(-1.0, -1.0, -1.0, -1.0))
+                                        mark_color: uniform(#x00000000)
+                                        mark_color_active: uniform(#x1B6EF3)
+                                    }
+                                }
+                            }
                             labels: ["English", "Simplified Chinese"]
                         }
 
@@ -134,6 +203,10 @@ script_mod! {
                         flow: Down
 
                         bot_settings := BotSettings {}
+
+                        LineH { width: 400, padding: 10, margin: Inset{top: 20, bottom: 5} }
+
+                        translation_settings := TranslationSettings {}
 
                         LineH { width: 400, padding: 10, margin: Inset{top: 20, bottom: 5} }
 
@@ -330,6 +403,9 @@ impl SettingsScreen {
         self.view
             .bot_settings(cx, ids!(bot_settings))
             .set_app_language(cx, self.app_language);
+        self.view
+            .translation_settings(cx, ids!(translation_settings))
+            .set_app_language(cx, self.app_language);
         self.view.redraw(cx);
     }
 
@@ -374,13 +450,14 @@ impl SettingsScreen {
     }
 
     /// Fetches the current user's profile and uses it to populate the settings screen.
-    pub fn populate(&mut self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, app_language: AppLanguage) {
+    pub fn populate(&mut self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, translation_config: &crate::room::translation::TranslationConfig, app_language: AppLanguage) {
         let Some(profile) = own_profile.or_else(|| get_own_profile(cx)) else {
             error!("Failed to get own profile for settings screen.");
             return;
         };
         self.view.account_settings(cx, ids!(account_settings)).populate(cx, profile);
         self.view.bot_settings(cx, ids!(bot_settings)).populate(cx, bot_settings);
+        self.view.translation_settings(cx, ids!(translation_settings)).populate(cx, translation_config);
         self.set_app_language(cx, app_language);
         self.set_selected_category(cx, SettingsCategory::Account);
         self.view.button(cx, ids!(close_button)).reset_hover(cx);
@@ -391,9 +468,9 @@ impl SettingsScreen {
 
 impl SettingsScreenRef {
     /// See [`SettingsScreen::populate()`].
-    pub fn populate(&self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, app_language: AppLanguage) {
+    pub fn populate(&self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, translation_config: &crate::room::translation::TranslationConfig, app_language: AppLanguage) {
         let Some(mut inner) = self.borrow_mut() else { return; };
-        inner.populate(cx, own_profile, bot_settings, app_language);
+        inner.populate(cx, own_profile, bot_settings, translation_config, app_language);
     }
 }
 

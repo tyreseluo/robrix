@@ -1035,6 +1035,8 @@ impl MatchEvent for App {
                     let logged_in_actual = self.app_state.logged_in;
                     self.app_state = app_state.clone();
                     self.app_state.logged_in = logged_in_actual;
+                    // Initialize the global translation config so RoomInputBar can access it.
+                    crate::room::translation::set_global_config(&self.app_state.translation);
                     cx.action(MainDesktopUiAction::LoadDockFromAppState);
                     continue;
                 }
@@ -2016,6 +2018,9 @@ pub struct AppState {
     pub adding_account: bool,
     /// Local configuration and UI state for bot-assisted room binding.
     pub bot_settings: BotSettingsState,
+    /// Translation API configuration.
+    #[serde(default)]
+    pub translation: crate::room::translation::TranslationConfig,
 }
 
 /// Local bot integration settings persisted per Matrix account.
