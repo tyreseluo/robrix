@@ -525,7 +525,7 @@ pub type OnMediaFetchedFn = fn(
 #[derive(Debug)]
 pub enum UrlPreviewError {
     /// HTTP request failed.
-    Request(String),
+    Request(matrix_sdk::reqwest::Error),
     /// JSON parsing failed.
     Json(serde_json::Error),
     /// Client not available.
@@ -2940,10 +2940,11 @@ async fn matrix_worker_task(
                 };
 
                 let _pin_task = Handle::current().spawn(async move {
+                    let room = timeline.room();
                     let result = if pin {
-                        timeline.pin_event(&event_id).await
+                        room.pin_event(&event_id).await
                     } else {
-                        timeline.unpin_event(&event_id).await
+                        room.unpin_event(&event_id).await
                     };
                     match sender.send(TimelineUpdate::PinResult { event_id, pin, result }) {
                         Ok(_) => SignalToUI::set_ui_signal(),
@@ -2990,33 +2991,29 @@ async fn matrix_worker_task(
                         let token = client.access_token().ok_or(UrlPreviewError::AccessTokenNotAvailable)?;
                         // Official Doc: https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediapreview_url
                         // Element desktop is using /_matrix/media/v3/preview_url
-                        let endpoint_url = client.homeserver().join("/_matrix/client/v1/media/preview_url")
+                        let mut endpoint_url = client.homeserver().join("/_matrix/client/v1/media/preview_url")
                             .map_err(UrlPreviewError::UrlParse)?;
+                        endpoint_url.query_pairs_mut().append_pair("url", url.as_str());
                         // log!("Fetching URL preview from endpoint: {} for URL: {}", endpoint_url, url);
-                        
+
                         let response = client
                             .http_client()
                             .get(endpoint_url.clone())
                             .bearer_auth(token)
-                            .query(&[("url", url.as_str())])
                             .header("Content-Type", "application/json")
                             .send()
                             .await
-                            .map_err(|e| {
-                                UrlPreviewError::Request(e.to_string())
-                            })?;
-                        
+                            .map_err(UrlPreviewError::Request)?;
+
                         let status = response.status();
                         // log!("URL preview response status for {}: {}", url, status);
-                        
+
                         if !status.is_success() && status.as_u16() != 429 {
                             // error!("URL preview request failed with status {} for URL: {}", status, url);
                             return Err(UrlPreviewError::HttpStatus(status.as_u16()));
                         }
-                        
-                        let text = response.text().await.map_err(|e| {
-                            UrlPreviewError::Request(e.to_string())
-                        })?;
+
+                        let text = response.text().await.map_err(UrlPreviewError::Request)?;
                         
                         // log!("URL preview response body length for {}: {} bytes", url, text.len());
                         // if text.len() > MAX_LOG_RESPONSE_BODY_LENGTH {
@@ -4721,7 +4718,8 @@ fn handle_session_changes(
     Handle::current().spawn(async move {
         loop {
             match receiver.recv().await {
-                Ok(SessionChange::UnknownToken { soft_logout }) => {
+                Ok(SessionChange::UnknownToken(data)) => {
+                    let soft_logout = data.soft_logout;
                     let msg = if soft_logout {
                         "Your login session has expired.\n\nPlease log in again."
                     } else {
@@ -5160,6 +5158,9 @@ async fn get_latest_event_details(
                 &sender_username,
             ).format_with(&sender_username, true);
             Some((*timestamp, latest_message_text))
+        }
+        LatestEventValue::RemoteInvite { timestamp, .. } => {
+            Some((*timestamp, String::from("You were invited to this room.")))
         }
     }    
 }

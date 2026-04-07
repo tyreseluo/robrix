@@ -13,7 +13,7 @@ use makepad_widgets::*;
 use makepad_widgets::animator::Animate;
 use matrix_sdk::{RoomDisplayName, RoomState, ruma::OwnedRoomId};
 use matrix_sdk_ui::spaces::SpaceRoom;
-use ruma::room::JoinRuleSummary;
+use ruma::{OwnedRoomAliasId, room::JoinRuleSummary};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::shared::avatar::AvatarState;
 use crate::shared::expand_arrow::ExpandArrow;
@@ -32,7 +32,10 @@ use crate::{
     i18n::{AppLanguage, tr_fmt, tr_key},
     join_leave_room_modal::{JoinLeaveModalKind, JoinLeaveRoomModalAction},
     room::BasicRoomDetails,
-    shared::avatar::{AvatarWidgetExt, AvatarWidgetRefExt},
+    shared::{
+        avatar::{AvatarWidgetExt, AvatarWidgetRefExt},
+        room_filter_input_bar::RoomFilterInputBarWidgetExt,
+    },
     space_service_sync::{SpaceRequest, SpaceRoomExt, SpaceRoomListAction},
     utils::{self, RoomNameId},
 };
@@ -313,6 +316,27 @@ script_mod! {
                     text_overflow: Ellipsis
                     draw_text +: { text_style: REGULAR_TEXT {font_size: 10.5}, color: #1a1a1a }
                 }
+
+                suggested_tag := RoundedView {
+                    visible: false
+                    width: Fit, height: Fit,
+                    padding: Inset { left: 6, right: 6, top: 3, bottom: 3 }
+                    show_bg: true
+                    draw_bg +: {
+                        color: #E8F4FD
+                        border_radius: 3.0
+                        border_size: 0.75
+                        border_color: (COLOR_INFO_BLUE)
+                    }
+                    suggested_label := Label {
+                        padding: 0
+                        margin: 0
+                        width: Fit, height: Fit,
+                        text: "Suggested"
+                        draw_text +: { text_style: REGULAR_TEXT {font_size: 8.5}, color: (COLOR_INFO_BLUE) }
+                    }
+                }
+
                 info_label := Label {
                     width: Fill, height: Fit,
                     margin: 0
@@ -443,7 +467,7 @@ script_mod! {
             loading_spinner := LoadingSpinner {
                 width: 14,
                 height: 14,
-                margin: Inset{left: 10, right: 6}
+                margin: Inset{left: 10, right: 4}
                 draw_bg +: {
                     color: (COLOR_ACTIVE_PRIMARY)
                     border_size: 2.0
@@ -507,14 +531,30 @@ script_mod! {
             show_bg: true,
             draw_bg.color: (COLOR_BG_PREVIEW)
 
-            space_info_label := Label {
+            space_info_row := View {
                 width: Fill,
                 height: Fit,
-                flow: Right, // do not wrap
-                margin: Inset{left: 2}
-                draw_text +: {
-                    text_style: REGULAR_TEXT {font_size: 10},
-                    color: #737373,
+                flow: Right,
+                spacing: 10,
+                align: Align { y: 0.5 }
+
+                space_info_label := Label {
+                    width: Fit,
+                    height: Fit,
+                    flow: Right, // do not wrap
+                    margin: Inset{left: 2}
+                    draw_text +: {
+                        text_style: REGULAR_TEXT {font_size: 10},
+                        color: #737373,
+                    }
+                    text: "Welcome to the space:"
+                }
+
+                // Filter input bar for searching rooms/spaces in this space
+                filter_bar := mod.widgets.RoomFilterInputBar {
+                    input +: {
+                        empty_text: "Filter this space..."
+                    }
                 }
                 text: ""
             }
@@ -855,6 +895,7 @@ impl Widget for SubspaceEntry {
 struct SpaceRoomInfo {
     id: OwnedRoomId,
     name: String,
+    canonical_alias: Option<OwnedRoomAliasId>,
     topic: Option<String>,
     avatar: AvatarState,
     num_joined_members: u64,
@@ -863,6 +904,8 @@ struct SpaceRoomInfo {
     join_rule: Option<JoinRuleSummary>,
     /// If `Some`, this is a space. If `None`, it's a room.
     children_count: Option<u64>,
+    /// Whether the room is suggested by the space administrators.
+    suggested: bool,
 }
 impl SpaceRoomInfo {
     fn is_space(&self) -> bool {
@@ -874,6 +917,7 @@ impl From<&SpaceRoom> for SpaceRoomInfo {
         SpaceRoomInfo {
             id: space_room.room_id.clone(),
             name: space_room.display_name.clone(),
+            canonical_alias: space_room.canonical_alias.clone(),
             topic: space_room.topic.as_ref().map(|t| {
                 replace_linebreaks_separators(t.trim(), false).into_owned()
             }),
@@ -882,6 +926,7 @@ impl From<&SpaceRoom> for SpaceRoomInfo {
             state: space_room.state,
             join_rule: space_room.join_rule.clone(),
             children_count: space_room.is_space().then_some(space_room.children_count),
+            suggested: space_room.suggested,
         }
     }
 }
@@ -889,6 +934,7 @@ impl From<SpaceRoom> for SpaceRoomInfo {
     fn from(space_room: SpaceRoom) -> Self {
         SpaceRoomInfo {
             children_count: space_room.is_space().then_some(space_room.children_count),
+            canonical_alias: space_room.canonical_alias,
             id: space_room.room_id,
             name: space_room.display_name,
             topic: space_room.topic.map(|t| {
@@ -898,6 +944,7 @@ impl From<SpaceRoom> for SpaceRoomInfo {
             num_joined_members: space_room.num_joined_members,
             state: space_room.state,
             join_rule: space_room.join_rule,
+            suggested: space_room.suggested,
         }
     }
 }
@@ -956,6 +1003,9 @@ pub struct SpaceLobbyScreen {
     #[rust] top_level_join_rule: Option<JoinRuleSummary>,
     #[rust] top_level_member_count: Option<u64>,
     #[rust] app_language: AppLanguage,
+
+    /// The current filter keywords entered by the user, if any.
+    #[rust] filter_keywords: String,
 }
 
 impl Widget for SpaceLobbyScreen {
@@ -1083,6 +1133,16 @@ impl Widget for SpaceLobbyScreen {
                     cx.action(InviteModalAction::Open(space_name_id.clone()));
                 }
             }
+
+            // Handle changes to this screen's own filter input bar.
+            if let Some(keywords) = self.view.room_filter_input_bar(cx, ids!(filter_bar)).changed(actions) {
+                self.filter_keywords = keywords;
+                self.rebuild_tree_entries();
+                // Reset scroll to the top when filter changes.
+                let portal_list = self.view.portal_list(cx, ids!(tree_list));
+                portal_list.set_first_id_and_scroll(0, 0.0);
+                self.redraw(cx);
+            }
         }
     }
 
@@ -1143,10 +1203,12 @@ impl Widget for SpaceLobbyScreen {
                 // No entries found
                 else if entry_count == 0 && item_id == 0 {
                     let item = list.item(cx, item_id, id!(status_label));
-                    item.child_by_path(ids!(label)).as_label().set_text(
-                        cx,
-                        tr_key(app_language, "space_lobby.status.no_rooms_spaces"),
-                    );
+                    let msg = if self.filter_keywords.is_empty() {
+                        tr_key(app_language, "space_lobby.status.no_rooms_spaces")
+                    } else {
+                        tr_key(app_language, "space_lobby.status.no_matching_rooms_spaces")
+                    };
+                    item.child_by_path(ids!(label)).as_label().set_text(cx, msg);
                     item.child_by_path(ids!(loading_spinner)).set_visible(cx, false);
                     item
                 }
@@ -1266,6 +1328,12 @@ impl Widget for SpaceLobbyScreen {
                                 spacer.walk.width = Size::Fixed(indent_pixel);
                             }
 
+                            // Show "Suggested" tag if recommended and not already joined
+                            let show_suggested = info.suggested
+                                && !matches!(info.state, Some(RoomState::Joined));
+                            item.child_by_path(ids!(main_entry.content.suggested_tag))
+                                .set_visible(cx, show_suggested);
+
                             // Build the info label with join status, member count, and topic
                             // Note: Public/Private is intentionally not shown per-item to reduce clutter
                             let info_label = item.child_by_path(ids!(main_entry.content.info_label)).as_label();
@@ -1380,7 +1448,7 @@ impl SpaceLobbyScreen {
         } else {
             String::new()
         };
-        self.view.label(cx, ids!(header.space_info_label)).set_text(cx, &text);
+        self.view.label(cx, ids!(header.space_info_row.space_info_label)).set_text(cx, &text);
     }
 
     fn insert_created_room_placeholder(&mut self, cx: &mut Cx, room_name_id: &RoomNameId) {
@@ -1414,6 +1482,7 @@ impl SpaceLobbyScreen {
                 is_direct: Some(false),
                 children_count: 0,
                 state: Some(RoomState::Joined),
+                suggested: false,
                 heroes: None,
                 via: Vec::new(),
             });
@@ -1469,22 +1538,211 @@ impl SpaceLobbyScreen {
         self.redraw(cx);
     }
 
-    /// Rebuild the flattened tree entries based on the current expansion state.
+    /// Rebuild the flattened tree entries based on the current expansion state,
+    /// and then apply the current filter keywords (if any).
     fn rebuild_tree_entries(&mut self) {
         let Some(space_name_id) = &self.space_name_id else { return };
         let root_space_id = space_name_id.room_id().clone();
-        // Build tree starting from root
         let mut new_tree_entries = Vec::new();
-        Self::build_tree_for_space(
-            &self.children_cache,
-            &self.expanded_spaces,
-            &self.loading_subspaces,
-            &mut new_tree_entries,
-            &root_space_id,
-            0,
-            0,
-        );
+
+        if self.filter_keywords.is_empty() {
+            // No filter: build tree respecting expansion state.
+            Self::build_tree_for_space(
+                &self.children_cache,
+                &self.expanded_spaces,
+                &self.loading_subspaces,
+                &mut new_tree_entries,
+                &root_space_id,
+                0,
+                0,
+            );
+        } else {
+            // Filter active: build tree showing all matching entries
+            // plus their ancestor spaces to preserve hierarchy context.
+            let kw = self.filter_keywords.to_lowercase();
+            Self::build_filtered_tree(
+                &self.children_cache,
+                &mut new_tree_entries,
+                &root_space_id,
+                &kw,
+                0,
+                0,
+            );
+        }
+
         self.tree_entries = new_tree_entries;
+    }
+
+    /// Returns whether the given [`SpaceRoomInfo`] matches the filter keywords.
+    fn matches_filter(info: &SpaceRoomInfo, keywords: &str) -> bool {
+        info.name.to_lowercase().contains(keywords)
+            || info.id.as_str().to_lowercase().contains(keywords)
+            || info.canonical_alias.as_ref()
+                .is_some_and(|a| a.as_str().to_lowercase().contains(keywords))
+            || info.topic.as_ref()
+                .is_some_and(|t| t.to_lowercase().contains(keywords))
+    }
+
+    /// Recursively build a filtered tree that includes only entries matching
+    /// the keywords, plus any ancestor spaces needed to preserve the hierarchy.
+    ///
+    /// Returns `true` if any matching entry was added within this subtree.
+    fn build_filtered_tree(
+        children_cache: &HashMap<OwnedRoomId, Vector<SpaceRoom>>,
+        tree_entries: &mut Vec<TreeEntry>,
+        space_id: &OwnedRoomId,
+        keywords: &str,
+        level: usize,
+        parent_mask: u32,
+    ) -> bool {
+        let Some(children) = children_cache.get(space_id) else { return false };
+
+        // Sort identically to the unfiltered tree: spaces first, then rooms, both alphabetically.
+        let mut sorted_children: Vec<_> = children.iter().collect();
+        sorted_children.sort_by(|a, b| {
+            match (a.is_space(), b.is_space()) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()),
+            }
+        });
+
+        // First pass: determine which children have matches (self or descendants)
+        // so we can correctly compute `is_last` for tree line drawing.
+        let matched_indices: Vec<usize> = sorted_children.iter().enumerate().filter_map(|(i, child)| {
+            let info = SpaceRoomInfo::from(*child);
+            let self_matches = Self::matches_filter(&info, keywords);
+            let has_matching_descendants = child.is_space()
+                && children_cache.contains_key(&child.room_id)
+                && Self::subtree_has_match(children_cache, &child.room_id, keywords);
+            if self_matches || has_matching_descendants {
+                Some(i)
+            } else {
+                None
+            }
+        }).collect();
+
+        if matched_indices.is_empty() {
+            return false;
+        }
+
+        // Second pass: emit entries for matched children, preserving hierarchy.
+        for (pos, &child_idx) in matched_indices.iter().enumerate() {
+            let child = sorted_children[child_idx];
+            let is_last = pos == matched_indices.len() - 1;
+            let info = SpaceRoomInfo::from(child);
+            let self_matches = Self::matches_filter(&info, keywords);
+
+            let child_mask = if is_last {
+                parent_mask
+            } else {
+                parent_mask | (1 << level)
+            };
+
+            if child.is_space() && children_cache.contains_key(&child.room_id) {
+                // For spaces: always include if self matches or descendants match.
+                tree_entries.push(TreeEntry::Item {
+                    info,
+                    level,
+                    is_last,
+                    parent_mask,
+                });
+                // Recurse into child space: if the space itself matches,
+                // show ALL of its children (unfiltered); otherwise show only
+                // the matching descendants.
+                if self_matches {
+                    // Show all children of a matching space (no further filtering).
+                    Self::build_tree_for_space_ignoring_expansion(
+                        children_cache,
+                        tree_entries,
+                        &child.room_id,
+                        level + 1,
+                        child_mask,
+                    );
+                } else {
+                    // Space doesn't match, but some descendant does — recurse with filter.
+                    Self::build_filtered_tree(
+                        children_cache,
+                        tree_entries,
+                        &child.room_id,
+                        keywords,
+                        level + 1,
+                        child_mask,
+                    );
+                }
+            } else if self_matches {
+                // Non-space room or space without cached children: include only if it matches.
+                tree_entries.push(TreeEntry::Item {
+                    info,
+                    level,
+                    is_last,
+                    parent_mask,
+                });
+            }
+        }
+
+        true
+    }
+
+    /// Returns `true` if any entry in the subtree rooted at `space_id` matches the keywords.
+    fn subtree_has_match(
+        children_cache: &HashMap<OwnedRoomId, Vector<SpaceRoom>>,
+        space_id: &OwnedRoomId,
+        keywords: &str,
+    ) -> bool {
+        let Some(children) = children_cache.get(space_id) else { return false };
+        children.iter().any(|child| {
+            let info = SpaceRoomInfo::from(child);
+            Self::matches_filter(&info, keywords)
+                || (child.is_space() && Self::subtree_has_match(children_cache, &child.room_id, keywords))
+        })
+    }
+
+    /// Like [`build_tree_for_space`] but ignores expansion state — shows all children.
+    /// Used to display the full contents of a space that itself matched the filter.
+    fn build_tree_for_space_ignoring_expansion(
+        children_cache: &HashMap<OwnedRoomId, Vector<SpaceRoom>>,
+        tree_entries: &mut Vec<TreeEntry>,
+        space_id: &OwnedRoomId,
+        level: usize,
+        parent_mask: u32,
+    ) {
+        let Some(children) = children_cache.get(space_id) else { return };
+
+        let mut sorted_children: Vec<_> = children.iter().collect();
+        sorted_children.sort_by(|a, b| {
+            match (a.is_space(), b.is_space()) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()),
+            }
+        });
+
+        let count = sorted_children.len();
+        for (i, child) in sorted_children.into_iter().enumerate() {
+            let is_last = i == count - 1;
+            tree_entries.push(TreeEntry::Item {
+                info: SpaceRoomInfo::from(child),
+                level,
+                is_last,
+                parent_mask,
+            });
+
+            if child.is_space() && children_cache.contains_key(&child.room_id) {
+                let child_mask = if is_last {
+                    parent_mask
+                } else {
+                    parent_mask | (1 << level)
+                };
+                Self::build_tree_for_space_ignoring_expansion(
+                    children_cache,
+                    tree_entries,
+                    &child.room_id,
+                    level + 1,
+                    child_mask,
+                );
+            }
+        }
     }
 
     /// Recursively build the tree of spaces and their expanded children such that they
@@ -1606,8 +1864,13 @@ impl SpaceLobbyScreen {
         self.tree_entries.clear();
         self.top_level_join_rule = None;
         self.top_level_member_count = None;
-        self.view.label(cx, ids!(header.space_info_label)).set_text(cx, "");
+        self.view.label(cx, ids!(header.space_info_row.space_info_label)).set_text(cx, "");
         self.is_loading = true;
+
+        // Clear the filter bar when switching to a new space.
+        self.filter_keywords.clear();
+        self.view.text_input(cx, ids!(filter_bar.input)).set_text(cx, "");
+        self.view.button(cx, ids!(filter_bar.clear_button)).set_visible(cx, false);
 
         // Restore UI state if we've viewed this space before, otherwise start fresh
         self.expanded_spaces = SPACE_LOBBY_STATES.with_borrow(|states| {

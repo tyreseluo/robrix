@@ -536,6 +536,7 @@
   "space_lobby.header.button.invite": "邀请",
   "space_lobby.status.loading_rooms_spaces": "正在加载房间和空间...",
   "space_lobby.status.no_rooms_spaces": "未找到房间或空间。",
+  "space_lobby.status.no_matching_rooms_spaces": "未找到匹配的房间或空间。",
   "space_lobby.status.loading": "加载中...",
   "space_lobby.item.button.join": "加入",
   "space_lobby.item.button.view": "查看",
