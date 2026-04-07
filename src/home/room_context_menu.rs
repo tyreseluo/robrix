@@ -186,7 +186,9 @@ impl Widget for RoomContextMenu {
                         !self.view(cx, ids!(main_content)).area().rect(cx).contains(fue.abs)
                     }
                 }
-                 Hit::FingerScroll(_) => true,
+                // Ignore zero-scroll events: macOS trackpad generates FingerScroll(0,0)
+                // on two-finger press (right-click), which would incorrectly dismiss the menu.
+                Hit::FingerScroll(fse) => fse.scroll.x != 0.0 || fse.scroll.y != 0.0,
                 _ => false,
             }
         };

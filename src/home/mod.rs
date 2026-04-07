@@ -37,6 +37,10 @@ pub mod streaming_animation;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContextMenuOpenGesture {
     digit_id: DigitId,
+    /// The time of the original `FingerDown` that opened the menu.
+    /// Matches `FingerUpEvent.capture_time` for the same capture chain
+    /// (see Makepad `finger.rs`: `capture_digit` stores `e.time` as `capture.time`,
+    /// and `FingerUpEvent` reads it back as `capture_time`).
     capture_time: f64,
 }
 
