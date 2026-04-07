@@ -525,7 +525,7 @@ pub type OnMediaFetchedFn = fn(
 #[derive(Debug)]
 pub enum UrlPreviewError {
     /// HTTP request failed.
-    Request(reqwest::Error),
+    Request(String),
     /// JSON parsing failed.
     Json(serde_json::Error),
     /// Client not available.
@@ -541,7 +541,7 @@ pub enum UrlPreviewError {
 impl std::fmt::Display for UrlPreviewError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UrlPreviewError::Request(e) => write!(f, "HTTP request failed: {}", e),
+            UrlPreviewError::Request(e) => write!(f, "HTTP request failed: {e}"),
             UrlPreviewError::Json(e) => write!(f, "JSON parsing failed: {}", e),
             UrlPreviewError::ClientNotAvailable => write!(f, "Matrix client not available"),
             UrlPreviewError::AccessTokenNotAvailable => write!(f, "Access token not available"),
@@ -2985,15 +2985,9 @@ async fn matrix_worker_task(
                 let _fetch_url_preview_task = Handle::current().spawn(async move {
                     let result: Result<LinkPreviewData, UrlPreviewError> = async {
                         // log!("Getting Matrix client for URL preview: {}", url);
-                        let client = get_client().ok_or_else(|| {
-                            // error!("Matrix client not available for URL preview: {}", url);
-                            UrlPreviewError::ClientNotAvailable
-                        })?;
-                        
-                        let token = client.access_token().ok_or_else(|| {
-                            // error!("Access token not available for URL preview: {}", url);
-                            UrlPreviewError::AccessTokenNotAvailable
-                        })?;
+                        let client = get_client().ok_or(UrlPreviewError::ClientNotAvailable)?;
+
+                        let token = client.access_token().ok_or(UrlPreviewError::AccessTokenNotAvailable)?;
                         // Official Doc: https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediapreview_url
                         // Element desktop is using /_matrix/media/v3/preview_url
                         let endpoint_url = client.homeserver().join("/_matrix/client/v1/media/preview_url")
@@ -3009,8 +3003,7 @@ async fn matrix_worker_task(
                             .send()
                             .await
                             .map_err(|e| {
-                                // error!("HTTP request failed for URL preview {}: {}", url, e);
-                                UrlPreviewError::Request(e)
+                                UrlPreviewError::Request(e.to_string())
                             })?;
                         
                         let status = response.status();
@@ -3022,8 +3015,7 @@ async fn matrix_worker_task(
                         }
                         
                         let text = response.text().await.map_err(|e| {
-                            // error!("Failed to read response text for URL preview {}: {}", url, e);
-                            UrlPreviewError::Request(e)
+                            UrlPreviewError::Request(e.to_string())
                         })?;
                         
                         // log!("URL preview response body length for {}: {} bytes", url, text.len());
