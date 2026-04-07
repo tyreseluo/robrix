@@ -4311,23 +4311,6 @@ impl RoomScreen {
                         //       and then replaces the existing timeline in ALL_ROOMS_INFO with the new one.
                     }
 
-                    // If the last appended item was sent by the current user,
-                    // scroll to bottom so the user always sees their own message.
-                    if is_append && new_items.len() > tl.items.len() {
-                        let sent_by_self = new_items.last()
-                            .and_then(|item| match item.kind() {
-                                TimelineItemKind::Event(ev) => Some(ev.sender()),
-                                _ => None,
-                            })
-                            .is_some_and(|sender| {
-                                current_user_id().is_some_and(|uid| sender == uid)
-                            });
-                        if sent_by_self {
-                            portal_list.set_first_id_and_scroll(new_items.len().saturating_sub(1), 0.0);
-                            portal_list.set_tail_range(true);
-                        }
-                    }
-
                     let prior_items_changed = clear_cache || changed_indices.start <= curr_first_id;
 
                     if new_items.len() == tl.items.len() {
@@ -5051,6 +5034,15 @@ impl RoomScreen {
                             Some(5.0),
                         );
                     }
+                }
+                MessageAction::MessageSubmittedLocally => {
+                    let Some(tl) = self.tl_state.as_ref() else { continue };
+                    let last_item_idx = tl.items.len().saturating_sub(1);
+                    portal_list.set_first_id_and_scroll(last_item_idx, 0.0);
+                    portal_list.set_tail_range(true);
+                    self.jump_to_bottom_button(cx, ids!(jump_to_bottom_button))
+                        .update_visibility(cx, true);
+                    self.redraw(cx);
                 }
                 MessageAction::Pin(details) => {
                     let Some(tl) = self.tl_state.as_ref() else { return };
@@ -8120,6 +8112,8 @@ pub enum MessageAction {
     Edit(MessageDetails),
     /// The user requested to edit their latest message in this room.
     EditLatest,
+    /// The user submitted a new local message and the timeline should follow the live tail.
+    MessageSubmittedLocally,
     /// The user clicked the "pin" button on a message.
     Pin(MessageDetails),
     /// The user clicked the "unpin" button on a message.
