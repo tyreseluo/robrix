@@ -1,12 +1,14 @@
 
 use makepad_widgets::*;
 
-use crate::{app::{AppState, BotSettingsState}, home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, i18n::{AppLanguage, I18nKey, language_dropdown_labels, tr}, persistence, profile::user_profile::UserProfile, settings::{account_settings::AccountSettingsWidgetExt, bot_settings::BotSettingsWidgetExt}, shared::{popup_list::{PopupKind, enqueue_popup_notification}, styles::{apply_neutral_button_style, apply_primary_button_style}}, sliding_sync::current_user_id};
+use crate::{app::{AppState, BotSettingsState}, home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, i18n::{AppLanguage, I18nKey, language_dropdown_labels, tr}, persistence, profile::user_profile::UserProfile, settings::{account_settings::AccountSettingsWidgetExt, bot_settings::BotSettingsWidgetExt, translation_settings::TranslationSettingsWidgetExt}, shared::{expand_arrow::ExpandArrow, popup_list::{PopupKind, enqueue_popup_notification}, styles::{apply_neutral_button_style, apply_primary_button_style}}, sliding_sync::current_user_id};
 
 script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
 
+    mod.widgets.ICO_CHEVRON_RIGHT = crate_resource("self://resources/icons/chevron_right.svg")
+    mod.widgets.ICO_CHEVRON_DOWN = crate_resource("self://resources/icons/chevron_down.svg")
 
     // The main, top-level settings screen widget.
     mod.widgets.SettingsScreen = #(SettingsScreen::register_widget(vm)) {
@@ -109,11 +111,88 @@ script_mod! {
                             text: "Application language"
                         }
 
-                        language_dropdown := DropDownFlat {
-                            width: 165
-                            height: 40
+                        // Custom language selector: button + popup list
+                        // (replaces DropDown which has unsolvable arrow shader artifact)
+                        language_selector_button := RoundedView {
+                            width: 200, height: Fit
+                            flow: Right
+                            align: Align{y: 0.5}
+                            padding: Inset{left: 12, right: 10, top: 10, bottom: 10}
                             margin: Inset{left: 5, top: 2, bottom: 2}
-                            labels: ["English", "Simplified Chinese"]
+                            cursor: MouseCursor.Hand
+                            show_bg: true
+                            draw_bg +: {
+                                color: (COLOR_PRIMARY)
+                                border_radius: 4.0
+                                border_size: 1.0
+                                border_color: #xC8D9F2
+                            }
+
+                            language_selector_label := Label {
+                                width: Fill, height: Fit
+                                draw_text +: {
+                                    color: #x333333
+                                    text_style: REGULAR_TEXT { font_size: 11 }
+                                }
+                                text: "English"
+                            }
+
+                            language_arrow := ExpandArrow {
+                                width: 14, height: 14
+                                draw_bg +: {
+                                    color: instance(#x888888)
+                                }
+                            }
+                        }
+
+                        language_popup := RoundedView {
+                            visible: false
+                            width: 200, height: Fit
+                            flow: Down
+                            padding: Inset{top: 4, bottom: 4}
+                            show_bg: true
+                            new_batch: true
+                            draw_bg +: {
+                                color: (COLOR_PRIMARY)
+                                border_radius: 6.0
+                                border_size: 1.0
+                                border_color: #xD3E1F6
+                            }
+
+                            lang_option_en := View {
+                                width: Fill, height: 36
+                                flow: Right
+                                align: Align{y: 0.5}
+                                padding: Inset{left: 12, right: 12}
+                                cursor: MouseCursor.Hand
+                                show_bg: true
+                                draw_bg +: { color: #0000 }
+                                Label {
+                                    width: Fit, height: Fit
+                                    draw_text +: {
+                                        color: #x333333
+                                        text_style: REGULAR_TEXT { font_size: 11 }
+                                    }
+                                    text: "English"
+                                }
+                            }
+                            lang_option_zh := View {
+                                width: Fill, height: 36
+                                flow: Right
+                                align: Align{y: 0.5}
+                                padding: Inset{left: 12, right: 12}
+                                cursor: MouseCursor.Hand
+                                show_bg: true
+                                draw_bg +: { color: #0000 }
+                                Label {
+                                    width: Fit, height: Fit
+                                    draw_text +: {
+                                        color: #x333333
+                                        text_style: REGULAR_TEXT { font_size: 11 }
+                                    }
+                                    text: "简体中文"
+                                }
+                            }
                         }
 
                         preferences_language_hint_label := Label {
@@ -134,6 +213,10 @@ script_mod! {
                         flow: Down
 
                         bot_settings := BotSettings {}
+
+                        LineH { width: 400, padding: 10, margin: Inset{top: 20, bottom: 5} }
+
+                        translation_settings := TranslationSettings {}
 
                         LineH { width: 400, padding: 10, margin: Inset{top: 20, bottom: 5} }
 
@@ -176,6 +259,7 @@ pub struct SettingsScreen {
 
     #[rust] selected_category: SettingsCategory,
     #[rust] app_language: AppLanguage,
+    #[rust] language_popup_visible: bool,
 }
 
 impl Widget for SettingsScreen {
@@ -213,26 +297,57 @@ impl Widget for SettingsScreen {
             cx.action(NavigationBarAction::CloseSettings);
         }
 
-        if let Event::Actions(actions) = event {
-            if self.view.drop_down(cx, ids!(language_dropdown)).changed(actions).is_some() {
-                let selected_language = AppLanguage::from_dropdown_index(
-                    self.view.drop_down(cx, ids!(language_dropdown)).selected_item(),
-                );
-                if self.app_language != selected_language {
-                    self.set_app_language(cx, selected_language);
-                    if let Some(app_state) = scope.data.get_mut::<AppState>() {
-                        if app_state.app_language != selected_language {
-                            app_state.app_language = selected_language;
-                            persist_app_state(app_state);
-                            enqueue_popup_notification(
-                                tr(selected_language, I18nKey::LanguageReloadHint),
-                                PopupKind::Info,
-                                Some(4.0),
-                            );
+        // Handle language selector button click
+        {
+            let selector = self.view.view(cx, ids!(language_selector_button));
+            if let Hit::FingerUp(fe) = event.hits(cx, selector.area()) {
+                if fe.is_over && fe.was_tap() {
+                    self.language_popup_visible = !self.language_popup_visible;
+                    self.view.view(cx, ids!(language_popup)).set_visible(cx, self.language_popup_visible);
+                    self.update_language_button_text(cx);
+                    self.redraw(cx);
+                }
+            }
+        }
+
+        // Handle language popup item selection via finger_up
+        if self.language_popup_visible {
+            let lang_options: &[(&[LiveId], usize)] = &[
+                (&[live_id!(lang_option_en)], 0),
+                (&[live_id!(lang_option_zh)], 1),
+            ];
+            for &(id_path, index) in lang_options {
+                let item_view = self.view.view(cx, id_path);
+                if let Hit::FingerUp(fe) = event.hits(cx, item_view.area()) {
+                    if fe.is_over && fe.was_tap() {
+                        self.language_popup_visible = false;
+                        self.view.view(cx, &[live_id!(language_popup)]).set_visible(cx, false);
+                        self.update_language_button_text(cx);
+
+                        let selected_language = AppLanguage::from_dropdown_index(index);
+                        if self.app_language != selected_language {
+                            self.set_app_language(cx, selected_language);
+                            if let Some(app_state) = scope.data.get_mut::<AppState>() {
+                                if app_state.app_language != selected_language {
+                                    app_state.app_language = selected_language;
+                                    persist_app_state(app_state);
+                                    enqueue_popup_notification(
+                                        tr(selected_language, I18nKey::LanguageReloadHint),
+                                        PopupKind::Info,
+                                        Some(4.0),
+                                    );
+                                }
+                            }
                         }
+                        self.redraw(cx);
+                        break;
                     }
                 }
             }
+        }
+
+        if let Event::Actions(actions) = event {
+            // Handle language selector click — moved to finger_up below
 
             if self.view.button(cx, ids!(category_account_button)).clicked(actions) {
                 self.set_selected_category(cx, SettingsCategory::Account);
@@ -321,16 +436,29 @@ impl SettingsScreen {
         self.view
             .label(cx, ids!(preferences_language_hint_label))
             .set_text(cx, tr(self.app_language, I18nKey::LanguageReloadHint));
-        let language_dropdown = self.view.drop_down(cx, ids!(language_dropdown));
-        language_dropdown.set_labels(cx, language_dropdown_labels(self.app_language));
-        language_dropdown.set_selected_item(cx, self.app_language.dropdown_index());
+        self.update_language_button_text(cx);
         self.view
             .account_settings(cx, ids!(account_settings))
             .set_app_language(cx, self.app_language);
         self.view
             .bot_settings(cx, ids!(bot_settings))
             .set_app_language(cx, self.app_language);
+        self.view
+            .translation_settings(cx, ids!(translation_settings))
+            .set_app_language(cx, self.app_language);
         self.view.redraw(cx);
+    }
+
+    fn update_language_button_text(&mut self, cx: &mut Cx) {
+        let labels = language_dropdown_labels(self.app_language);
+        let selected_idx = self.app_language.dropdown_index();
+        let selected_label = labels.get(selected_idx).cloned().unwrap_or_else(|| "English".to_string());
+        self.view.label(cx, ids!(language_selector_label)).set_text(cx, &selected_label);
+
+        // Toggle expand arrow direction
+        if let Some(mut arrow) = self.view.child_by_path(ids!(language_arrow)).borrow_mut::<ExpandArrow>() {
+            arrow.set_is_open(cx, self.language_popup_visible, Animate::Yes);
+        }
     }
 
     fn set_selected_category(&mut self, cx: &mut Cx, category: SettingsCategory) {
@@ -374,13 +502,14 @@ impl SettingsScreen {
     }
 
     /// Fetches the current user's profile and uses it to populate the settings screen.
-    pub fn populate(&mut self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, app_language: AppLanguage) {
+    pub fn populate(&mut self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, translation_config: &crate::room::translation::TranslationConfig, app_language: AppLanguage) {
         let Some(profile) = own_profile.or_else(|| get_own_profile(cx)) else {
             error!("Failed to get own profile for settings screen.");
             return;
         };
         self.view.account_settings(cx, ids!(account_settings)).populate(cx, profile);
         self.view.bot_settings(cx, ids!(bot_settings)).populate(cx, bot_settings);
+        self.view.translation_settings(cx, ids!(translation_settings)).populate(cx, translation_config);
         self.set_app_language(cx, app_language);
         self.set_selected_category(cx, SettingsCategory::Account);
         self.view.button(cx, ids!(close_button)).reset_hover(cx);
@@ -391,9 +520,9 @@ impl SettingsScreen {
 
 impl SettingsScreenRef {
     /// See [`SettingsScreen::populate()`].
-    pub fn populate(&self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, app_language: AppLanguage) {
+    pub fn populate(&self, cx: &mut Cx, own_profile: Option<UserProfile>, bot_settings: &BotSettingsState, translation_config: &crate::room::translation::TranslationConfig, app_language: AppLanguage) {
         let Some(mut inner) = self.borrow_mut() else { return; };
-        inner.populate(cx, own_profile, bot_settings, app_language);
+        inner.populate(cx, own_profile, bot_settings, translation_config, app_language);
     }
 }
 

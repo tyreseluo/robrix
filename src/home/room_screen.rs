@@ -21,7 +21,7 @@ use matrix_sdk::{
     }
 };
 use matrix_sdk_ui::timeline::{
-    self, EmbeddedEvent, EncryptedMessage, EventTimelineItem, InReplyToDetails, MemberProfileChange, MembershipChange, MsgLikeContent, MsgLikeKind, OtherMessageLike, PollState, RoomMembershipChange, TimelineDetails, TimelineEventItemId, TimelineItem, TimelineItemContent, TimelineItemKind, VirtualTimelineItem
+    self, EmbeddedEvent, EncryptedMessage, EventTimelineItem, InReplyToDetails, LiveLocationState, MemberProfileChange, MembershipChange, MsgLikeContent, MsgLikeKind, OtherMessageLike, PollState, RoomMembershipChange, TimelineDetails, TimelineEventItemId, TimelineItem, TimelineItemContent, TimelineItemKind, VirtualTimelineItem
 };
 use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
 
@@ -31,7 +31,7 @@ use crate::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
     },
-    room::{BasicRoomDetails, room_input_bar::{RoomInputBarState, RoomInputBarWidgetRefExt}, typing_notice::TypingNoticeWidgetExt},
+    room::{BasicRoomDetails, room_input_bar::{RoomInputBarState, RoomInputBarWidgetRefExt}, translation, typing_notice::TypingNoticeWidgetExt},
     shared::{
         avatar::{AvatarState, AvatarWidgetExt, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalAction, ConfirmationModalContent, ConfirmationModalWidgetExt}, html_or_plaintext::{HtmlOrPlaintextRef, HtmlOrPlaintextWidgetRefExt, RobrixHtmlLinkAction}, image_viewer::{ImageViewerAction, ImageViewerMetaData, LoadState}, jump_to_bottom_button::{JumpToBottomButtonWidgetExt, UnreadMessageCount}, popup_list::{PopupKind, enqueue_popup_notification}, restore_status_view::RestoreStatusViewWidgetExt, styles::*, text_or_image::{TextOrImageAction, TextOrImageRef, TextOrImageWidgetRefExt}, timestamp::TimestampWidgetRefExt
     },
@@ -62,6 +62,11 @@ const VIEWPORT_FILL_PAGINATION_SIZE: u16 = 150;
 const TOPIC_PREVIEW_CHARS: usize = 140;
 const ROOM_INFO_PANE_DESKTOP_WIDTH: f32 = 320.0;
 const ROOM_INFO_PANE_MOBILE_BREAKPOINT: f32 = 700.0;
+const TRANSLATION_LANG_POPUP_WIDTH: f64 = 220.0;
+const TRANSLATION_LANG_POPUP_SCROLL_HEIGHT: f64 = 288.0;
+const TRANSLATION_LANG_POPUP_HEIGHT: f64 = TRANSLATION_LANG_POPUP_SCROLL_HEIGHT + 8.0;
+const TRANSLATION_LANG_POPUP_GAP: f64 = 6.0;
+const TRANSLATION_LANG_POPUP_MARGIN: f64 = 8.0;
 
 
 /// #FFF4E5
@@ -101,6 +106,29 @@ fn is_msc4357_live(event_tl_item: &EventTimelineItem) -> bool {
         .flatten()
         .map(|content| content_has_msc4357_live_marker(&content))
         .unwrap_or(false)
+}
+
+fn compute_translation_lang_popup_abs_pos(button_rect: Rect, container_rect: Rect) -> DVec2 {
+    let min_x = container_rect.pos.x + TRANSLATION_LANG_POPUP_MARGIN;
+    let max_x = (container_rect.pos.x + container_rect.size.x - TRANSLATION_LANG_POPUP_WIDTH - TRANSLATION_LANG_POPUP_MARGIN)
+        .max(min_x);
+    let popup_x = button_rect.pos.x
+        .max(min_x)
+        .min(max_x);
+
+    let min_y = container_rect.pos.y + TRANSLATION_LANG_POPUP_MARGIN;
+    let max_y = (container_rect.pos.y + container_rect.size.y - TRANSLATION_LANG_POPUP_HEIGHT - TRANSLATION_LANG_POPUP_MARGIN)
+        .max(min_y);
+    let popup_y_above = button_rect.pos.y - TRANSLATION_LANG_POPUP_HEIGHT - TRANSLATION_LANG_POPUP_GAP;
+    let popup_y = if popup_y_above >= min_y {
+        popup_y_above
+    } else {
+        (button_rect.pos.y + button_rect.size.y + TRANSLATION_LANG_POPUP_GAP)
+            .max(min_y)
+            .min(max_y)
+    };
+
+    dvec2(popup_x, popup_y)
 }
 
 fn streaming_scan_range(
@@ -319,11 +347,11 @@ fn detected_bot_binding_for_members(
 
     if non_self_members
         .iter()
-        .any(|room_member| room_member.user_id().localpart().to_ascii_lowercase() == "botfather")
+        .any(|room_member| room_member.user_id().localpart().eq_ignore_ascii_case("botfather"))
     {
         return non_self_members
             .iter()
-            .find(|room_member| room_member.user_id().localpart().to_ascii_lowercase() == "botfather")
+            .find(|room_member| room_member.user_id().localpart().eq_ignore_ascii_case("botfather"))
             .map(|room_member| room_member.user_id().to_owned());
     };
     None
@@ -1834,6 +1862,28 @@ script_mod! {
         jump_to_bottom_button := JumpToBottomButton { }
     }
 
+    mod.widgets.TranslationLangPopupButton = RobrixIconButton {
+        width: Fill
+        height: 36
+        spacing: 0
+        margin: 0
+        padding: Inset{left: 12, right: 12, top: 8, bottom: 8}
+        icon_walk: Walk{width: 0, height: 0}
+        draw_text +: {
+            color: (COLOR_TEXT)
+            color_hover: (COLOR_TEXT)
+            color_down: (COLOR_TEXT)
+            text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+        }
+        draw_bg +: {
+            color: #0000
+            color_hover: #xF0F4FA
+            color_down: #xE8EEF8
+            border_size: 0.0
+            border_radius: 0.0
+        }
+    }
+
 
     mod.widgets.RoomScreen = #(RoomScreen::register_widget(vm)) {
         width: Fill, height: Fill,
@@ -1865,6 +1915,60 @@ script_mod! {
 
                 room_input_bar := RoomInputBar {
                     // margin: Inset{top: 20}
+                }
+            }
+
+            translation_lang_modal := Modal {
+                align: Align{x: 0, y: 0}
+                bg_view.draw_bg.color: #00000000
+                content +: {
+                    width: Fill
+                    height: Fill
+                    flow: Overlay
+                    align: Align{x: 0, y: 0}
+
+                    translation_lang_popup := RoundedView {
+                        width: 220
+                        height: Fit
+                        margin: Inset{left: 0, top: 0}
+                        padding: Inset{top: 4, bottom: 4}
+                        show_bg: true
+                        new_batch: true
+                        draw_bg +: {
+                            color: (COLOR_PRIMARY)
+                            border_radius: 6.0
+                            border_size: 1.0
+                            border_color: #ddd
+                            shadow_color: #0003
+                            shadow_radius: 8.0
+                            shadow_offset: vec2(0.0, 2.0)
+                        }
+
+                        translation_lang_scroll := ScrollYView {
+                            width: Fill
+                            height: 288
+                            flow: Down
+                            spacing: 0
+
+                            lang_en := mod.widgets.TranslationLangPopupButton { text: "en  English" }
+                            lang_zh := mod.widgets.TranslationLangPopupButton { text: "zh  简体中文" }
+                            lang_zh_tw := mod.widgets.TranslationLangPopupButton { text: "zh-TW  繁體中文" }
+                            lang_ja := mod.widgets.TranslationLangPopupButton { text: "ja  日本語" }
+                            lang_ko := mod.widgets.TranslationLangPopupButton { text: "ko  한국어" }
+                            lang_es := mod.widgets.TranslationLangPopupButton { text: "es  Español" }
+                            lang_fr := mod.widgets.TranslationLangPopupButton { text: "fr  Français" }
+                            lang_de := mod.widgets.TranslationLangPopupButton { text: "de  Deutsch" }
+                            lang_ru := mod.widgets.TranslationLangPopupButton { text: "ru  Русский" }
+                            lang_pt := mod.widgets.TranslationLangPopupButton { text: "pt  Português" }
+                            lang_ar := mod.widgets.TranslationLangPopupButton { text: "ar  العربية" }
+                            lang_vi := mod.widgets.TranslationLangPopupButton { text: "vi  Tiếng Việt" }
+                            lang_th := mod.widgets.TranslationLangPopupButton { text: "th  ไทย" }
+                            lang_id := mod.widgets.TranslationLangPopupButton { text: "id  Bahasa Indonesia" }
+                            lang_ms := mod.widgets.TranslationLangPopupButton { text: "ms  Bahasa Melayu" }
+                            lang_tr := mod.widgets.TranslationLangPopupButton { text: "tr  Türkçe" }
+                            lang_hi := mod.widgets.TranslationLangPopupButton { text: "hi  हिन्दी" }
+                        }
+                    }
                 }
             }
 
@@ -2995,10 +3099,10 @@ impl Widget for RoomScreen {
                                 .resolved_bot_user_id_for_room(room_id, current_user_id().as_deref())
                             {
                                 if &bot_user_id == user_id
-                                    && !app_state
+                                    && app_state
                                         .bot_settings
                                         .bound_bot_user_id(room_id.as_ref())
-                                        .is_some_and(|existing_bot_user_id| existing_bot_user_id.as_str() == user_id.as_str())
+                                        .is_none_or(|existing_bot_user_id| existing_bot_user_id.as_str() != user_id.as_str())
                                 {
                                     cx.action(AppStateAction::BotRoomBindingUpdated {
                                         room_id: room_id.clone(),
@@ -3675,6 +3779,7 @@ impl Widget for RoomScreen {
                 // Keep all unhandled actions so we can add them back to the global action list below.
                 true
             });
+            self.handle_translation_lang_popup_actions(cx, &actions_generated_within_this_room_screen);
             // Add back any unhandled actions to the global action list.
             cx.extend_actions(actions_generated_within_this_room_screen);
         }
@@ -3796,6 +3901,16 @@ impl Widget for RoomScreen {
                                             utd,
                                             item_drawn_status,
                                         ),
+                                        MsgLikeKind::LiveLocation(live_loc) => populate_small_state_event(
+                                            cx,
+                                            list,
+                                            item_id,
+                                            &tl_state.kind,
+                                            app_language,
+                                            event_tl_item,
+                                            live_loc,
+                                            item_drawn_status,
+                                        ),
                                         MsgLikeKind::Other(other) => populate_small_state_event(
                                             cx,
                                             list,
@@ -3915,7 +4030,65 @@ impl RoomScreen {
         self.view
             .label(cx, ids!(top_space.label))
             .set_text(cx, tr_key(self.app_language, "room_screen.top_space.loading_earlier"));
+        self.view
+            .room_input_bar(cx, ids!(room_input_bar))
+            .set_app_language(cx, self.app_language);
+        self.sync_translation_lang_popup(cx);
         self.view.redraw(cx);
+    }
+
+    fn sync_translation_lang_popup(&mut self, cx: &mut Cx) {
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_en))
+            .set_text(cx, &translation::language_popup_label("en"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_zh))
+            .set_text(cx, &translation::language_popup_label("zh"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_zh_tw))
+            .set_text(cx, &translation::language_popup_label("zh-TW"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_ja))
+            .set_text(cx, &translation::language_popup_label("ja"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_ko))
+            .set_text(cx, &translation::language_popup_label("ko"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_es))
+            .set_text(cx, &translation::language_popup_label("es"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_fr))
+            .set_text(cx, &translation::language_popup_label("fr"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_de))
+            .set_text(cx, &translation::language_popup_label("de"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_ru))
+            .set_text(cx, &translation::language_popup_label("ru"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_pt))
+            .set_text(cx, &translation::language_popup_label("pt"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_ar))
+            .set_text(cx, &translation::language_popup_label("ar"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_vi))
+            .set_text(cx, &translation::language_popup_label("vi"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_th))
+            .set_text(cx, &translation::language_popup_label("th"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_id))
+            .set_text(cx, &translation::language_popup_label("id"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_ms))
+            .set_text(cx, &translation::language_popup_label("ms"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_tr))
+            .set_text(cx, &translation::language_popup_label("tr"));
+        self.view
+            .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_hi))
+            .set_text(cx, &translation::language_popup_label("hi"));
     }
 
     fn room_id(&self) -> Option<&OwnedRoomId> {
@@ -4738,6 +4911,34 @@ impl RoomScreen {
                     tl.tombstone_info = Some(successor_room_details);
                 }
                 TimelineUpdate::LinkPreviewFetched => {}
+                TimelineUpdate::FileUploadConfirmed(file_data) => {
+                    let room_input_bar = self.view.room_input_bar(cx, ids!(room_input_bar));
+                    if let Some(replied_to) = room_input_bar.handle_file_upload_confirmed(cx, &file_data.name) {
+                        submit_async_request(MatrixRequest::SendAttachment {
+                            timeline_kind: tl.kind.clone(),
+                            file_data,
+                            replied_to,
+                            #[cfg(feature = "tsp")]
+                            sign_with_tsp: room_input_bar.is_tsp_signing_enabled(cx),
+                        });
+                    }
+                }
+                TimelineUpdate::FileUploadUpdate { current, total } => {
+                    self.view.room_input_bar(cx, ids!(room_input_bar))
+                        .set_upload_progress(cx, current, total);
+                }
+                TimelineUpdate::FileUploadAbortHandle(handle) => {
+                    self.view.room_input_bar(cx, ids!(room_input_bar))
+                        .set_upload_abort_handle(handle);
+                }
+                TimelineUpdate::FileUploadError { error, file_data } => {
+                    self.view.room_input_bar(cx, ids!(room_input_bar))
+                        .show_upload_error(cx, &error, file_data);
+                }
+                TimelineUpdate::FileUploadComplete => {
+                    self.view.room_input_bar(cx, ids!(room_input_bar))
+                        .hide_upload_progress(cx);
+                }
             }
         }
 
@@ -5219,6 +5420,9 @@ impl RoomScreen {
                 MessageAction::ShowRoomInfoPane => {
                     self.show_room_info_pane(cx);
                 }
+                MessageAction::ToggleTranslationLangPopup { button_rect } => {
+                    self.toggle_translation_lang_popup(cx, *button_rect);
+                }
                 MessageAction::Redact { details, reason } => {
                     let Some(tl) = self.tl_state.as_ref() else { return };
                     let timeline_event_id = details.timeline_event_id.clone();
@@ -5254,6 +5458,67 @@ impl RoomScreen {
                 MessageAction::ActionBarClose => { }
                 MessageAction::ToggleAppServiceActions => { }
                 MessageAction::None => { }
+            }
+        }
+    }
+
+    fn toggle_translation_lang_popup(&mut self, cx: &mut Cx, button_rect: Rect) {
+        let translation_lang_modal = self.view.modal(cx, ids!(translation_lang_modal));
+        if translation_lang_modal.is_open() {
+            translation_lang_modal.close(cx);
+            return;
+        }
+
+        let room_screen_rect = self.view.area().clipped_rect(cx);
+        let popup_abs_pos = compute_translation_lang_popup_abs_pos(button_rect, room_screen_rect);
+        self.sync_translation_lang_popup(cx);
+        log!(
+            "Translation popup: button_rect={button_rect:?}, room_screen_rect={room_screen_rect:?}, popup_abs_pos={popup_abs_pos:?}"
+        );
+        if let Some(mut translation_lang_popup) = self
+            .view
+            .view(cx, ids!(translation_lang_modal.content.translation_lang_popup))
+            .borrow_mut()
+        {
+            translation_lang_popup.walk.abs_pos = Some(popup_abs_pos);
+            translation_lang_popup.walk.margin.left = 0.0;
+            translation_lang_popup.walk.margin.top = 0.0;
+            translation_lang_popup.walk.margin.right = 0.0;
+            translation_lang_popup.walk.margin.bottom = 0.0;
+        }
+        translation_lang_modal.open(cx);
+    }
+
+    fn handle_translation_lang_popup_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        let translation_lang_modal = self.view.modal(cx, ids!(translation_lang_modal));
+        if !translation_lang_modal.is_open() {
+            return;
+        }
+
+        let lang_ids: &[(&str, &[LiveId])] = &[
+            ("en", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_en)]),
+            ("zh", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_zh)]),
+            ("zh-TW", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_zh_tw)]),
+            ("ja", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_ja)]),
+            ("ko", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_ko)]),
+            ("es", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_es)]),
+            ("fr", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_fr)]),
+            ("de", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_de)]),
+            ("ru", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_ru)]),
+            ("pt", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_pt)]),
+            ("ar", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_ar)]),
+            ("vi", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_vi)]),
+            ("th", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_th)]),
+            ("id", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_id)]),
+            ("ms", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_ms)]),
+            ("tr", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_tr)]),
+            ("hi", &[live_id!(translation_lang_modal), live_id!(content), live_id!(translation_lang_popup), live_id!(translation_lang_scroll), live_id!(lang_hi)]),
+        ];
+        for &(code, id_path) in lang_ids {
+            if self.button(cx, id_path).clicked(actions) {
+                self.view.room_input_bar(cx, ids!(room_input_bar)).activate_translation_language(cx, code);
+                translation_lang_modal.close(cx);
+                break;
             }
         }
     }
@@ -6190,6 +6455,22 @@ pub enum TimelineUpdate {
     Tombstoned(SuccessorRoomDetails),
     /// A notice that link preview data for a URL has been fetched and is now available.
     LinkPreviewFetched,
+    /// User confirmed a file upload via the file upload modal.
+    FileUploadConfirmed(crate::shared::file_upload_modal::FileData),
+    /// Progress update for an ongoing file upload.
+    FileUploadUpdate {
+        current: u64,
+        total: u64,
+    },
+    /// The abort handle for an in-progress file upload.
+    FileUploadAbortHandle(tokio::task::AbortHandle),
+    /// An error occurred during file upload.
+    FileUploadError {
+        error: String,
+        file_data: crate::shared::file_upload_modal::FileData,
+    },
+    /// File upload completed successfully.
+    FileUploadComplete,
 }
 
 thread_local! {
@@ -7843,6 +8124,27 @@ impl SmallStateEventContent for EncryptedMessage {
 }
 
 // For other message-like content (custom message-like events).
+impl SmallStateEventContent for LiveLocationState {
+    fn populate_item_content(
+        &self,
+        cx: &mut Cx,
+        _list: &mut PortalList,
+        _item_id: usize,
+        item: WidgetRef,
+        _event_tl_item: &EventTimelineItem,
+        username: &str,
+        _item_drawn_status: ItemDrawnStatus,
+        mut new_drawn_status: ItemDrawnStatus,
+    ) -> (WidgetRef, ItemDrawnStatus) {
+        item.label(cx, ids!(content)).set_text(
+            cx,
+            &format!("{username} shared a live location."),
+        );
+        new_drawn_status.content_drawn = true;
+        (item, new_drawn_status)
+    }
+}
+
 impl SmallStateEventContent for OtherMessageLike {
     fn populate_item_content(
         &self,
@@ -8153,6 +8455,9 @@ pub enum MessageAction {
         /// The absolute position where we should show the context menu,
         /// in which the (0,0) origin coordinate is the top left corner of the app window.
         abs_pos: DVec2,
+    },
+    ToggleTranslationLangPopup {
+        button_rect: Rect,
     },
     /// The user requested opening the message action bar
     ActionBarOpen {
@@ -8663,5 +8968,59 @@ mod tests {
 
         assert!(rebuilt.is_empty());
         assert!(!should_schedule_frame);
+    }
+
+    #[test]
+    fn translation_lang_popup_abs_pos_prefers_above_button() {
+        let button_rect = Rect {
+            pos: dvec2(48.0, 680.0),
+            size: dvec2(32.0, 32.0),
+        };
+        let container_rect = Rect {
+            pos: dvec2(0.0, 0.0),
+            size: dvec2(1280.0, 760.0),
+        };
+
+        let popup_pos = compute_translation_lang_popup_abs_pos(button_rect, container_rect);
+
+        assert!(popup_pos.y < button_rect.pos.y);
+        assert!(popup_pos.y >= TRANSLATION_LANG_POPUP_MARGIN);
+        assert!(popup_pos.x >= TRANSLATION_LANG_POPUP_MARGIN);
+    }
+
+    #[test]
+    fn translation_lang_popup_abs_pos_falls_below_when_top_space_is_insufficient() {
+        let button_rect = Rect {
+            pos: dvec2(48.0, 20.0),
+            size: dvec2(32.0, 32.0),
+        };
+        let container_rect = Rect {
+            pos: dvec2(0.0, 0.0),
+            size: dvec2(1280.0, 760.0),
+        };
+
+        let popup_pos = compute_translation_lang_popup_abs_pos(button_rect, container_rect);
+
+        assert!(popup_pos.y > button_rect.pos.y);
+        assert!(popup_pos.y >= TRANSLATION_LANG_POPUP_MARGIN);
+    }
+
+    #[test]
+    fn translation_lang_popup_abs_pos_clamps_to_room_screen_right_edge() {
+        let button_rect = Rect {
+            pos: dvec2(1240.0, 680.0),
+            size: dvec2(32.0, 32.0),
+        };
+        let container_rect = Rect {
+            pos: dvec2(0.0, 0.0),
+            size: dvec2(1280.0, 760.0),
+        };
+
+        let popup_pos = compute_translation_lang_popup_abs_pos(button_rect, container_rect);
+
+        assert_eq!(
+            popup_pos.x + TRANSLATION_LANG_POPUP_WIDTH,
+            container_rect.size.x - TRANSLATION_LANG_POPUP_MARGIN
+        );
     }
 }

@@ -87,7 +87,7 @@ fn dictionary(language: AppLanguage) -> &'static HashMap<String, String> {
     }
 }
 
-pub fn tr_key<'a>(language: AppLanguage, key: &'a str) -> &'a str {
+pub fn tr_key(language: AppLanguage, key: &str) -> &str {
     dictionary(language)
         .get(key)
         .map(String::as_str)
@@ -112,4 +112,33 @@ pub fn language_dropdown_labels(language: AppLanguage) -> Vec<String> {
         tr(language, I18nKey::LanguageOptionEnglish).to_string(),
         tr(language, I18nKey::LanguageOptionChineseSimplified).to_string(),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translation_i18n_keys_exist_for_settings_and_room_input() {
+        assert_eq!(
+            tr_key(AppLanguage::English, "settings.labs.translation.title"),
+            "Real-time Translation",
+        );
+        assert_eq!(
+            tr_key(AppLanguage::ChineseSimplified, "settings.labs.translation.title"),
+            "实时翻译",
+        );
+        assert_eq!(
+            tr_key(AppLanguage::English, "room_input_bar.translation.preview.idle"),
+            "Start typing to translate...",
+        );
+        assert_eq!(
+            tr_key(AppLanguage::ChineseSimplified, "room_input_bar.translation.preview.idle"),
+            "开始输入即可翻译...",
+        );
+        assert_eq!(
+            tr_key(AppLanguage::ChineseSimplified, "room_input_bar.input.placeholder"),
+            "输入消息（支持 Markdown）...",
+        );
+    }
 }
