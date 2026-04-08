@@ -12,10 +12,10 @@ use crate::{
     avatar_cache::{self, AvatarCacheEntry, clear_avatar_cache}, home::{
         add_room::{CreateRoomModalAction, CreateRoomModalWidgetRefExt},
         bot_binding_modal::{BotBindingModalAction, BotBindingModalWidgetRefExt},
-        event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt, mark_invite_modal_closed}, invite_screen::InviteScreenWidgetRefExt, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
+        event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt, mark_invite_modal_closed}, invite_screen::InviteScreenWidgetRefExt, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, TimelineUpdate, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
     }, i18n::{AppLanguage, tr_fmt, tr_key}, join_leave_room_modal::{
         JoinLeaveModalKind, JoinLeaveRoomModalAction, JoinLeaveRoomModalWidgetRefExt
-    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::RoomFilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
+    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, file_upload_modal::{FilePreviewerAction, FileUploadModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::FilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request, get_timeline_update_sender}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
         VerificationModalAction,
         VerificationModalWidgetRefExt,
     }
@@ -105,7 +105,7 @@ script_mod! {
                         right: (mod.widgets.SAFE_INSET_PAD_RIGHT),
                     }
 
-                    View {
+                    overlay_container := View {
                         width: Fill, height: Fill,
                         flow: Overlay,
 
@@ -129,7 +129,15 @@ script_mod! {
                                 image_viewer_modal_inner := ImageViewer {}
                             }
                         }
-                        
+
+                        file_upload_modal := Modal {
+                            content +: {
+                                width: Fill, height: Fill,
+                                align: Align{x: 0.5, y: 0.5},
+                                file_upload_modal_inner := FileUploadModal {}
+                            }
+                        }
+
                         // Context menus should be shown in front of other UI elements,
                         // but behind verification modals.
                         new_message_context_menu := NewMessageContextMenu { }
@@ -444,11 +452,10 @@ fn init_file_logging() -> Option<()> {
     let log_path = logs_dir.join(&log_filename);
 
     // Also create/update a symlink to the latest log file for convenience
-    let latest_log_path = logs_dir.join("robrix_latest.log");
-
-    // Remove old symlink if it exists (ignore errors)
+    // Remove old symlink if it exists and create a new one (unix only)
     #[cfg(unix)]
     {
+        let latest_log_path = logs_dir.join("robrix_latest.log");
         let _ = std::fs::remove_file(&latest_log_path);
         let _ = std::os::unix::fs::symlink(&log_filename, &latest_log_path);
     }
@@ -851,7 +858,7 @@ impl MatchEvent for App {
                 // which will open the login_status_modal to show the failure message.
             }
 
-            if let RoomFilterAction::Changed(keywords) = action.as_widget_action().cast_ref() {
+            if let FilterAction::Changed(keywords) = action.as_widget_action().cast_ref() {
                 cx.stop_timer(self.room_filter_debounce_timer);
                 self.pending_room_filter_keywords = keywords.clone();
                 self.room_filter_debounce_timer = cx.start_timeout(0.12);
@@ -933,10 +940,11 @@ impl MatchEvent for App {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let new_message_context_menu = self.ui.new_message_context_menu(cx, ids!(new_message_context_menu));
                 let expected_dimensions = new_message_context_menu.show(cx, details, self.app_state.app_language);
-                // Ensure the context menu does not spill over the window's bounds.
-                let rect = self.ui.window(cx, ids!(main_window)).area().rect(cx);
-                let pos_x = min(abs_pos.x, rect.size.x - expected_dimensions.x);
-                let pos_y = min(abs_pos.y, rect.size.y - expected_dimensions.y);
+                // Use the overlay container's rect (not the window's) to correctly position
+                // the context menu relative to the body area, which excludes the caption bar.
+                let rect = self.ui.view(cx, ids!(overlay_container)).area().rect(cx);
+                let pos_x = min(abs_pos.x - rect.pos.x, rect.size.x - expected_dimensions.x);
+                let pos_y = min(abs_pos.y - rect.pos.y, rect.size.y - expected_dimensions.y);
                 let margin = Inset {
                     left: pos_x as f64,
                     top: pos_y as f64,
@@ -956,10 +964,11 @@ impl MatchEvent for App {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let room_context_menu = self.ui.room_context_menu(cx, ids!(room_context_menu));
                 let expected_dimensions = room_context_menu.show(cx, details, self.app_state.app_language);
-                // Ensure the context menu does not spill over the window's bounds.
-                let rect = self.ui.window(cx, ids!(main_window)).area().rect(cx);
-                let pos_x = min(pos.x, rect.size.x - expected_dimensions.x);
-                let pos_y = min(pos.y, rect.size.y - expected_dimensions.y);
+                // Use the overlay container's rect (not the window's) to correctly position
+                // the context menu relative to the body area, which excludes the caption bar.
+                let rect = self.ui.view(cx, ids!(overlay_container)).area().rect(cx);
+                let pos_x = min(pos.x - rect.pos.x, rect.size.x - expected_dimensions.x);
+                let pos_y = min(pos.y - rect.pos.y, rect.size.y - expected_dimensions.y);
                 let margin = Inset {
                     left: pos_x as f64,
                     top: pos_y as f64,
@@ -1025,8 +1034,10 @@ impl MatchEvent for App {
                 Some(AppStateAction::RestoreAppStateFromPersistentState(app_state)) => {
                     // Ignore the `logged_in` state that was stored persistently.
                     let logged_in_actual = self.app_state.logged_in;
-                    self.app_state = app_state.clone();
+                    self.app_state = *app_state.clone();
                     self.app_state.logged_in = logged_in_actual;
+                    // Initialize the global translation config so RoomInputBar can access it.
+                    crate::room::translation::set_global_config(&self.app_state.translation);
                     cx.action(MainDesktopUiAction::LoadDockFromAppState);
                     continue;
                 }
@@ -1204,6 +1215,33 @@ impl MatchEvent for App {
                 }
                 Some(ImageViewerAction::Hide) => {
                     self.ui.modal(cx, ids!(image_viewer_modal)).close(cx);
+                    continue;
+                }
+                _ => {}
+            }
+            // Handle file upload modal actions
+            match action.downcast_ref() {
+                Some(FilePreviewerAction::Show(file_data)) => {
+                    self.ui.file_upload_modal(cx, ids!(file_upload_modal_inner))
+                        .set_file_data(cx, file_data.clone());
+                    self.ui.modal(cx, ids!(file_upload_modal)).open(cx);
+                    continue;
+                }
+                Some(FilePreviewerAction::Hide) | Some(FilePreviewerAction::Cancelled) => {
+                    self.ui.modal(cx, ids!(file_upload_modal)).close(cx);
+                    continue;
+                }
+                Some(FilePreviewerAction::UploadConfirmed(file_data)) => {
+                    // Send the file upload event to the current room's timeline
+                    if let Some(selected_room) = &self.app_state.selected_room {
+                        if let Some(timeline_kind) = selected_room.timeline_kind() {
+                            if let Some(sender) = get_timeline_update_sender(&timeline_kind) {
+                                let _ = sender.send(TimelineUpdate::FileUploadConfirmed(file_data.clone()));
+                                SignalToUI::set_ui_signal();
+                            }
+                        }
+                    }
+                    self.ui.modal(cx, ids!(file_upload_modal)).close(cx);
                     continue;
                 }
                 _ => {}
@@ -1409,6 +1447,7 @@ impl AppMain for App {
         crate::home::location_preview::script_mod(vm);
         crate::home::tombstone_footer::script_mod(vm);
         crate::home::editing_pane::script_mod(vm);
+        crate::home::upload_progress::script_mod(vm);
         crate::room::script_mod(vm);
         crate::join_leave_room_modal::script_mod(vm);
         crate::verification_modal::script_mod(vm);
@@ -1980,6 +2019,9 @@ pub struct AppState {
     pub adding_account: bool,
     /// Local configuration and UI state for bot-assisted room binding.
     pub bot_settings: BotSettingsState,
+    /// Translation API configuration.
+    #[serde(default)]
+    pub translation: crate::room::translation::TranslationConfig,
 }
 
 /// Local bot integration settings persisted per Matrix account.
@@ -2329,6 +2371,26 @@ impl SelectedRoom {
             SelectedRoom::Thread { room_name_id, .. } => format!("[Thread] {room_name_id}"),
         }
     }
+
+    /// Returns the `TimelineKind` for this selected room.
+    ///
+    /// Returns `None` for `InvitedRoom` and `Space` variants, as they don't have timelines.
+    pub fn timeline_kind(&self) -> Option<TimelineKind> {
+        match self {
+            SelectedRoom::JoinedRoom { room_name_id } => {
+                Some(TimelineKind::MainRoom {
+                    room_id: room_name_id.room_id().clone(),
+                })
+            }
+            SelectedRoom::Thread { room_name_id, thread_root_event_id } => {
+                Some(TimelineKind::Thread {
+                    room_id: room_name_id.room_id().clone(),
+                    thread_root_event_id: thread_root_event_id.clone(),
+                })
+            }
+            SelectedRoom::InvitedRoom { .. } | SelectedRoom::Space { .. } => None,
+        }
+    }
 }
 
 impl PartialEq for SelectedRoom {
@@ -2368,7 +2430,7 @@ pub enum AppStateAction {
     UpgradedInviteToJoinedRoom(OwnedRoomId),
     /// The given app state was loaded from persistent storage
     /// and is ready to be restored.
-    RestoreAppStateFromPersistentState(AppState),
+    RestoreAppStateFromPersistentState(Box<AppState>),
     /// A room-level BotFather bind or unbind action completed.
     BotRoomBindingUpdated {
         room_id: OwnedRoomId,

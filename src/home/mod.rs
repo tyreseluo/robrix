@@ -33,6 +33,7 @@ pub mod room_context_menu;
 pub mod link_preview;
 pub mod room_image_viewer;
 pub mod streaming_animation;
+pub mod upload_progress;
 
 pub fn script_mod(vm: &mut ScriptVm) {
     search_messages::script_mod(vm);
@@ -65,6 +66,8 @@ pub fn script_mod(vm: &mut ScriptVm) {
     main_desktop_ui::script_mod(vm);
     spaces_bar::script_mod(vm);
     navigation_tab_bar::script_mod(vm);
+    // Note: upload_progress::script_mod is called earlier in app.rs
+    // because RoomInputBar depends on it.
     // Keep HomeScreen last, it references many widgets registered above.
     home_screen::script_mod(vm);
 }

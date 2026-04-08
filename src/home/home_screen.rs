@@ -1,6 +1,11 @@
 use makepad_widgets::*;
 
-use crate::{app::AppState, home::navigation_tab_bar::{NavigationBarAction, SelectedTab}, settings::settings_screen::SettingsScreenWidgetRefExt};
+use crate::{
+    app::AppState,
+    home::navigation_tab_bar::{NavigationBarAction, SelectedTab},
+    settings::settings_screen::SettingsScreenWidgetRefExt,
+    shared::room_filter_input_bar::{MainFilterAction, RoomFilterInputBarWidgetExt},
+};
 
 script_mod! {
     use mod.prelude.widgets.*
@@ -415,6 +420,14 @@ pub struct HomeScreen {
 impl Widget for HomeScreen {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         if let Event::Actions(actions) = event {
+            // On desktop, the RoomFilterInputBar is inside this HomeScreen.
+            // Check if it changed and re-emit as a MainFilterAction so that
+            // RoomsList and SpacesBar can respond without cross-talk from
+            // other RoomFilterInputBar instances (e.g., SpaceLobbyScreen's).
+            if let Some(keywords) = self.view.room_filter_input_bar(cx, ids!(room_filter_input_bar)).changed(actions) {
+                cx.action(MainFilterAction::Changed(keywords));
+            }
+
             let app_state = scope.data.get_mut::<AppState>().unwrap();
             for action in actions {
                 match action.downcast_ref() {
@@ -455,7 +468,7 @@ impl Widget for HomeScreen {
                             if let Some(settings_page) = self.update_active_page_from_selection(cx, app_state) {
                                 settings_page
                                     .settings_screen(cx, ids!(settings_screen))
-                                    .populate(cx, None, &app_state.bot_settings, app_state.app_language);
+                                    .populate(cx, None, &app_state.bot_settings, &app_state.translation, app_state.app_language);
                                 self.view.redraw(cx);
                             } else {
                                 error!("BUG: failed to set active page to show settings screen.");
