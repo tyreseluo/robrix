@@ -206,7 +206,7 @@ When `"encryption": true` is configured:
 - **OpenClaw Matrix Plugin:** [docs.openclaw.ai/channels/matrix](https://docs.openclaw.ai/channels/matrix) -- official Matrix channel plugin reference.
 - **Matrix Client-Server API Spec:** [spec.matrix.org -- Client-Server API](https://spec.matrix.org/latest/client-server-api/) -- the protocol OpenClaw uses.
 - **Matrix Application Service API Spec:** [spec.matrix.org -- Application Service API](https://spec.matrix.org/latest/application-service-api/) -- the protocol Octos uses.
-- **Octos Architecture Guide:** [02-how-robrix-palpo-octos-work-together.md](../robrix-with-palpo-and-octos/02-how-robrix-palpo-octos-work-together.md) -- full explanation of the Octos AppService model.
+- **Octos Architecture Guide:** [03-how-robrix-palpo-octos-work-together.md](../robrix-with-palpo-and-octos/03-how-robrix-palpo-octos-work-together.md) -- full explanation of the Octos AppService model.
 - **Deployment Guide:** [01-deploying-openclaw-with-matrix.md](01-deploying-openclaw-with-matrix.md) -- how to deploy OpenClaw with Matrix.
 - **Usage Guide:** [02-using-robrix-with-openclaw.md](02-using-robrix-with-openclaw.md) -- how to use Robrix to chat with OpenClaw agents.
 

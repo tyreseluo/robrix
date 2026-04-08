@@ -8,7 +8,7 @@ This guide walks you through deploying the backend services step by step: from c
 
 > **Just want to try it quickly?** Jump to [Quick Start](#2-quick-start) -- 5 steps to get running.
 >
-> **Want to understand WHY things are configured this way?** See [Architecture](02-how-robrix-palpo-octos-work-together.md) for the full explanation.
+> **Want to understand WHY things are configured this way?** See [Architecture](03-how-robrix-palpo-octos-work-together.md) for the full explanation.
 
 ---
 
@@ -115,7 +115,7 @@ You should see three services (`palpo_postgres`, `palpo`, `octos`) all in `runni
 
 This section explains every configuration file in the `palpo-and-octos-deploy/` directory. You already have a working setup from the Quick Start -- come here when you want to customize.
 
-> **Note:** To understand the architecture and WHY each component is configured this way, see [Architecture](02-how-robrix-palpo-octos-work-together.md).
+> **Note:** To understand the architecture and WHY each component is configured this way, see [Architecture](03-how-robrix-palpo-octos-work-together.md).
 
 ### 3.1 Directory Layout
 
@@ -287,7 +287,7 @@ This file defines the bot's identity, LLM provider, and Matrix channel configura
 | `port` | Port Octos listens on for Appservice events from Palpo. |
 | `allowed_senders` | Matrix user IDs allowed to talk to the bot. Empty `[]` = everyone. |
 
-> **Important:** `homeserver` is the internal Docker URL Octos uses to call Palpo. `server_name` is the Matrix domain embedded in user IDs. They are related but not interchangeable. See [Architecture](02-how-robrix-palpo-octos-work-together.md) for why.
+> **Important:** `homeserver` is the internal Docker URL Octos uses to call Palpo. `server_name` is the Matrix domain embedded in user IDs. They are related but not interchangeable. See [Architecture](03-how-robrix-palpo-octos-work-together.md) for why.
 
 **Gateway settings:**
 
@@ -493,7 +493,7 @@ docker compose up -d
 - **Palpo:** [github.com/palpo-im/palpo](https://github.com/palpo-im/palpo) -- Palpo homeserver documentation.
 - **Robrix:** [Project-Robius-China/robrix2](https://github.com/Project-Robius-China/robrix2) -- Robrix client, build instructions, and feature tracker.
 - **Matrix Appservice Spec:** [spec.matrix.org -- Application Service API](https://spec.matrix.org/latest/application-service-api/) -- the Matrix protocol specification for application services.
-- **Architecture Guide:** [02-how-robrix-palpo-octos-work-together.md](02-how-robrix-palpo-octos-work-together.md) -- how the Appservice mechanism works, message lifecycle, and BotFather system.
+- **Architecture Guide:** [03-how-robrix-palpo-octos-work-together.md](03-how-robrix-palpo-octos-work-together.md) -- how the Appservice mechanism works, message lifecycle, and BotFather system.
 
 ---
 

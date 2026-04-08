@@ -206,7 +206,7 @@ OpenClaw 的 Matrix 插件使用 matrix-js-sdk 的 **Rust crypto 路径**，实�
 - **OpenClaw Matrix 插件：** [docs.openclaw.ai/channels/matrix](https://docs.openclaw.ai/channels/matrix) — 官方 Matrix 频道插件参考。
 - **Matrix Client-Server API 规范：** [spec.matrix.org -- Client-Server API](https://spec.matrix.org/latest/client-server-api/) — OpenClaw 使用的协议。
 - **Matrix Application Service API 规范：** [spec.matrix.org -- Application Service API](https://spec.matrix.org/latest/application-service-api/) — Octos 使用的协议。
-- **Octos 架构原理：** [02-how-robrix-palpo-octos-work-together-zh.md](../robrix-with-palpo-and-octos/02-how-robrix-palpo-octos-work-together-zh.md) — Octos AppService 模式的完整解析。
+- **Octos 架构原理：** [03-how-robrix-palpo-octos-work-together-zh.md](../robrix-with-palpo-and-octos/03-how-robrix-palpo-octos-work-together-zh.md) — Octos AppService 模式的完整解析。
 - **部署指南：** [01-deploying-openclaw-with-matrix-zh.md](01-deploying-openclaw-with-matrix-zh.md) — 如何部署 OpenClaw + Matrix。
 - **使用指南：** [02-using-robrix-with-openclaw-zh.md](02-using-robrix-with-openclaw-zh.md) — 如何使用 Robrix 与 OpenClaw 代理对话。
 

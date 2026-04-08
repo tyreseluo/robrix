@@ -1,10 +1,10 @@
 # 架构原理：Robrix + Palpo + Octos 如何协同工作
 
-[English Version](02-how-robrix-palpo-octos-work-together.md)
+[English Version](03-how-robrix-palpo-octos-work-together.md)
 
 > **目标：** 阅读本指南后，你将理解 Matrix Application Service（应用服务）机制如何运作，Octos 如何作为 App Service 注册到 Palpo 以接收和回复消息，以及消息从 Robrix 经过 Palpo 到达 AI 机器人再返回的完整生命周期。
 
-本文档解释 Robrix + Palpo + Octos 系统背后的**工作机制**。如需部署请参阅 [01-deploying-palpo-and-octos-zh.md](01-deploying-palpo-and-octos-zh.md)。如需使用指南请参阅 [03-using-robrix-with-palpo-and-octos-zh.md](03-using-robrix-with-palpo-and-octos-zh.md)。
+本文档解释 Robrix + Palpo + Octos 系统背后的**工作机制**。如需部署请参阅 [01-deploying-palpo-and-octos-zh.md](01-deploying-palpo-and-octos-zh.md)。如需使用指南请参阅 [02-using-robrix-with-palpo-and-octos-zh.md](02-using-robrix-with-palpo-and-octos-zh.md)。
 
 ---
 
@@ -302,7 +302,7 @@ Robrix 内置了通过 BotFather 系统创建和管理子机器人的 UI。在 R
 2. 创建新的子机器人，自定义用户名、显示名称和系统提示词
 3. 查看和管理现有机器人
 
-详细的操作步骤请参阅使用指南中的[机器人管理](03-using-robrix-with-palpo-and-octos-zh.md)部分。
+详细的操作步骤请参阅使用指南中的[机器人管理](02-using-robrix-with-palpo-and-octos-zh.md)部分。
 
 ---
 
@@ -314,7 +314,7 @@ Robrix 内置了通过 BotFather 系统创建和管理子机器人的 UI。在 R
 - **Robrix GitHub：** [Project-Robius-China/robrix2](https://github.com/Project-Robius-China/robrix2) -- Robrix 客户端源代码和功能跟踪。
 - **Matrix 规范 (Client-Server API)：** [spec.matrix.org -- Client-Server API](https://spec.matrix.org/latest/client-server-api/) -- 完整的 Client-Server API 规范，包括 Sliding Sync。
 - **部署指南：** [01-deploying-palpo-and-octos-zh.md](01-deploying-palpo-and-octos-zh.md) -- 如何部署和配置系统。
-- **使用指南：** [03-using-robrix-with-palpo-and-octos-zh.md](03-using-robrix-with-palpo-and-octos-zh.md) -- 如何使用 Robrix 与 AI 机器人交互的分步指南。
+- **使用指南：** [02-using-robrix-with-palpo-and-octos-zh.md](02-using-robrix-with-palpo-and-octos-zh.md) -- 如何使用 Robrix 与 AI 机器人交互的分步指南。
 
 ---
 

@@ -8,7 +8,7 @@
 
 > **只想快速试试？** 跳到 [快速开始](#2-快速开始) — 5 步即可运行。
 >
-> **想了解每个配置背后的原理？** 参阅 [架构原理](02-how-robrix-palpo-octos-work-together-zh.md) 了解完整解释。
+> **想了解每个配置背后的原理？** 参阅 [架构原理](03-how-robrix-palpo-octos-work-together-zh.md) 了解完整解释。
 
 ---
 
@@ -115,7 +115,7 @@ docker compose ps
 
 本节解释 `palpo-and-octos-deploy/` 目录中的每个配置文件。快速开始已经让你跑起来了——当你需要自定义时再来这里查阅。
 
-> **注意：** 想了解架构以及每个组件为何如此配置，请参阅 [架构原理](02-how-robrix-palpo-octos-work-together-zh.md)。
+> **注意：** 想了解架构以及每个组件为何如此配置，请参阅 [架构原理](03-how-robrix-palpo-octos-work-together-zh.md)。
 
 ### 3.1 目录结构
 
@@ -287,7 +287,7 @@ client = "http://127.0.0.1:8128"
 | `port` | Octos 监听 Palpo 应用服务事件的端口。 |
 | `allowed_senders` | 允许与机器人对话的 Matrix 用户 ID。空数组 `[]` = 所有人都可以对话。 |
 
-> **重要：** `homeserver` 是 Octos 访问 Palpo 时使用的 Docker 内部 URL；`server_name` 是写进 Matrix 用户 ID 的域名部分。两者相关但不能混用。详见 [架构原理](02-how-robrix-palpo-octos-work-together-zh.md)。
+> **重要：** `homeserver` 是 Octos 访问 Palpo 时使用的 Docker 内部 URL；`server_name` 是写进 Matrix 用户 ID 的域名部分。两者相关但不能混用。详见 [架构原理](03-how-robrix-palpo-octos-work-together-zh.md)。
 
 **Gateway 设置：**
 
@@ -493,7 +493,7 @@ docker compose up -d
 - **Palpo：** [github.com/palpo-im/palpo](https://github.com/palpo-im/palpo) — Palpo 主服务器文档。
 - **Robrix：** [Project-Robius-China/robrix2](https://github.com/Project-Robius-China/robrix2) — Robrix 客户端、构建说明和功能追踪。
 - **Matrix Appservice 规范：** [spec.matrix.org — Application Service API](https://spec.matrix.org/latest/application-service-api/) — 应用服务的 Matrix 协议规范。
-- **架构原理：** [02-how-robrix-palpo-octos-work-together-zh.md](02-how-robrix-palpo-octos-work-together-zh.md) — 应用服务机制如何运作、消息生命周期和 BotFather 系统。
+- **架构原理：** [03-how-robrix-palpo-octos-work-together-zh.md](03-how-robrix-palpo-octos-work-together-zh.md) — 应用服务机制如何运作、消息生命周期和 BotFather 系统。
 
 ---
 

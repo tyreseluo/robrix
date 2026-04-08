@@ -1,6 +1,6 @@
 # 使用指南：Robrix + Palpo + Octos
 
-[English Version](03-using-robrix-with-palpo-and-octos.md)
+[English Version](02-using-robrix-with-palpo-and-octos.md)
 
 > **目标：** 按照本指南操作后，你将掌握如何使用 Robrix 连接 Palpo 服务器、注册账号、创建房间、邀请 AI 机器人、进行对话，以及通过 BotFather 系统管理机器人——全部配有分步截图演示。
 
@@ -145,7 +145,7 @@
 
 Octos 支持"BotFather"模式：主机器人（`@octosbot`）可以创建**子机器人**，每个子机器人拥有自己的个性和系统提示词。这对于构建专业化的 AI 助手非常有用。
 
-如需深入了解其工作原理，请参阅 [架构指南](02-how-robrix-palpo-octos-work-together-zh.md)。
+如需深入了解其工作原理，请参阅 [架构指南](03-how-robrix-palpo-octos-work-together-zh.md)。
 
 ### 6.1 在 Robrix 中启用 App Service 支持
 
@@ -284,4 +284,4 @@ BotFather 和子机器人的角色不同：
 ## 接下来
 
 - [部署指南](01-deploying-palpo-and-octos-zh.md) -- 搭建和配置服务
-- [架构指南](02-how-robrix-palpo-octos-work-together-zh.md) -- 了解各组件如何协同工作
+- [架构指南](03-how-robrix-palpo-octos-work-together-zh.md) -- 了解各组件如何协同工作

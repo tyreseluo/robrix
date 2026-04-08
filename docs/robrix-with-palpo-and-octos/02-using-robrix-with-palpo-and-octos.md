@@ -1,6 +1,6 @@
 # Usage Guide: Robrix + Palpo + Octos
 
-[中文版](03-using-robrix-with-palpo-and-octos-zh.md)
+[中文版](02-using-robrix-with-palpo-and-octos-zh.md)
 
 > **Goal:** After following this guide, you will know how to use Robrix to connect to your Palpo server, register an account, create rooms, invite AI bots, have conversations, and manage bots through the BotFather system — all demonstrated with step-by-step screenshots.
 
@@ -146,7 +146,7 @@ If someone else has already created a room with the bot and invited you, or if a
 
 Octos supports a "BotFather" pattern: the main bot (`@octosbot`) can create **child bots**, each with its own personality and system prompt. This is useful for building specialized assistants.
 
-For a deeper understanding of how this works, see the [Architecture Guide](02-how-robrix-palpo-octos-work-together.md).
+For a deeper understanding of how this works, see the [Architecture Guide](03-how-robrix-palpo-octos-work-together.md).
 
 ### 6.1 Enable App Service Support in Robrix
 
@@ -284,4 +284,4 @@ For remote deployments, replace `127.0.0.1:8128` with your configured `server_na
 ## What's Next
 
 - [Deployment Guide](01-deploying-palpo-and-octos.md) -- set up and configure services
-- [Architecture Guide](02-how-robrix-palpo-octos-work-together.md) -- understand how the components work together
+- [Architecture Guide](03-how-robrix-palpo-octos-work-together.md) -- understand how the components work together

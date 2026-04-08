@@ -1,10 +1,10 @@
 # Architecture: How Robrix + Palpo + Octos Work Together
 
-[中文版](02-how-robrix-palpo-octos-work-together-zh.md)
+[中文版](03-how-robrix-palpo-octos-work-together-zh.md)
 
 > **Goal:** After reading this guide, you will understand how the Matrix Application Service mechanism works, how Octos registers as an App Service on Palpo to receive and respond to messages, and how the complete message lifecycle flows from Robrix through Palpo to the AI bot and back.
 
-This document explains the **mechanisms** behind the Robrix + Palpo + Octos system. If you want to deploy it, see [01-deploying-palpo-and-octos.md](01-deploying-palpo-and-octos.md). If you want to use it, see [03-using-robrix-with-palpo-and-octos.md](03-using-robrix-with-palpo-and-octos.md).
+This document explains the **mechanisms** behind the Robrix + Palpo + Octos system. If you want to deploy it, see [01-deploying-palpo-and-octos.md](01-deploying-palpo-and-octos.md). If you want to use it, see [02-using-robrix-with-palpo-and-octos.md](02-using-robrix-with-palpo-and-octos.md).
 
 ---
 
@@ -302,7 +302,7 @@ Robrix has a built-in UI for creating and managing child bots through the BotFat
 2. Create new child bots with a custom username, display name, and system prompt
 3. View and manage existing bots
 
-For step-by-step instructions, see the [Bot Management](03-using-robrix-with-palpo-and-octos.md) section in the usage guide.
+For step-by-step instructions, see the [Bot Management](02-using-robrix-with-palpo-and-octos.md) section in the usage guide.
 
 ---
 
@@ -314,7 +314,7 @@ For step-by-step instructions, see the [Bot Management](03-using-robrix-with-pal
 - **Robrix GitHub:** [Project-Robius-China/robrix2](https://github.com/Project-Robius-China/robrix2) -- Robrix client source and feature tracker.
 - **Matrix Spec (Client-Server API):** [spec.matrix.org -- Client-Server API](https://spec.matrix.org/latest/client-server-api/) -- The full Client-Server API specification, including Sliding Sync.
 - **Deployment Guide:** [01-deploying-palpo-and-octos.md](01-deploying-palpo-and-octos.md) -- How to deploy and configure the system.
-- **Usage Guide:** [03-using-robrix-with-palpo-and-octos.md](03-using-robrix-with-palpo-and-octos.md) -- How to use Robrix with AI bots, step by step.
+- **Usage Guide:** [02-using-robrix-with-palpo-and-octos.md](02-using-robrix-with-palpo-and-octos.md) -- How to use Robrix with AI bots, step by step.
 
 ---
 
