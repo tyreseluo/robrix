@@ -229,7 +229,7 @@ Edit `~/.openclaw/openclaw.json`. Two complete configurations are provided below
 | `homeserver` | `"http://127.0.0.1:8128"` | **Local Palpo must use `http`**, not `https` (Palpo has no TLS by default). matrix.org uses `https`. |
 | `network.dangerouslyAllowPrivateNetwork` | `true` | **Only needed for local/LAN deployments.** OpenClaw blocks private IPs (127.0.0.1, 10.x, 192.168.x) by default as an anti-SSRF security measure. Not needed when connecting to public servers like matrix.org. |
 | `userId` | `"@chalice:127.0.0.1:8128"` | **Must be the full Matrix ID format** `@username:server`. |
-| `password` | `"your-password"` | Password authentication -- OpenClaw logs in automatically and caches the token at `~/.openclaw/credentials/matrix/`. |
+| `password` | `"your-password"` | Password authentication -- OpenClaw logs in automatically and caches the token at `~/.openclaw/credentials/matrix/`. Access Token authentication is also supported (replace `password` with `accessToken`) -- see [OpenClaw Matrix Plugin Docs](https://docs.openclaw.ai/channels/matrix). |
 | `encryption` | `true` | **Strongly recommended.** Matrix DMs enable E2EE by default. Without this, the bot receives encrypted messages it cannot decrypt, resulting in "message sent but no reply". |
 | `autoJoin` | `"always"` | Accept all invites during testing. Change to `"allowlist"` in production. |
 | `dm.policy` | `"open"` | Allow all DMs during testing. Change to `"allowlist"` in production. |

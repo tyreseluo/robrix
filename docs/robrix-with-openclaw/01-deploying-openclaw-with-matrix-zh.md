@@ -229,7 +229,7 @@ openclaw config
 | `homeserver` | `"http://127.0.0.1:8128"` | **本地 Palpo 必须用 `http`**，不是 `https`（Palpo 默认没有 TLS）。matrix.org 用 `https`。 |
 | `network.dangerouslyAllowPrivateNetwork` | `true` | **仅本地/内网部署需要。** OpenClaw 默认阻止连接私有 IP（127.0.0.1、10.x、192.168.x），这是防 SSRF 的安全措施。连公共服务器（matrix.org）不需要此项。 |
 | `userId` | `"@chalice:127.0.0.1:8128"` | **必须是完整 Matrix ID 格式** `@用户名:服务器`。 |
-| `password` | `"你的密码"` | 密码认证——OpenClaw 自动登录并缓存 token 到 `~/.openclaw/credentials/matrix/`。 |
+| `password` | `"你的密码"` | 密码认证——OpenClaw 自动登录并缓存 token 到 `~/.openclaw/credentials/matrix/`。也支持 Access Token 认证（将 `password` 替换为 `accessToken`），详见 [OpenClaw Matrix 插件文档](https://docs.openclaw.ai/channels/matrix)。 |
 | `encryption` | `true` | **强烈建议开启。** Matrix DM 默认启用 E2EE。如果不开，Bot 收到加密消息无法解密，表现为"发了消息但没回复"。 |
 | `autoJoin` | `"always"` | 测试阶段接受所有邀请。生产环境改为 `"allowlist"`。 |
 | `dm.policy` | `"open"` | 测试阶段允许所有私聊。生产环境改为 `"allowlist"`。 |
