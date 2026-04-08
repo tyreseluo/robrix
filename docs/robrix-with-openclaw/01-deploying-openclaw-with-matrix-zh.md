@@ -4,6 +4,10 @@
 
 > **目标：** 完成本指南后，你将拥有一个连接到 Matrix 服务器的 OpenClaw AI 代理。之后你可以使用 Robrix（或任何 Matrix 客户端）与 OpenClaw 驱动的 AI 代理对话。
 
+## 什么是 OpenClaw？
+
+[OpenClaw](https://github.com/openclaw/openclaw) 是一个开源的自托管 AI 助手平台（前身为 MoltBot，2026 年初更名）。它支持多种 LLM（DeepSeek、OpenAI、Anthropic 等），并通过频道插件接入 Matrix、Telegram、Discord 等聊天平台。在本指南中，OpenClaw 通过 **Matrix 频道插件**以**普通用户身份**登录服务器，不需要任何服务器端配置。与 Octos 的 Application Service 模式不同，OpenClaw 的接入方式更简单——详见[架构原理](03-how-robrix-and-openclaw-work-together-zh.md)。
+
 本指南将逐步引导你完成 OpenClaw 与 Matrix 的部署：从创建 Matrix Bot 账号，到配置 OpenClaw Matrix 频道插件，再到端到端验证连接。
 
 > **想快速体验？** 跳转到 [快速开始](#2-快速开始)。

@@ -4,6 +4,10 @@
 
 > **Goal:** After following this guide, you will have OpenClaw running as an AI agent connected to a Matrix homeserver. You can then use Robrix (or any Matrix client) to chat with OpenClaw-powered AI agents.
 
+## What is OpenClaw?
+
+[OpenClaw](https://github.com/openclaw/openclaw) is an open-source, self-hosted AI assistant platform (formerly MoltBot, renamed in early 2026). It supports multiple LLMs (DeepSeek, OpenAI, Anthropic, etc.) and connects to Matrix, Telegram, Discord, and other chat platforms via channel plugins. In this guide, OpenClaw logs in to the Matrix server as a **regular user** through its **Matrix channel plugin**, requiring no server-side configuration. This is simpler than Octos's Application Service approach -- see [Architecture Guide](03-how-robrix-and-openclaw-work-together.md) for details.
+
 This guide walks you through deploying OpenClaw with Matrix step by step: from creating a Matrix bot account, to configuring the OpenClaw Matrix channel plugin, to verifying the connection end-to-end.
 
 > **Just want to try it quickly?** Jump to [Quick Start](#2-quick-start).
