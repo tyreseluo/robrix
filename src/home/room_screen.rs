@@ -175,7 +175,7 @@ where
     I: IntoIterator<Item = Option<usize>>,
     F: FnMut(usize) -> bool,
 {
-    indices.into_iter().flatten().any(|idx| is_visible(idx))
+    indices.into_iter().flatten().any(is_visible)
 }
 
 fn streaming_candidates_from_items<'a>(
