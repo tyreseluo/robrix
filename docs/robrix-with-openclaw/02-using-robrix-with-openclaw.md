@@ -45,7 +45,7 @@ Confirm the following:
 2. Type a message (e.g., "Hello"), press Enter
 3. Wait 1-3 seconds -- the bot should reply
 
-<!-- Screenshot: OpenClaw bot successfully replying -->
+<img src="../images/openclaw-bot-reply.png" width="600" alt="OpenClaw Bot (chalice) successfully replying">
 
 > **Note:** If the bot was just deployed, messages you sent earlier may not be decryptable (because those messages' encryption keys were not distributed to the bot's device). This is normal Matrix E2EE behavior -- send a **new message** instead.
 
@@ -65,14 +65,16 @@ In addition to DMs, you can invite the bot to group chat rooms.
 2. Invite the bot (type the bot's Matrix ID)
 3. The bot joins automatically (because `autoJoin: "always"` is configured)
 
-<!-- Screenshot: Bot joining the room -->
+<img src="../images/openclaw-bot-join-room.png" width="600" alt="OpenClaw Bot (chalice) accepts invitation and joins the room, just like a regular user">
+
+> Notice that chalice accepts the invitation and joins the room as a regular user -- this is a key characteristic of the client mode. The bot is indistinguishable from any other user.
 
 ### 3.2 Chat in the Room
 
 - **Default behavior:** The bot responds to all messages in the room
 - **If `requireMention: true` is configured:** You need to @mention the bot to trigger a reply
 
-<!-- Screenshot: Chatting with the bot in a room -->
+<img src="../images/openclaw-bot-reply.png" width="600" alt="Chatting with OpenClaw Bot in a room">
 
 ---
 

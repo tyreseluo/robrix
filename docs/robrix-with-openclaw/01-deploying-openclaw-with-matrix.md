@@ -293,7 +293,7 @@ matrix: device is verified by its owner and ready for encrypted rooms  ← Encry
 3. **Start a DM**: Select the bot to enter a conversation
 4. **Send a message** and wait for a reply
 
-<!-- Screenshot: OpenClaw successfully replying to a message -->
+<img src="../images/openclaw-bot-reply.png" width="600" alt="OpenClaw Bot (chalice) successfully replying in Robrix">
 
 > **Important:** If you sent messages before OpenClaw's encryption device was created, those historical messages **can never be decrypted** (this is normal Matrix E2EE behavior). You must send a **new message** to trigger a reply.
 
