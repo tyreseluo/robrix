@@ -360,6 +360,12 @@ jobs:
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Workaround Android APK output path
+        shell: bash
+        run: |
+          mkdir -p target/android
+          ln -sfn android/makepad-android-apk target/makepad-android-apk
+
       - name: Package (android)
         uses: project-robius/makepad-packaging-action@v1
         env:

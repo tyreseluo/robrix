@@ -12,6 +12,7 @@ pub enum UpdateCheckOutcome {
     Error(String),
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 const DEFAULT_UPDATER_ENDPOINT: &str = "https://github.com/Project-Robius-China/robrix2/releases/latest/download/latest.json";
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -43,6 +44,7 @@ fn check_latest_version_without_signature(endpoint: &str) -> Result<Option<Strin
     })
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn resolve_updater_pubkey() -> Option<String> {
     option_env!("ROBRIX_UPDATER_PUBKEY")
         .map(str::trim)
@@ -54,6 +56,7 @@ fn resolve_updater_pubkey() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn resolve_updater_endpoint() -> String {
     option_env!("ROBRIX_UPDATER_ENDPOINT")
         .map(str::trim)
