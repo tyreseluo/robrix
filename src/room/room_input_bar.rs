@@ -18,11 +18,70 @@
 
 use makepad_widgets::*;
 use matrix_sdk::room::reply::{EnforceThread, Reply};
+use ruma::events::room::message::AddMentions;
 use matrix_sdk_ui::timeline::{EmbeddedEvent, EventTimelineItem, TimelineEventItemId};
 use ruma::{events::room::message::{LocationMessageEventContent, MessageType, ReplyWithinThread, RoomMessageEventContent}, OwnedRoomId, OwnedUserId};
-use crate::{home::{editing_pane::{EditingPaneState, EditingPaneWidgetExt, EditingPaneWidgetRefExt}, location_preview::{LocationPreviewWidgetExt, LocationPreviewWidgetRefExt}, room_screen::{MessageAction, RoomScreenProps, populate_preview_of_timeline_item}, tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt}}, i18n::AppLanguage, location::init_location_subscriber, shared::{avatar::AvatarWidgetRefExt, html_or_plaintext::HtmlOrPlaintextWidgetRefExt, mentionable_text_input::MentionableTextInputWidgetExt, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{MatrixRequest, TimelineKind, UserPowerLevels, submit_async_request}, utils};
+use crate::{app::AppState, home::{editing_pane::{EditingPaneState, EditingPaneWidgetExt, EditingPaneWidgetRefExt}, location_preview::{LocationPreviewWidgetExt, LocationPreviewWidgetRefExt}, room_screen::{MessageAction, RoomScreenProps, populate_preview_of_timeline_item}, tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt}, upload_progress::UploadProgressViewWidgetRefExt}, i18n::{AppLanguage, tr_fmt, tr_key}, location::init_location_subscriber, room::translation::{self, TRANSLATION_REQUEST_ID}, shared::{avatar::AvatarWidgetRefExt, file_upload_modal::{FileData, FileLoadedData, FilePreviewerAction}, html_or_plaintext::HtmlOrPlaintextWidgetRefExt, mentionable_text_input::MentionableTextInputWidgetExt, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{MatrixRequest, TimelineKind, UserPowerLevels, submit_async_request}, utils};
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use crate::shared::file_upload_modal::{FilePreviewerMetaData, ThumbnailData};
 
 const ROOM_INFO_CARD_MOBILE_BREAKPOINT: f32 = 700.0;
+#[cfg(test)]
+const TRANSLATION_LANG_POPUP_WIDTH: f64 = 220.0;
+#[cfg(test)]
+const TRANSLATION_LANG_POPUP_SCROLL_HEIGHT: f64 = 288.0;
+#[cfg(test)]
+const TRANSLATION_LANG_POPUP_HEIGHT: f64 = TRANSLATION_LANG_POPUP_SCROLL_HEIGHT + 8.0;
+#[cfg(test)]
+const TRANSLATION_LANG_POPUP_GAP: f64 = 6.0;
+#[cfg(test)]
+const TRANSLATION_LANG_POPUP_MARGIN: f64 = 8.0;
+
+#[cfg(test)]
+fn compute_translation_popup_abs_pos(
+    button_rect_local: Rect,
+    container_rect_screen: Rect,
+    pass_size: DVec2,
+) -> DVec2 {
+    let max_x = (container_rect_screen.size.x - TRANSLATION_LANG_POPUP_WIDTH - TRANSLATION_LANG_POPUP_MARGIN)
+        .max(TRANSLATION_LANG_POPUP_MARGIN);
+    let popup_x = (button_rect_local.pos.x + button_rect_local.size.x - TRANSLATION_LANG_POPUP_WIDTH)
+        .max(TRANSLATION_LANG_POPUP_MARGIN)
+        .min(max_x);
+
+    let max_y = (pass_size.y - TRANSLATION_LANG_POPUP_HEIGHT - TRANSLATION_LANG_POPUP_MARGIN)
+        .max(TRANSLATION_LANG_POPUP_MARGIN);
+    let popup_y_above = button_rect_local.pos.y - TRANSLATION_LANG_POPUP_HEIGHT - TRANSLATION_LANG_POPUP_GAP;
+    let button_screen_y = container_rect_screen.pos.y + button_rect_local.pos.y;
+    let popup_y = if button_screen_y >= TRANSLATION_LANG_POPUP_HEIGHT + TRANSLATION_LANG_POPUP_GAP + TRANSLATION_LANG_POPUP_MARGIN {
+        popup_y_above
+    } else {
+        let popup_y_screen = (button_screen_y + button_rect_local.size.y + TRANSLATION_LANG_POPUP_GAP)
+            .max(TRANSLATION_LANG_POPUP_MARGIN)
+            .min(max_y);
+        popup_y_screen - container_rect_screen.pos.y
+    };
+
+    dvec2(popup_x, popup_y)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TranslationApplyOutcome {
+    input_text: String,
+    preserved_preview_text: String,
+    next_last_source: String,
+    keep_preview_visible: bool,
+}
+
+fn compute_translation_apply_outcome(translated_text: &str) -> TranslationApplyOutcome {
+    let applied_text = translated_text.to_string();
+    TranslationApplyOutcome {
+        input_text: applied_text.clone(),
+        preserved_preview_text: applied_text.clone(),
+        next_last_source: applied_text,
+        keep_preview_visible: true,
+    }
+}
 
 script_mod! {
     use mod.prelude.widgets.*
@@ -32,6 +91,64 @@ script_mod! {
     mod.widgets.ICO_LOCATION_PERSON = crate_resource("self://resources/icons/location-person.svg")
     mod.widgets.ICO_MENU = crate_resource("self://resources/icons/menu.svg")
     mod.widgets.ICO_THREADS = crate_resource("self://resources/icons/double_chat.svg")
+    mod.widgets.ICO_TRANSLATE = crate_resource("self://resources/icons/translate.svg")
+
+    mod.widgets.TranslationLangItem = View {
+        width: Fill, height: 36
+        flow: Right
+        align: Align{y: 0.5}
+        padding: Inset{left: 12, right: 12}
+        cursor: MouseCursor.Hand
+        show_bg: true
+        draw_bg +: {
+            color: #0000
+            hover: instance(0.0)
+            pixel: fn() {
+                return mix(self.color, #xF0F4FA, self.hover)
+            }
+        }
+        animator: Animator {
+            hover: {
+                default: @off
+                off: AnimatorState {
+                    from: {all: Forward {duration: 0.15}}
+                    apply: { draw_bg: { hover: 0.0 } }
+                }
+                on: AnimatorState {
+                    from: {all: Forward {duration: 0.15}}
+                    apply: { draw_bg: { hover: 1.0 } }
+                }
+            }
+        }
+
+        RoundedView {
+            width: Fit, height: Fit
+            padding: Inset{left: 5, right: 5, top: 2, bottom: 2}
+            margin: Inset{right: 10}
+            show_bg: true
+            draw_bg +: {
+                color: #xE8EEF8
+                border_radius: 3.0
+            }
+            lang_code := Label {
+                width: Fit, height: Fit
+                draw_text +: {
+                    color: #x555555
+                    text_style: REGULAR_TEXT { font_size: 9 }
+                }
+                text: "en"
+            }
+        }
+
+        lang_name := Label {
+            width: Fill, height: Fit
+            draw_text +: {
+                color: #x333333
+                text_style: REGULAR_TEXT { font_size: 11 }
+            }
+            text: "English"
+        }
+    }
 
     mod.widgets.RoomEmojiButton = mod.widgets.RobrixIconButton {
         spacing: 0
@@ -61,6 +178,8 @@ script_mod! {
         width: Fill,
         height: Fit{max: FitBound.Rel{base: Base.Full, factor: 0.75}}
         flow: Down,
+        clip_x: false,
+        clip_y: false,
 
         // These margins are a hack to make the borders of the RoomInputBar
         // line up with the boundaries of its parent widgets.
@@ -83,6 +202,85 @@ script_mod! {
 
         // Below that, display a preview of the current location that a user is about to send.
         location_preview := LocationPreview { }
+
+        // Upload progress view (shown when a file upload is in progress)
+        upload_progress_view := UploadProgressView { }
+
+        // Translation preview: shows the translated text above the input bar.
+        translation_preview := RoundedView {
+            visible: false
+            width: Fill, height: Fit
+            flow: Right
+            padding: Inset{left: 12, right: 8, top: 8, bottom: 8}
+            align: Align{y: 0.5}
+            spacing: 8
+            show_bg: true
+            draw_bg +: {
+                color: #xF0F4FA
+                border_radius: 4.0
+            }
+
+            translation_lang_badge := RoundedView {
+                width: Fit, height: Fit
+                padding: Inset{left: 6, right: 6, top: 2, bottom: 2}
+                show_bg: true
+                draw_bg +: {
+                    color: #xE0E8F0
+                    border_radius: 3.0
+                }
+                translation_lang_code := Label {
+                    width: Fit, height: Fit
+                    draw_text +: {
+                        color: #x555555
+                        text_style: REGULAR_TEXT { font_size: 9 }
+                    }
+                    text: "en"
+                }
+            }
+
+            translation_preview_text := Label {
+                width: Fill, height: Fit
+                flow: Flow.Right{wrap: true}
+                draw_text +: {
+                    color: #x333333
+                    text_style: REGULAR_TEXT { font_size: 11 }
+                }
+                text: ""
+            }
+
+            translation_apply_button := Button {
+                width: Fit, height: Fit
+                padding: Inset{top: 4, bottom: 4, left: 10, right: 10}
+                text: "Apply"
+                draw_bg +: {
+                    color: (COLOR_ACTIVE_PRIMARY)
+                    color_hover: (COLOR_ACTIVE_PRIMARY_DARKER)
+                    color_down: #0C5DAA
+                    border_radius: 4.0
+                }
+                draw_text +: {
+                    color: #fff
+                    text_style: REGULAR_TEXT { font_size: 10 }
+                }
+            }
+
+            translation_close_button := RobrixIconButton {
+                width: Fit, height: Fit
+                padding: 4
+                spacing: 0
+                draw_icon +: {
+                    svg: (ICON_CLOSE)
+                    color: #x999999
+                }
+                draw_bg +: {
+                    color: #0000
+                    color_hover: #xE0E0E0
+                    color_down: #xD0D0D0
+                }
+                icon_walk: Walk{width: 12, height: 12}
+                text: ""
+            }
+        }
 
         // Below that, display one of multiple possible views:
         // * the message input bar (buttons and message TextInput).
@@ -226,6 +424,23 @@ script_mod! {
                         margin: Inset{bottom: 9, left: 6, right: 0}
                     }
 
+                    // Attachment button for uploading files/images
+                    send_attachment_button := RobrixIconButton {
+                        margin: Inset{left: 3, right: 1, top: 4, bottom: 4}
+                        spacing: 0,
+                        draw_icon +: {
+                            svg: (ICON_ADD_ATTACHMENT)
+                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
+                        },
+                        draw_bg +: {
+                            color: (COLOR_BG_PREVIEW)
+                            color_hover: #E0E8F0
+                            color_down: #D0D8E8
+                        }
+                        icon_walk: Walk{width: 21, height: 21}
+                        text: "",
+                    }
+
                     emoji_picker_button := RobrixIconButton {
                         margin: Inset{left: 3, right: 1, top: 4, bottom: 4}
                         spacing: 0,
@@ -237,6 +452,22 @@ script_mod! {
                             color: (COLOR_BG_PREVIEW)
                             color_hover: #E0E8F0
                             color_down: #D0D8E8
+                        }
+                        icon_walk: Walk{width: 19, height: 19}
+                        text: "",
+                    }
+
+                    translate_button := RobrixIconButton {
+                        margin: Inset{left: 1, right: 1, top: 4, bottom: 4}
+                        spacing: 0,
+                        draw_icon +: {
+                            svg: (mod.widgets.ICO_TRANSLATE)
+                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
+                        },
+                        draw_bg +: {
+                            color: (COLOR_BG_PREVIEW)
+                            color_hover: #xE0E8F0
+                            color_down: #xD0D8E8
                         }
                         icon_walk: Walk{width: 19, height: 19}
                         text: "",
@@ -312,6 +543,48 @@ script_mod! {
 
             editing_pane := EditingPane { }
         }
+
+        translation_lang_wrapper := RoundedView {
+            visible: false
+            width: 220, height: Fit
+            flow: Down
+            padding: Inset{top: 4, bottom: 4}
+            show_bg: true
+            new_batch: true
+            draw_bg +: {
+                color: (COLOR_PRIMARY)
+                border_radius: 6.0
+                border_size: 1.0
+                border_color: #ddd
+                shadow_color: #0003
+                shadow_radius: 8.0
+                shadow_offset: vec2(0.0, 2.0)
+            }
+
+            translation_lang_scroll := ScrollYView {
+                width: Fill, height: 288
+                flow: Down
+                spacing: 0
+
+                lang_en := mod.widgets.TranslationLangItem {}
+                lang_zh := mod.widgets.TranslationLangItem {}
+                lang_zh_tw := mod.widgets.TranslationLangItem {}
+                lang_ja := mod.widgets.TranslationLangItem {}
+                lang_ko := mod.widgets.TranslationLangItem {}
+                lang_es := mod.widgets.TranslationLangItem {}
+                lang_fr := mod.widgets.TranslationLangItem {}
+                lang_de := mod.widgets.TranslationLangItem {}
+                lang_ru := mod.widgets.TranslationLangItem {}
+                lang_pt := mod.widgets.TranslationLangItem {}
+                lang_ar := mod.widgets.TranslationLangItem {}
+                lang_vi := mod.widgets.TranslationLangItem {}
+                lang_th := mod.widgets.TranslationLangItem {}
+                lang_id := mod.widgets.TranslationLangItem {}
+                lang_ms := mod.widgets.TranslationLangItem {}
+                lang_tr := mod.widgets.TranslationLangItem {}
+                lang_hi := mod.widgets.TranslationLangItem {}
+            }
+        }
     }
 }
 
@@ -320,6 +593,8 @@ script_mod! {
 pub struct RoomInputBar {
     #[source] source: ScriptObjectRef,
     #[deref] view: View,
+    #[rust] app_language: AppLanguage,
+    #[rust] app_language_initialized: bool,
 
     /// Whether the `ReplyingPreview` was visible when the `EditingPane` was shown.
     /// If true, when the `EditingPane` gets hidden, we need to re-show the `ReplyingPreview`.
@@ -335,10 +610,38 @@ pub struct RoomInputBar {
     /// Cached natural Fit height of the input_bar, used as the animation
     /// target when the editing pane is being hidden.
     #[rust] input_bar_natural_height: f64,
+    /// The pending file load operation, if any. Contains the receiver channel
+    /// for receiving the loaded file data from a background thread.
+    #[rust] pending_file_load: Option<crate::shared::file_upload_modal::FileLoadReceiver>,
+
+    // --- Translation state ---
+    /// Whether real-time translation is currently active.
+    #[rust] translation_active: bool,
+    /// The target language code (e.g., "en", "zh", "ja").
+    #[rust] translation_target_code: String,
+    /// The most recent translation result.
+    #[rust] translation_preview_text: Option<String>,
+    /// Whether a translation HTTP request is currently in flight.
+    #[rust] translation_request_pending: bool,
+    /// Debounce timer for translation requests.
+    #[rust] translation_debounce_timer: Timer,
+    /// The last source text that was sent for translation.
+    #[rust] translation_last_source: String,
+    /// Whether the language selector popup is visible.
+    #[rust] is_lang_popup_visible: bool,
+    /// Cached translation config, updated from AppState when translation is activated.
+    #[rust] translation_config: Option<translation::TranslationConfig>,
 }
 
 impl Widget for RoomInputBar {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        let app_language = scope.data.get::<AppState>()
+            .map(|app_state| app_state.app_language)
+            .unwrap_or_default();
+        if !self.app_language_initialized || self.app_language != app_language {
+            self.set_app_language(cx, app_language);
+        }
+
         let room_screen_props = scope
             .props
             .get::<RoomScreenProps>()
@@ -365,14 +668,115 @@ impl Widget for RoomInputBar {
             _ => {}
         }
 
+        // Always read the latest translation config from global state.
+        // Settings may update it at any time via set_global_config().
+        self.translation_config = translation::get_global_config();
+
         if let Event::Actions(actions) = event {
             self.handle_actions(cx, actions, room_screen_props);
+        }
+
+        // Handle signal events for pending file loads from background threads.
+        if let Event::Signal = event {
+            if let Some(receiver) = &self.pending_file_load {
+                let mut remove_receiver = false;
+                match receiver.try_recv() {
+                    Ok(Some(loaded_data)) => {
+                        let file_data = convert_loaded_data_to_file_data(loaded_data);
+                        Cx::post_action(FilePreviewerAction::Show(file_data));
+                        remove_receiver = true;
+                    }
+                    Ok(None) => {
+                        remove_receiver = true;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        remove_receiver = true;
+                    }
+                }
+                if remove_receiver {
+                    self.pending_file_load = None;
+                    self.redraw(cx);
+                }
+            }
+        }
+
+        // Handle translation debounce timer firing.
+        if let Event::Timer(te) = event {
+            if self.translation_debounce_timer.is_timer(te).is_some() && self.translation_active {
+                log!("Translation: debounce timer fired, translation_active={}", self.translation_active);
+                let mentionable_text_input = self.mentionable_text_input(cx, ids!(mentionable_text_input));
+                let source_text = mentionable_text_input.text().trim().to_string();
+                log!("Translation: source_text='{}', last_source='{}'", source_text, self.translation_last_source);
+                if !source_text.is_empty() && source_text != self.translation_last_source {
+                    self.translation_last_source = source_text.clone();
+                    self.translation_request_pending = true;
+
+                    self.view
+                        .label(cx, ids!(translation_preview_text))
+                        .set_text(cx, tr_key(self.app_language, "room_input_bar.translation.preview.loading"));
+                    self.view.view(cx, ids!(translation_preview)).set_visible(cx, true);
+                    self.redraw(cx);
+
+                    log!("Translation: config cached={}, target='{}'", self.translation_config.is_some(), self.translation_target_code);
+                    if let Some(config) = &self.translation_config {
+                        log!("Translation: config enabled={}, api_url='{}', model='{}'", config.enabled, config.api_base_url, config.model);
+                        if config.is_configured() {
+                            let target_code = self.translation_target_code.clone();
+                            log!("Translation: sending request for '{}' -> '{}'", source_text, target_code);
+                            translation::send_translation_request(
+                                cx,
+                                config,
+                                &source_text,
+                                &target_code,
+                            );
+                        } else {
+                            log!("Translation: config not properly configured");
+                        }
+                    } else {
+                        log!("Translation: no cached config!");
+                    }
+                }
+            }
+        }
+
+        // Handle translation HTTP response.
+        if let Event::NetworkResponses(responses) = event {
+            for response in responses {
+                if let NetworkResponse::HttpResponse { request_id, response } = response {
+                    if *request_id == TRANSLATION_REQUEST_ID {
+                        self.translation_request_pending = false;
+                        match translation::parse_translation_response(response) {
+                            Ok(translated_text) => {
+                                self.translation_preview_text = Some(translated_text.clone());
+                                self.view.label(cx, ids!(translation_preview_text)).set_text(cx, &translated_text);
+                                self.view.view(cx, ids!(translation_preview)).set_visible(cx, true);
+                            }
+                            Err(e) => {
+                                log!("Translation error: {e}");
+                                self.view.label(cx, ids!(translation_preview_text)).set_text(
+                                    cx,
+                                    &tr_fmt(self.app_language, "room_input_bar.translation.preview.error", &[("error", &e)]),
+                                );
+                            }
+                        }
+                        self.redraw(cx);
+                    }
+                }
+            }
         }
 
         self.view.handle_event(cx, event, scope);
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let app_language = scope.data.get::<AppState>()
+            .map(|app_state| app_state.app_language)
+            .unwrap_or_default();
+        if !self.app_language_initialized || self.app_language != app_language {
+            self.set_app_language(cx, app_language);
+        }
+
         // Shrink the input_bar's height as the editing pane slides in,
         // and grow it back as the editing pane slides out.
         // slide=1.0 → editing pane hidden → input_bar at full Fit height.
@@ -404,11 +808,56 @@ impl Widget for RoomInputBar {
         let width = self.view.area().rect(cx).size.x as f32;
         let show_room_info_card = !(width > 1.0 && width < ROOM_INFO_CARD_MOBILE_BREAKPOINT);
         self.button(cx, ids!(room_info_card_button)).set_visible(cx, show_room_info_card);
+
         self.view.draw_walk(cx, scope, walk)
     }
 }
 
 impl RoomInputBar {
+    fn set_app_language(&mut self, cx: &mut Cx, app_language: AppLanguage) {
+        self.app_language = app_language;
+        self.app_language_initialized = true;
+        self.sync_app_language(cx);
+    }
+
+    fn sync_app_language(&mut self, cx: &mut Cx) {
+        self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input))
+            .set_empty_text(cx, tr_key(self.app_language, "room_input_bar.input.placeholder").to_string());
+        self.button(cx, ids!(translation_apply_button))
+            .set_text(cx, tr_key(self.app_language, "room_input_bar.translation.preview.apply"));
+        if self.translation_active {
+            if self.translation_request_pending {
+                self.view
+                    .label(cx, ids!(translation_preview_text))
+                    .set_text(cx, tr_key(self.app_language, "room_input_bar.translation.preview.loading"));
+            } else if self.translation_preview_text.is_none() {
+                self.view
+                    .label(cx, ids!(translation_preview_text))
+                    .set_text(cx, tr_key(self.app_language, "room_input_bar.translation.preview.idle"));
+            }
+        }
+        self.view.redraw(cx);
+    }
+
+    /// Handles a language being selected from the popup.
+    fn on_language_selected(&mut self, cx: &mut Cx, code: &str) {
+        self.translation_target_code = code.to_string();
+        self.translation_active = true;
+        self.is_lang_popup_visible = false;
+        self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
+
+        // Show the language code in the preview badge
+        self.view.label(cx, ids!(translation_lang_code)).set_text(cx, code);
+        self.view
+            .label(cx, ids!(translation_preview_text))
+            .set_text(cx, tr_key(self.app_language, "room_input_bar.translation.preview.idle"));
+        self.view.view(cx, ids!(translation_preview)).set_visible(cx, true);
+
+        // Focus the text input
+        self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input)).set_key_focus(cx);
+        self.redraw(cx);
+    }
+
     fn resolve_target_user_id(
         &mut self,
         explicit_target_user_id: Option<OwnedUserId>,
@@ -458,6 +907,12 @@ impl RoomInputBar {
             self.redraw(cx);
         }
 
+        // Handle the add attachment button being clicked.
+        if self.button(cx, ids!(send_attachment_button)).clicked(actions) {
+            log!("Add attachment button clicked; opening file picker...");
+            self.open_file_picker(cx);
+        }
+
         let picked_emoji = if self.button(cx, ids!(emoji_smile_button)).clicked(actions) {
             Some("😀")
         } else if self.button(cx, ids!(emoji_joy_button)).clicked(actions) {
@@ -490,6 +945,58 @@ impl RoomInputBar {
             self.is_emoji_picker_expanded = false;
             self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
             self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input)).set_key_focus(cx);
+            self.redraw(cx);
+        }
+
+        // Handle the translate button being clicked — toggle language selector popup.
+        if self.button(cx, ids!(translate_button)).clicked(actions) {
+            if self.translation_active {
+                // Turn off translation
+                self.translation_active = false;
+                self.translation_preview_text = None;
+                self.translation_request_pending = false;
+                self.translation_last_source.clear();
+                self.view.view(cx, ids!(translation_preview)).set_visible(cx, false);
+                self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
+                self.is_lang_popup_visible = false;
+                self.redraw(cx);
+            } else {
+                self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
+                self.is_lang_popup_visible = false;
+                let button_rect = self.button(cx, ids!(translate_button)).area().clipped_rect(cx);
+                if button_rect.size.x > 0.0 {
+                    cx.widget_action(
+                        room_screen_props.room_screen_widget_uid,
+                        MessageAction::ToggleTranslationLangPopup { button_rect },
+                    );
+                }
+            }
+        }
+
+        // Handle "Apply" button on translation preview — replace input text with translation.
+        if self.button(cx, ids!(translation_apply_button)).clicked(actions) {
+            if let Some(translated) = self.translation_preview_text.clone() {
+                let outcome = compute_translation_apply_outcome(&translated);
+                mentionable_text_input.set_text(cx, &outcome.input_text);
+                self.enable_send_message_button(cx, !outcome.input_text.trim().is_empty());
+                self.translation_preview_text = Some(outcome.preserved_preview_text.clone());
+                self.translation_last_source = outcome.next_last_source;
+                self.view.label(cx, ids!(translation_preview_text)).set_text(cx, &outcome.preserved_preview_text);
+                self.view.view(cx, ids!(translation_preview)).set_visible(cx, outcome.keep_preview_visible);
+                self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input)).set_key_focus(cx);
+                self.redraw(cx);
+            }
+        }
+
+        // Handle close button on translation preview.
+        if self.button(cx, ids!(translation_close_button)).clicked(actions) {
+            self.translation_active = false;
+            self.translation_preview_text = None;
+            self.translation_request_pending = false;
+            self.translation_last_source.clear();
+            self.view.view(cx, ids!(translation_preview)).set_visible(cx, false);
+            self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
+            self.is_lang_popup_visible = false;
             self.redraw(cx);
         }
 
@@ -550,6 +1057,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: event_id.to_owned(),
                             enforce_thread,
+                            add_mentions: AddMentions::Yes,
                         }
                     })
                 ).or_else(||
@@ -557,6 +1065,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: thread_root_event_id.clone(),
                             enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
+                            add_mentions: AddMentions::No,
                         }
                     )
                 );
@@ -611,6 +1120,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: event_id.to_owned(),
                             enforce_thread,
+                            add_mentions: AddMentions::Yes,
                         }
                     })
                 ).or_else(||
@@ -618,6 +1128,7 @@ impl RoomInputBar {
                         Reply {
                             event_id: thread_root_event_id.clone(),
                             enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
+                            add_mentions: AddMentions::No,
                         }
                     )
                 );
@@ -648,6 +1159,18 @@ impl RoomInputBar {
                 room_id: room_screen_props.timeline_kind.room_id().clone(),
                 typing: !is_empty,
             });
+
+            // Trigger translation debounce if translation mode is active.
+            if self.translation_active {
+                let trimmed = new_text.trim().to_string();
+                log!("Translation: text changed, trimmed='{}', last_source='{}'", trimmed, self.translation_last_source);
+                if !trimmed.is_empty() && trimmed != self.translation_last_source {
+                    cx.stop_timer(self.translation_debounce_timer);
+                    self.translation_debounce_timer = cx.start_timeout(0.5);
+                    log!("Translation: debounce timer started");
+                }
+            }
+
             is_empty
         } else {
             text_input.text().is_empty()
@@ -708,7 +1231,7 @@ impl RoomInputBar {
         populate_preview_of_timeline_item(
             cx,
             &replying_preview.html_or_plaintext(cx, ids!(reply_preview_content.reply_preview_body)),
-            AppLanguage::default(),
+            self.app_language,
             replying_to.0.content(),
             replying_to.0.sender(),
             &replying_preview_username,
@@ -882,9 +1405,114 @@ impl RoomInputBar {
     fn is_tsp_signing_enabled(&self, cx: &mut Cx) -> bool {
         self.view.check_box(cx, ids!(tsp_sign_checkbox)).active(cx)
     }
+
+    /// Opens the native file picker dialog to select a file for upload.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    fn open_file_picker(&mut self, cx: &mut Cx) {
+        // Run file dialog on main thread (required for non-windowed environments)
+        let dialog = rfd::FileDialog::new()
+            .set_title("Select file to upload")
+            .add_filter("All files", &["*"])
+            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "bmp"])
+            .add_filter("Documents", &["pdf", "doc", "docx", "txt", "rtf"]);
+
+        if let Some(selected_file_path) = dialog.pick_file() {
+            // Get file metadata
+            let file_size = match std::fs::metadata(&selected_file_path) {
+                Ok(metadata) => metadata.len(),
+                Err(e) => {
+                    makepad_widgets::error!("Failed to read file metadata: {e}");
+                    enqueue_popup_notification(
+                        format!("Unable to access file: {e}"),
+                        PopupKind::Error,
+                        None,
+                    );
+                    return;
+                }
+            };
+
+            // Check for empty files
+            if file_size == 0 {
+                enqueue_popup_notification("Cannot upload empty file", PopupKind::Error, None);
+                return;
+            }
+
+            // Detect the MIME type from the file extension
+            let mime = mime_guess::from_path(&selected_file_path)
+                .first_or_octet_stream();
+
+            // Create channel for receiving loaded file data
+            let (sender, receiver) = std::sync::mpsc::channel();
+            self.pending_file_load = Some(receiver);
+
+            // Spawn background thread to generate thumbnail (for images)
+            let path_clone = selected_file_path.clone();
+            let mime_clone = mime.clone();
+            cx.spawn_thread(move || {
+                // Generate thumbnail for images
+                let (thumbnail, dimensions) = if crate::image_utils::is_displayable_image(mime_clone.as_ref()) {
+                    match std::fs::read(&path_clone) {
+                        Ok(data) => {
+                            match crate::image_utils::generate_thumbnail(&data) {
+                                Ok((thumb_data, width, height)) => (
+                                    Some(ThumbnailData { data: thumb_data, width, height }),
+                                    Some((width, height))
+                                ),
+                                Err(e) => {
+                                    makepad_widgets::error!("Failed to generate thumbnail: {e}");
+                                    (None, None)
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            makepad_widgets::error!("Failed to read file for thumbnail: {e}");
+                            (None, None)
+                        }
+                    }
+                } else {
+                    (None, None)
+                };
+
+                let loaded_data = FileLoadedData {
+                    metadata: FilePreviewerMetaData {
+                        mime: mime_clone,
+                        file_size,
+                        file_path: path_clone,
+                    },
+                    thumbnail,
+                    dimensions,
+                };
+
+                if sender.send(Some(loaded_data)).is_err() {
+                    makepad_widgets::error!("Failed to send file data to UI: receiver dropped");
+                }
+                SignalToUI::set_ui_signal();
+            });
+        }
+    }
+
+    /// Shows a "not supported" message on mobile platforms.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    fn open_file_picker(&mut self, _cx: &mut Cx) {
+        enqueue_popup_notification(
+            "File uploads are not yet supported on this platform.",
+            PopupKind::Error,
+            None,
+        );
+    }
 }
 
 impl RoomInputBarRef {
+    pub fn activate_translation_language(&self, cx: &mut Cx, code: &str) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        inner.on_language_selected(cx, code);
+    }
+
+    pub fn set_app_language(&self, cx: &mut Cx, app_language: AppLanguage) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        inner.set_app_language(cx, app_language);
+    }
+
     /// Shows a preview of the given event that the user is currently replying to
     /// above the message input bar.
     pub fn show_replying_to(
@@ -999,6 +1627,8 @@ impl RoomInputBarRef {
         inner.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
         inner.is_emoji_picker_expanded = false;
         inner.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
+        inner.is_lang_popup_visible = false;
+        inner.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
 
         // 2. Restore the state of the replying-to preview.
         if let Some(replying_to) = replying_to {
@@ -1024,6 +1654,106 @@ impl RoomInputBarRef {
         // 4. Restore the state of the tombstone footer.
         //    This depends on the `EditingPane` state, so it must be done after Step 3.
         inner.update_tombstone_footer(cx, timeline_kind.room_id(), tombstone_info);
+    }
+
+    /// Shows the upload progress view for a file upload.
+    pub fn show_upload_progress(&self, cx: &mut Cx, file_name: &str) {
+        let Some(inner) = self.borrow() else { return };
+        inner.child_by_path(ids!(upload_progress_view))
+            .as_upload_progress_view()
+            .show(cx, file_name);
+    }
+
+    /// Hides the upload progress view.
+    pub fn hide_upload_progress(&self, cx: &mut Cx) {
+        let Some(inner) = self.borrow() else { return };
+        inner.child_by_path(ids!(upload_progress_view))
+            .as_upload_progress_view()
+            .hide(cx);
+    }
+
+    /// Updates the upload progress.
+    pub fn set_upload_progress(&self, cx: &mut Cx, current: u64, total: u64) {
+        let Some(inner) = self.borrow() else { return };
+        inner.child_by_path(ids!(upload_progress_view))
+            .as_upload_progress_view()
+            .set_progress(cx, current, total);
+    }
+
+    /// Sets the abort handle for the current upload.
+    pub fn set_upload_abort_handle(&self, handle: tokio::task::AbortHandle) {
+        let Some(inner) = self.borrow_mut() else { return };
+        inner.child_by_path(ids!(upload_progress_view))
+            .as_upload_progress_view()
+            .set_abort_handle(handle);
+    }
+
+    /// Shows an upload error with retry option.
+    pub fn show_upload_error(&self, cx: &mut Cx, error: &str, file_data: FileData) {
+        let Some(inner) = self.borrow() else { return };
+        inner.child_by_path(ids!(upload_progress_view))
+            .as_upload_progress_view()
+            .show_error(cx, error, file_data);
+    }
+
+    /// Handles a confirmed file upload from the file upload modal.
+    ///
+    /// This method:
+    /// - Shows the upload progress view
+    /// - Gets and clears any "replying to" state
+    /// - Returns the reply metadata needed to submit the upload request
+    pub fn handle_file_upload_confirmed(&self, cx: &mut Cx, file_name: &str) -> Option<Option<matrix_sdk::room::reply::Reply>> {
+        use matrix_sdk::room::reply::{EnforceThread, Reply};
+
+        let mut inner = self.borrow_mut()?;
+
+        // Get the reply metadata if replying to a message
+        let replied_to = inner
+            .replying_to
+            .take()
+            .and_then(|(event_tl_item, _embedded_event)| {
+                event_tl_item.event_id().map(|event_id| Reply {
+                    event_id: event_id.to_owned(),
+                    enforce_thread: EnforceThread::MaybeThreaded,
+                    add_mentions: ruma::events::room::message::AddMentions::Yes,
+                })
+            });
+
+        // Show the upload progress view
+        inner.child_by_path(ids!(upload_progress_view))
+            .as_upload_progress_view()
+            .show(cx, file_name);
+
+        // Clear the replying-to state
+        inner.clear_replying_to(cx);
+
+        Some(replied_to)
+    }
+
+    /// Returns whether TSP signing is enabled.
+    #[cfg(feature = "tsp")]
+    pub fn is_tsp_signing_enabled(&self, cx: &mut Cx) -> bool {
+        let Some(inner) = self.borrow() else { return false };
+        inner.is_tsp_signing_enabled(cx)
+    }
+}
+
+/// Converts `FileLoadedData` from background thread to `FileData` for the modal.
+fn convert_loaded_data_to_file_data(loaded: FileLoadedData) -> FileData {
+    // Read the file data from the path
+    let data = std::fs::read(&loaded.metadata.file_path).unwrap_or_default();
+    let name = loaded.metadata.file_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    FileData {
+        path: loaded.metadata.file_path,
+        name,
+        mime_type: loaded.metadata.mime.to_string(),
+        data,
+        size: loaded.metadata.file_size,
+        thumbnail: loaded.thumbnail,
     }
 }
 
@@ -1053,4 +1783,90 @@ enum ShowEditingPaneBehavior {
     RestoreExisting {
         editing_pane_state: EditingPaneState,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translation_popup_position_prefers_above_button() {
+        let button_rect = Rect {
+            pos: dvec2(40.0, 4.0),
+            size: dvec2(32.0, 32.0),
+        };
+        let container_rect = Rect {
+            pos: dvec2(0.0, 640.0),
+            size: dvec2(1280.0, 64.0),
+        };
+        let pass_size = dvec2(1280.0, 800.0);
+
+        let pos = compute_translation_popup_abs_pos(button_rect, container_rect, pass_size);
+
+        assert!(pos.y < button_rect.pos.y);
+        assert!(pos.x >= 8.0);
+        assert!(pos.x + 220.0 <= container_rect.size.x - 8.0);
+    }
+
+    #[test]
+    fn translation_popup_position_falls_below_when_not_enough_space_above() {
+        let button_rect = Rect {
+            pos: dvec2(40.0, 4.0),
+            size: dvec2(32.0, 32.0),
+        };
+        let container_rect = Rect {
+            pos: dvec2(0.0, 10.0),
+            size: dvec2(1280.0, 64.0),
+        };
+        let pass_size = dvec2(1280.0, 800.0);
+
+        let pos = compute_translation_popup_abs_pos(button_rect, container_rect, pass_size);
+
+        assert!(pos.y > button_rect.pos.y);
+    }
+
+    #[test]
+    fn translation_popup_position_clamps_to_right_edge() {
+        let button_rect = Rect {
+            pos: dvec2(1260.0, 4.0),
+            size: dvec2(32.0, 32.0),
+        };
+        let container_rect = Rect {
+            pos: dvec2(0.0, 640.0),
+            size: dvec2(1280.0, 64.0),
+        };
+        let pass_size = dvec2(1280.0, 800.0);
+
+        let pos = compute_translation_popup_abs_pos(button_rect, container_rect, pass_size);
+
+        assert_eq!(pos.x + 220.0, container_rect.size.x - 8.0);
+    }
+
+    #[test]
+    fn translation_popup_position_can_resolve_to_negative_local_y() {
+        let button_rect = Rect {
+            pos: dvec2(40.0, 4.0),
+            size: dvec2(32.0, 32.0),
+        };
+        let container_rect = Rect {
+            pos: dvec2(0.0, 640.0),
+            size: dvec2(1280.0, 64.0),
+        };
+        let pass_size = dvec2(1280.0, 800.0);
+
+        let popup_pos = compute_translation_popup_abs_pos(button_rect, container_rect, pass_size);
+
+        assert!(popup_pos.y < button_rect.pos.y);
+        assert!(popup_pos.y < 0.0);
+    }
+
+    #[test]
+    fn translation_apply_keeps_session_open() {
+        let outcome = compute_translation_apply_outcome("Hola mundo");
+
+        assert_eq!(outcome.input_text, "Hola mundo");
+        assert_eq!(outcome.preserved_preview_text, "Hola mundo");
+        assert_eq!(outcome.next_last_source, "Hola mundo");
+        assert!(outcome.keep_preview_visible);
+    }
 }

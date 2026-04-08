@@ -205,7 +205,7 @@ fn registration_uiaa_error_message(error: &matrix_sdk::Error) -> String {
             Some(ErrorKind::WeakPassword) => {
                 return "That password is too weak. Please choose a stronger password.".to_owned();
             }
-            Some(ErrorKind::Forbidden { .. }) => {
+            Some(ErrorKind::Forbidden) => {
                 return "This homeserver does not allow open registration.".to_owned();
             }
             Some(ErrorKind::LimitExceeded { .. }) => {
@@ -525,7 +525,7 @@ pub type OnMediaFetchedFn = fn(
 #[derive(Debug)]
 pub enum UrlPreviewError {
     /// HTTP request failed.
-    Request(reqwest::Error),
+    Request(matrix_sdk::reqwest::Error),
     /// JSON parsing failed.
     Json(serde_json::Error),
     /// Client not available.
@@ -541,7 +541,7 @@ pub enum UrlPreviewError {
 impl std::fmt::Display for UrlPreviewError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UrlPreviewError::Request(e) => write!(f, "HTTP request failed: {}", e),
+            UrlPreviewError::Request(e) => write!(f, "HTTP request failed: {e}"),
             UrlPreviewError::Json(e) => write!(f, "JSON parsing failed: {}", e),
             UrlPreviewError::ClientNotAvailable => write!(f, "Matrix client not available"),
             UrlPreviewError::AccessTokenNotAvailable => write!(f, "Access token not available"),
@@ -916,6 +916,14 @@ pub enum MatrixRequest {
         message: RoomMessageEventContent,
         replied_to: Option<Reply>,
         target_user_id: Option<OwnedUserId>,
+        #[cfg(feature = "tsp")]
+        sign_with_tsp: bool,
+    },
+    /// Request to send a file attachment to the given room.
+    SendAttachment {
+        timeline_kind: TimelineKind,
+        file_data: crate::shared::file_upload_modal::FileData,
+        replied_to: Option<Reply>,
         #[cfg(feature = "tsp")]
         sign_with_tsp: bool,
     },
@@ -2749,6 +2757,94 @@ async fn matrix_worker_task(
                 });
             }
 
+            MatrixRequest::SendAttachment {
+                timeline_kind,
+                file_data,
+                replied_to,
+                #[cfg(feature = "tsp")]
+                sign_with_tsp: _sign_with_tsp,
+            } => {
+                let Some((timeline, sender)) = get_timeline_and_sender(&timeline_kind) else {
+                    log!("BUG: {timeline_kind} not found for send attachment request");
+                    continue;
+                };
+
+                // Spawn a new async task to send the attachment.
+                let _send_attachment_task = Handle::current().spawn(async move {
+                    use matrix_sdk::attachment::AttachmentConfig;
+                    use eyeball::SharedObservable;
+
+                    log!("Sending attachment to {timeline_kind}: {} ({} bytes)...",
+                        file_data.name, file_data.size);
+
+                    // For now, we'll just send the attachment without reply support
+                    // TODO: Add proper reply support for attachments
+                    let _ = replied_to; // Suppress unused warning for now
+
+                    // Parse MIME type
+                    let content_type: mime::Mime = file_data.mime_type.parse()
+                        .unwrap_or_else(|_| "application/octet-stream".parse().unwrap());
+
+                    // Create a progress observable to track upload progress
+                    let send_progress: SharedObservable<matrix_sdk::TransmissionProgress> = Default::default();
+                    let progress_subscriber = send_progress.subscribe();
+
+                    // Spawn a task to handle progress updates
+                    let sender_clone = sender.clone();
+                    Handle::current().spawn(async move {
+                        let mut subscriber = progress_subscriber;
+                        loop {
+                            let progress = subscriber.get();
+                            let current: u64 = progress.current as u64;
+                            let total: u64 = progress.total as u64;
+                            if sender_clone.send(TimelineUpdate::FileUploadUpdate {
+                                current,
+                                total,
+                            }).is_err() {
+                                break;
+                            }
+                            SignalToUI::set_ui_signal();
+                            // Wait for next update
+                            if subscriber.next().await.is_none() {
+                                break;
+                            }
+                        }
+                    });
+
+                    // Use the Room's send_attachment method directly
+                    let room = timeline.room();
+                    let config = AttachmentConfig::new();
+
+                    let send_future = room.send_attachment(
+                        &file_data.name,
+                        &content_type,
+                        file_data.data.clone(),
+                        config,
+                    ).with_send_progress_observable(send_progress);
+
+                    match send_future.await {
+                        Ok(_response) => {
+                            log!("Successfully sent attachment to {timeline_kind}.");
+                            let _ = sender.send(TimelineUpdate::FileUploadComplete);
+                        }
+                        Err(e) => {
+                            error!("Failed to send attachment to {timeline_kind}: {e:?}");
+                            let _ = sender.send(TimelineUpdate::FileUploadError {
+                                error: format!("{e}"),
+                                file_data: file_data.clone(),
+                            });
+                            enqueue_popup_notification(
+                                format!("Failed to upload file: {e}"),
+                                PopupKind::Error,
+                                None,
+                            );
+                        }
+                    }
+
+                    SignalToUI::set_ui_signal();
+                });
+            }
+
             MatrixRequest::ReadReceipt { timeline_kind, event_id, receipt_type } => {
                 let Some(timeline) = get_timeline(&timeline_kind) else {
                     log!("BUG: {timeline_kind} not found when sending read receipt, {event_id}");
@@ -2844,10 +2940,11 @@ async fn matrix_worker_task(
                 };
 
                 let _pin_task = Handle::current().spawn(async move {
+                    let room = timeline.room();
                     let result = if pin {
-                        timeline.pin_event(&event_id).await
+                        room.pin_event(&event_id).await
                     } else {
-                        timeline.unpin_event(&event_id).await
+                        room.unpin_event(&event_id).await
                     };
                     match sender.send(TimelineUpdate::PinResult { event_id, pin, result }) {
                         Ok(_) => SignalToUI::set_ui_signal(),
@@ -2889,46 +2986,34 @@ async fn matrix_worker_task(
                 let _fetch_url_preview_task = Handle::current().spawn(async move {
                     let result: Result<LinkPreviewData, UrlPreviewError> = async {
                         // log!("Getting Matrix client for URL preview: {}", url);
-                        let client = get_client().ok_or_else(|| {
-                            // error!("Matrix client not available for URL preview: {}", url);
-                            UrlPreviewError::ClientNotAvailable
-                        })?;
-                        
-                        let token = client.access_token().ok_or_else(|| {
-                            // error!("Access token not available for URL preview: {}", url);
-                            UrlPreviewError::AccessTokenNotAvailable
-                        })?;
+                        let client = get_client().ok_or(UrlPreviewError::ClientNotAvailable)?;
+
+                        let token = client.access_token().ok_or(UrlPreviewError::AccessTokenNotAvailable)?;
                         // Official Doc: https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediapreview_url
                         // Element desktop is using /_matrix/media/v3/preview_url
-                        let endpoint_url = client.homeserver().join("/_matrix/client/v1/media/preview_url")
+                        let mut endpoint_url = client.homeserver().join("/_matrix/client/v1/media/preview_url")
                             .map_err(UrlPreviewError::UrlParse)?;
+                        endpoint_url.query_pairs_mut().append_pair("url", url.as_str());
                         // log!("Fetching URL preview from endpoint: {} for URL: {}", endpoint_url, url);
-                        
+
                         let response = client
                             .http_client()
                             .get(endpoint_url.clone())
                             .bearer_auth(token)
-                            .query(&[("url", url.as_str())])
                             .header("Content-Type", "application/json")
                             .send()
                             .await
-                            .map_err(|e| {
-                                // error!("HTTP request failed for URL preview {}: {}", url, e);
-                                UrlPreviewError::Request(e)
-                            })?;
-                        
+                            .map_err(UrlPreviewError::Request)?;
+
                         let status = response.status();
                         // log!("URL preview response status for {}: {}", url, status);
-                        
+
                         if !status.is_success() && status.as_u16() != 429 {
                             // error!("URL preview request failed with status {} for URL: {}", status, url);
                             return Err(UrlPreviewError::HttpStatus(status.as_u16()));
                         }
-                        
-                        let text = response.text().await.map_err(|e| {
-                            // error!("Failed to read response text for URL preview {}: {}", url, e);
-                            UrlPreviewError::Request(e)
-                        })?;
+
+                        let text = response.text().await.map_err(UrlPreviewError::Request)?;
                         
                         // log!("URL preview response body length for {}: {} bytes", url, text.len());
                         // if text.len() > MAX_LOG_RESPONSE_BODY_LENGTH {
@@ -3301,6 +3386,19 @@ pub fn take_timeline_endpoints(kind: &TimelineKind) -> Option<TimelineEndpoints>
         request_sender,
         successor_room: details.timeline.room().successor_room(),
     })
+}
+
+/// Returns a clone of the timeline update sender for the given timeline.
+///
+/// This can be called multiple times, as it only clones the sender.
+pub fn get_timeline_update_sender(kind: &TimelineKind) -> Option<crossbeam_channel::Sender<TimelineUpdate>> {
+    let all_joined_rooms = ALL_JOINED_ROOMS.lock().unwrap();
+    let jrd = all_joined_rooms.get(kind.room_id())?;
+    let details = match kind {
+        TimelineKind::MainRoom { .. } => &jrd.main_timeline,
+        TimelineKind::Thread { thread_root_event_id, .. } => jrd.thread_timelines.get(thread_root_event_id)?,
+    };
+    Some(details.timeline_update_sender.clone())
 }
 
 const DEFAULT_HOMESERVER: &str = "matrix.org";
@@ -4574,7 +4672,7 @@ fn handle_load_app_state(user_id: OwnedUserId) {
                     && !app_state.saved_dock_state_home.dock_items.is_empty()
                 {
                     log!("Loaded room panel state from app data directory. Restoring now...");
-                    Cx::post_action(AppStateAction::RestoreAppStateFromPersistentState(app_state));
+                    Cx::post_action(AppStateAction::RestoreAppStateFromPersistentState(Box::new(app_state)));
                 }
             }
             Err(_e) => {
@@ -4620,7 +4718,8 @@ fn handle_session_changes(
     Handle::current().spawn(async move {
         loop {
             match receiver.recv().await {
-                Ok(SessionChange::UnknownToken { soft_logout }) => {
+                Ok(SessionChange::UnknownToken(data)) => {
+                    let soft_logout = data.soft_logout;
                     let msg = if soft_logout {
                         "Your login session has expired.\n\nPlease log in again."
                     } else {
@@ -5059,6 +5158,9 @@ async fn get_latest_event_details(
                 &sender_username,
             ).format_with(&sender_username, true);
             Some((*timestamp, latest_message_text))
+        }
+        LatestEventValue::RemoteInvite { timestamp, .. } => {
+            Some((*timestamp, String::from("You were invited to this room.")))
         }
     }    
 }

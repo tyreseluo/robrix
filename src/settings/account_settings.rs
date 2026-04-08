@@ -1,3 +1,4 @@
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::cell::RefCell;
 
 use makepad_widgets::{text::selection::Cursor, *};
@@ -5,7 +6,9 @@ use makepad_widgets::{text::selection::Cursor, *};
 use rfd::FileDialog;
 use matrix_sdk::ruma::OwnedUserId;
 
-use crate::{account_manager, app::{AppState, ConfirmDeleteAction}, avatar_cache::{self}, home::navigation_tab_bar::get_own_profile, i18n::{AppLanguage, tr_fmt, tr_key}, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction}, profile::{user_profile::UserProfile, user_profile_cache}, shared::{avatar::{AvatarState, AvatarWidgetExt}, confirmation_modal::ConfirmationModalContent, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{AccountDataAction, AccountSwitchAction, MatrixRequest, submit_async_request}, utils};
+use crate::{account_manager, app::AppState, avatar_cache::{self}, home::navigation_tab_bar::get_own_profile, i18n::{AppLanguage, tr_fmt, tr_key}, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction}, profile::{user_profile::UserProfile, user_profile_cache}, shared::{avatar::{AvatarState, AvatarWidgetExt}, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{AccountDataAction, AccountSwitchAction, MatrixRequest, submit_async_request}, utils};
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+use crate::{app::ConfirmDeleteAction, shared::confirmation_modal::ConfirmationModalContent};
 
 script_mod! {
     use mod.prelude.widgets.*
