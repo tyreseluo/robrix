@@ -250,6 +250,16 @@ Edit `~/.openclaw/openclaw.json`. Two complete configurations are provided below
 | TLS | None (`http`) | Yes (`https`) |
 | Registration | Register in Robrix connected to Palpo | Register via Element Web or Robrix |
 
+> **Switching from local Palpo to matrix.org:** This guide uses Palpo as the example, but the same configuration works on matrix.org or any standard Matrix server. You only need to change 3 things in `openclaw.json`:
+>
+> 1. `homeserver`: `http://127.0.0.1:8128` → `https://matrix.org`
+> 2. `userId`: `@username:127.0.0.1:8128` → `@username:matrix.org`
+> 3. Remove the entire `"network": { "dangerouslyAllowPrivateNetwork": true }` block (not needed for public servers)
+>
+> Everything else (LLM, encryption, autoJoin, etc.) **stays exactly the same**. After editing, run `openclaw gateway restart`.
+>
+> If you use another self-hosted Matrix server (e.g., Synapse, Dendrite), the same 3 changes apply -- just replace with your server's domain and protocol.
+
 ---
 
 ## 6. Starting and Verifying
@@ -307,6 +317,14 @@ matrix: device is verified by its owner and ready for encrypted rooms  ← Encry
 | Bot replies are empty or error | LLM API key invalid or insufficient balance | Check DeepSeek API key and account balance |
 | Robrix cannot find the bot | Bot account not registered | Confirm the bot account exists (verify in Element Web) |
 | Other OpenClaw issues | — | Consult [OpenClaw docs](https://docs.openclaw.ai/) and [GitHub Issues](https://github.com/openclaw/openclaw/issues) |
+
+> **Important note:** This guide only covers the configuration workflow we have tested and verified (OpenClaw v2026.4.7). OpenClaw is still under rapid development -- its CLI, plugin system, and gateway behavior may change in future versions. If you encounter OpenClaw issues not listed above (CLI errors, plugin loading failures, gateway behavior anomalies, etc.), these are OpenClaw-side issues. Please refer to:
+>
+> - [OpenClaw Official Documentation](https://docs.openclaw.ai/) -- latest configuration reference
+> - [OpenClaw Matrix Channel Plugin Docs](https://docs.openclaw.ai/channels/matrix) -- Matrix plugin specifics
+> - [OpenClaw GitHub Issues](https://github.com/openclaw/openclaw/issues) -- known issues and community discussions
+>
+> Robrix, as a standard Matrix client, communicates with OpenClaw through the Matrix protocol. The two are fully decoupled -- no special configuration is needed on the Robrix side.
 
 ---
 
