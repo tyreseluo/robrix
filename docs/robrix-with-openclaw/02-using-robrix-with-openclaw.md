@@ -43,7 +43,9 @@ Confirm the following:
 
 1. Select the bot to enter the conversation
 2. Type a message (e.g., "Hello"), press Enter
-3. Wait 1-3 seconds -- the bot should reply
+3. Wait for the bot to reply
+
+> **Tip:** LLM responses take time to generate, especially for longer answers (a few seconds to tens of seconds). Please be patient and avoid sending duplicate messages.
 
 <img src="../images/openclaw-bot-reply.png" width="600" alt="OpenClaw Bot (chalice) successfully replying">
 
@@ -83,9 +85,6 @@ In addition to DMs, you can invite the bot to group chat rooms.
 | OpenClaw Feature | Robrix Support | Notes |
 |------------------|---------------|-------|
 | **Text messages** | Fully supported | Standard Matrix messages, no compatibility issues |
-| **Streaming replies** | Partially supported | OpenClaw may send in segments; Robrix displays them incrementally |
-| **Voice bubbles** | Fallback display | OpenClaw v2026.4.5+ voice replies appear as attachments in Robrix |
-| **Exec Approval Prompts** | Fallback display | OpenClaw's execution approval prompts appear as plain text in Robrix |
 | **Multi-turn context** | Fully supported | OpenClaw automatically maintains conversation history |
 | **E2EE encryption** | Fully supported | Messages are encrypted end-to-end |
 

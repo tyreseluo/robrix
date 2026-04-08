@@ -142,7 +142,6 @@ The Robrix ecosystem offers two ways to integrate AI bots: OpenClaw's **client m
 | Basic conversation | Yes | Yes |
 | Multiple LLM providers | Yes (14+) | Yes |
 | E2EE encryption | Yes (Rust crypto SDK) | Not needed (AppService bypasses encryption) |
-| Dynamic child bots | No (one instance = one bot) | Yes (BotFather pattern) |
 | Server-side administration | Not needed | Requires admin access to register AppService |
 | Multi-channel (Telegram, Discord, etc.) | Yes | Matrix only |
 | Homeserver requirements | Any standard Matrix server | Must support Application Service API |

@@ -142,7 +142,6 @@ Robrix 生态中有两种接入 AI Bot 的方式：OpenClaw 使用的**客户端
 | 基本对话 | 支持 | 支持 |
 | 多模型切换 | 支持（14+ LLM provider） | 支持 |
 | E2EE 加密 | 支持（Rust crypto SDK） | 不需要（AppService 绕过加密） |
-| 动态创建子 Bot | 不支持（一个实例 = 一个 Bot） | 支持（BotFather 模式） |
 | 服务器端管理 | 不需要 | 需要管理员权限注册 AppService |
 | 多频道（Telegram、Discord 等） | 支持 | 仅 Matrix |
 | 对 homeserver 的要求 | 任何标准 Matrix 服务器 | 需要支持 AppService API |

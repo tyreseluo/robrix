@@ -34,13 +34,13 @@ This guide walks you through deploying OpenClaw with Matrix step by step: from c
 
 ## 1. Prerequisites
 
-| Requirement | Notes |
-|-------------|-------|
-| **Two Matrix accounts** | One for yourself, one for the OpenClaw bot |
-| **Node.js** | v22.16+ or v24+ (recommended) |
-| **LLM API Key** | e.g., [DeepSeek](https://platform.deepseek.com/) (free tier available), OpenAI, Anthropic, etc. |
-| **Matrix homeserver** | Local Palpo (recommended, see [Palpo Deployment Guide](../robrix-with-palpo-and-octos/01-deploying-palpo-and-octos.md)) or public server matrix.org |
-| **Robrix** | See [Getting Started with Robrix](../robrix/getting-started-with-robrix.md) |
+| Requirement                   | Notes                                                                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Two Matrix accounts** | One for yourself, one for the OpenClaw bot                                                                                                      |
+| **Node.js**             | v22.16+ or v24+ (recommended)                                                                                                                   |
+| **LLM API Key**         | e.g.,[DeepSeek](https://platform.deepseek.com/) (free tier available), OpenAI, Anthropic, etc.                                                     |
+| **Matrix homeserver**   | Local Palpo (recommended, see[Palpo Deployment Guide](../robrix-with-palpo-and-octos/01-deploying-palpo-and-octos.md)) or public server matrix.org |
+| **Robrix**              | See[Getting Started with Robrix](../robrix/getting-started-with-robrix.md)                                                                         |
 
 ---
 
@@ -61,13 +61,14 @@ See below for detailed steps.
 
 A bot account is just a **regular Matrix account**. OpenClaw logs in automatically using the username and password -- you do not need to manually obtain an Access Token.
 
-| Server | How to register | Notes |
-|--------|----------------|-------|
-| **Local Palpo** (recommended) | Register in Robrix | Connect to `http://127.0.0.1:8128` and register a new account |
-| **matrix.org** | Register in Robrix or [Element Web](https://app.element.io) | Public server, free, instant |
-| **Self-hosted Synapse** | Via Admin API or web registration | Recommended for production |
+| Server                        | How to register                                         | Notes                                                           |
+| ----------------------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
+| **Local Palpo**         | Register in Robrix                                      | Connect to `http://127.0.0.1:8128` and register a new account |
+| **matrix.org**          | Register in Robrix or[Element Web](https://app.element.io) | Public server, free, instant                                    |
+| **Self-hosted Synapse** | Via Admin API or web registration                       | Recommended for production                                      |
 
 When registering, remember:
+
 - **Username** (e.g., `chalice`)
 - **Password**
 
@@ -209,50 +210,50 @@ Edit `~/.openclaw/openclaw.json`. Two complete configurations are provided below
 
 #### `gateway` Configuration
 
-| Field | Value | Key Notes |
-|-------|-------|-----------|
+| Field    | Value       | Key Notes                                                                                                                                                                                                                                                                                    |
+| -------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mode` | `"local"` | **Required.** Without this field, gateway refuses to start with "missing gateway.mode" error. `"local"` means the OpenClaw gateway itself runs locally (listens on 127.0.0.1 only) -- this is unrelated to whether the LLM is remote. DeepSeek API calls still go over the internet. |
 
 #### `models.providers` Configuration
 
-| Field | Value | Key Notes |
-|-------|-------|-----------|
-| `baseUrl` | `"https://api.deepseek.com/v1"` | **Must include the `/v1` suffix.** DeepSeek uses an OpenAI-compatible API. |
-| `apiKey` | `"sk-xxx"` | **Write the key directly as plaintext.** Do not use `${ENV_VAR}` format -- macOS LaunchAgent services cannot read terminal environment variables. After writing, run `chmod 600 ~/.openclaw/openclaw.json` to protect file permissions. |
-| `api` | `"openai-completions"` | **Not `type`.** Many online tutorials incorrectly use `"type"` -- the correct field name is `"api"`. |
-| `contextWindow` | `164000` | **Must be set high.** OpenClaw's system prompt alone takes 16K+ tokens; the default 4096 will cause errors. DeepSeek Chat supports 164K. |
-| `maxTokens` | `8192` | Maximum tokens per reply. |
+| Field             | Value                             | Key Notes                                                                                                                                                                                                                                         |
+| ----------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`       | `"https://api.deepseek.com/v1"` | **Must include the `/v1` suffix.** DeepSeek uses an OpenAI-compatible API.                                                                                                                                                                |
+| `apiKey`        | `"sk-xxx"`                      | **Write the key directly as plaintext.** Do not use `${ENV_VAR}` format -- macOS LaunchAgent services cannot read terminal environment variables. After writing, run `chmod 600 ~/.openclaw/openclaw.json` to protect file permissions. |
+| `api`           | `"openai-completions"`          | **Not `type`.** Many online tutorials incorrectly use `"type"` -- the correct field name is `"api"`.                                                                                                                                  |
+| `contextWindow` | `164000`                        | **Must be set high.** OpenClaw's system prompt alone takes 16K+ tokens; the default 4096 will cause errors. DeepSeek Chat supports 164K.                                                                                                    |
+| `maxTokens`     | `8192`                          | Maximum tokens per reply.                                                                                                                                                                                                                         |
 
 > **Note on `providers` format:** `providers` is an object (provider name as key), not an array. `models` inside a provider IS an array.
 
 #### `channels.matrix` Configuration
 
-| Field | Value | Key Notes |
-|-------|-------|-----------|
-| `enabled` | `true` | Enable the Matrix channel. |
-| `homeserver` | `"http://127.0.0.1:8128"` | **Local Palpo must use `http`**, not `https` (Palpo has no TLS by default). matrix.org uses `https`. |
-| `network.dangerouslyAllowPrivateNetwork` | `true` | **Only needed for local/LAN deployments.** OpenClaw blocks private IPs (127.0.0.1, 10.x, 192.168.x) by default as an anti-SSRF security measure. Not needed when connecting to public servers like matrix.org. |
-| `userId` | `"@chalice:127.0.0.1:8128"` | **Must be the full Matrix ID format** `@username:server`. |
-| `password` | `"your-password"` | Password authentication -- OpenClaw logs in automatically and caches the token at `~/.openclaw/credentials/matrix/`. Access Token authentication is also supported (replace `password` with `accessToken`) -- see [OpenClaw Matrix Plugin Docs](https://docs.openclaw.ai/channels/matrix). |
-| `encryption` | `true` | **Strongly recommended.** Matrix DMs enable E2EE by default. Without this, the bot receives encrypted messages it cannot decrypt, resulting in "message sent but no reply". |
-| `autoJoin` | `"always"` | Accept all invites during testing. Change to `"allowlist"` in production. |
-| `dm.policy` | `"open"` | Allow all DMs during testing. Change to `"allowlist"` in production. |
+| Field                                      | Value                         | Key Notes                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                                | `true`                      | Enable the Matrix channel.                                                                                                                                                                                                                                                                    |
+| `homeserver`                             | `"http://127.0.0.1:8128"`   | **Local Palpo must use `http`**, not `https` (Palpo has no TLS by default). matrix.org uses `https`.                                                                                                                                                                              |
+| `network.dangerouslyAllowPrivateNetwork` | `true`                      | **Only needed for local/LAN deployments.** OpenClaw blocks private IPs (127.0.0.1, 10.x, 192.168.x) by default as an anti-SSRF security measure. Not needed when connecting to public servers like matrix.org.                                                                          |
+| `userId`                                 | `"@chalice:127.0.0.1:8128"` | **Must be the full Matrix ID format** `@username:server`.                                                                                                                                                                                                                             |
+| `password`                               | `"your-password"`           | Password authentication -- OpenClaw logs in automatically and caches the token at `~/.openclaw/credentials/matrix/`. Access Token authentication is also supported (replace `password` with `accessToken`) -- see [OpenClaw Matrix Plugin Docs](https://docs.openclaw.ai/channels/matrix). |
+| `encryption`                             | `true`                      | **Strongly recommended.** Matrix DMs enable E2EE by default. Without this, the bot receives encrypted messages it cannot decrypt, resulting in "message sent but no reply".                                                                                                             |
+| `autoJoin`                               | `"always"`                  | Accept all invites during testing. Change to `"allowlist"` in production.                                                                                                                                                                                                                   |
+| `dm.policy`                              | `"open"`                    | Allow all DMs during testing. Change to `"allowlist"` in production.                                                                                                                                                                                                                        |
 
 #### `plugins` Configuration
 
-| Field | Value | Key Notes |
-|-------|-------|-----------|
+| Field                              | Value    | Key Notes                            |
+| ---------------------------------- | -------- | ------------------------------------ |
 | `plugins.entries.matrix.enabled` | `true` | Ensure the Matrix plugin is enabled. |
 
 ### 5.4 Local Palpo vs Public matrix.org Differences
 
-| Setting | Local Palpo | Public matrix.org |
-|---------|------------|-------------------|
-| `homeserver` | `http://127.0.0.1:8128` | `https://matrix.org` |
-| `network.dangerouslyAllowPrivateNetwork` | **Required** `true` | **Not needed** (remove the entire `network` block) |
-| `userId` format | `@username:127.0.0.1:8128` | `@username:matrix.org` |
-| TLS | None (`http`) | Yes (`https`) |
-| Registration | Register in Robrix connected to Palpo | Register via Element Web or Robrix |
+| Setting                                    | Local Palpo                           | Public matrix.org                                          |
+| ------------------------------------------ | ------------------------------------- | ---------------------------------------------------------- |
+| `homeserver`                             | `http://127.0.0.1:8128`             | `https://matrix.org`                                     |
+| `network.dangerouslyAllowPrivateNetwork` | **Required** `true`           | **Not needed** (remove the entire `network` block) |
+| `userId` format                          | `@username:127.0.0.1:8128`          | `@username:matrix.org`                                   |
+| TLS                                        | None (`http`)                       | Yes (`https`)                                            |
+| Registration                               | Register in Robrix connected to Palpo | Register via Element Web or Robrix                         |
 
 > **Switching from local Palpo to matrix.org:** This guide uses Palpo as the example, but the same configuration works on matrix.org or any standard Matrix server. You only need to change 3 things in `openclaw.json`:
 >
@@ -290,12 +291,14 @@ matrix: logged in as @chalice:127.0.0.1:8128           ← Login successful
 matrix: device is verified by its owner and ready for encrypted rooms  ← Encryption ready
 ```
 
+> **Tip:** OpenClaw needs some time to complete the Matrix login and encryption device initialization after startup. If you only see `starting provider` but not `logged in` in the logs, wait a few seconds -- messages can only be received after login completes.
+
 ### 6.3 Test in Robrix
 
 1. **Launch Robrix** and log in with your **personal account**
 2. **Search for the bot**: Click the search icon, type the bot's Matrix ID (e.g., `@chalice:127.0.0.1:8128`), switch to the **People** tab (the bot is a regular user, so you must search under People)
 3. **Start a DM**: Select the bot to enter a conversation
-4. **Send a message** and wait for a reply
+4. **Send a message** and wait patiently for a reply (LLM responses take a few seconds to tens of seconds)
 
 <img src="../images/openclaw-bot-reply.png" width="600" alt="OpenClaw Bot (chalice) successfully replying in Robrix">
 
@@ -305,21 +308,21 @@ matrix: device is verified by its owner and ready for encrypted rooms  ← Encry
 
 ## 7. Troubleshooting
 
-| Symptom | Cause | Solution |
-|---------|-------|---------|
-| `channels add` wizard crashes with ENOENT | v2026.4.7 Telegram plugin path bug | Skip the wizard, edit `~/.openclaw/openclaw.json` directly |
-| Gateway refuses to start: "missing gateway.mode" | Config file missing `gateway` section | Add `"gateway": {"mode": "local"}` |
-| "Blocked hostname or private/internal/special-use IP address" | OpenClaw blocks private IPs by default | Add `"network": {"dangerouslyAllowPrivateNetwork": true}` |
-| Matrix connection fails, keeps retrying | `homeserver` uses `https` but local Palpo has no TLS | Change to `http://127.0.0.1:8128` |
-| "Invalid input: expected record, received array" | `providers` format is wrong | `providers` must be an object (key-value), not an array |
-| "Unrecognized key: type" | Wrong field name | Use `"api"` instead of `"type"` |
-| "missing env var DEEPSEEK_API_KEY" | Environment variable not visible to LaunchAgent | Write API key directly in the config file |
-| Message sent but bot does not reply (no error) | DM is encrypted but OpenClaw has encryption disabled | Add `"encryption": true` |
-| "encrypted event received without encryption enabled" | Same as above | Add `"encryption": true` |
-| "This message was sent before this device logged in" | Historical messages cannot be decrypted | Normal behavior. Send a **new message** |
-| Bot replies are empty or error | LLM API key invalid or insufficient balance | Check DeepSeek API key and account balance |
-| Robrix cannot find the bot | Bot account not registered | Confirm the bot account exists (verify in Element Web) |
-| Other OpenClaw issues | — | Consult [OpenClaw docs](https://docs.openclaw.ai/) and [GitHub Issues](https://github.com/openclaw/openclaw/issues) |
+| Symptom                                                       | Cause                                                    | Solution                                                                                                     |
+| ------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `channels add` wizard crashes with ENOENT                   | v2026.4.7 Telegram plugin path bug                       | Skip the wizard, edit `~/.openclaw/openclaw.json` directly                                                 |
+| Gateway refuses to start: "missing gateway.mode"              | Config file missing `gateway` section                  | Add `"gateway": {"mode": "local"}`                                                                         |
+| "Blocked hostname or private/internal/special-use IP address" | OpenClaw blocks private IPs by default                   | Add `"network": {"dangerouslyAllowPrivateNetwork": true}`                                                  |
+| Matrix connection fails, keeps retrying                       | `homeserver` uses `https` but local Palpo has no TLS | Change to `http://127.0.0.1:8128`                                                                          |
+| "Invalid input: expected record, received array"              | `providers` format is wrong                            | `providers` must be an object (key-value), not an array                                                    |
+| "Unrecognized key: type"                                      | Wrong field name                                         | Use `"api"` instead of `"type"`                                                                          |
+| "missing env var DEEPSEEK_API_KEY"                            | Environment variable not visible to LaunchAgent          | Write API key directly in the config file                                                                    |
+| Message sent but bot does not reply (no error)                | DM is encrypted but OpenClaw has encryption disabled     | Add `"encryption": true`                                                                                   |
+| "encrypted event received without encryption enabled"         | Same as above                                            | Add `"encryption": true`                                                                                   |
+| "This message was sent before this device logged in"          | Historical messages cannot be decrypted                  | Normal behavior. Send a**new message**                                                                 |
+| Bot replies are empty or error                                | LLM API key invalid or insufficient balance              | Check DeepSeek API key and account balance                                                                   |
+| Robrix cannot find the bot                                    | Bot account not registered                               | Confirm the bot account exists (verify in Element Web)                                                       |
+| Other OpenClaw issues                                         | —                                                       | Consult[OpenClaw docs](https://docs.openclaw.ai/) and [GitHub Issues](https://github.com/openclaw/openclaw/issues) |
 
 > **Important note:** This guide only covers the configuration workflow we have tested and verified (OpenClaw v2026.4.7). OpenClaw is still under rapid development -- its CLI, plugin system, and gateway behavior may change in future versions. If you encounter OpenClaw issues not listed above (CLI errors, plugin loading failures, gateway behavior anomalies, etc.), these are OpenClaw-side issues. Please refer to:
 >
@@ -354,12 +357,12 @@ After testing, tighten permissions. Modify these fields in `channels.matrix`:
 }
 ```
 
-| Field | Testing | Production | Purpose |
-|-------|---------|------------|---------|
-| `autoJoin` | `"always"` | `"allowlist"` | Only join allowlisted rooms |
-| `dm.policy` | `"open"` | `"allowlist"` | Only accept DMs from allowlisted users |
-| `groupPolicy` | — | `"allowlist"` | Restrict who can trigger the bot in groups |
-| `requireMention` | — | `true` | In group chats, require @mention to respond |
+| Field              | Testing      | Production      | Purpose                                     |
+| ------------------ | ------------ | --------------- | ------------------------------------------- |
+| `autoJoin`       | `"always"` | `"allowlist"` | Only join allowlisted rooms                 |
+| `dm.policy`      | `"open"`   | `"allowlist"` | Only accept DMs from allowlisted users      |
+| `groupPolicy`    | —           | `"allowlist"` | Restrict who can trigger the bot in groups  |
+| `requireMention` | —           | `true`        | In group chats, require @mention to respond |
 
 ---
 
