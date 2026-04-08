@@ -169,7 +169,7 @@ where
 
 fn any_timeline_indices_visible<I, F>(
     indices: I,
-    mut is_visible: F,
+    is_visible: F,
 ) -> bool
 where
     I: IntoIterator<Item = Option<usize>>,
