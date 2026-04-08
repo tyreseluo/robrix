@@ -195,7 +195,6 @@ When `"encryption": true` is configured:
 ### Important Notes
 
 - **Historical messages cannot be decrypted** -- Messages sent before OpenClaw's device was created did not have their Megolm session keys distributed to OpenClaw. They can never be decrypted.
-- **Palpo cross-signing bug** -- `keys/signatures/upload` may return "unknown db error", but this does not affect basic encryption functionality.
 - **vs Octos** -- Octos, as an AppService, receives **server-side decrypted plaintext events**. It does not need to handle E2EE at all. OpenClaw, as a client, must handle encryption itself.
 
 ---

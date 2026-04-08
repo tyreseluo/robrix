@@ -313,7 +313,6 @@ matrix: device is verified by its owner and ready for encrypted rooms  ← Encry
 | Message sent but bot does not reply (no error) | DM is encrypted but OpenClaw has encryption disabled | Add `"encryption": true` |
 | "encrypted event received without encryption enabled" | Same as above | Add `"encryption": true` |
 | "This message was sent before this device logged in" | Historical messages cannot be decrypted | Normal behavior. Send a **new message** |
-| Cross-signing bootstrap reports "unknown db error" | Palpo's `keys/signatures/upload` API bug | Does not affect basic encryption, can be ignored |
 | Bot replies are empty or error | LLM API key invalid or insufficient balance | Check DeepSeek API key and account balance |
 | Robrix cannot find the bot | Bot account not registered | Confirm the bot account exists (verify in Element Web) |
 | Other OpenClaw issues | — | Consult [OpenClaw docs](https://docs.openclaw.ai/) and [GitHub Issues](https://github.com/openclaw/openclaw/issues) |
