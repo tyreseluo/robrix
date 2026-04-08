@@ -47,6 +47,7 @@ script_mod! {
         ..mod.widgets.SolidView
 
         width: Fill, height: Fill,
+        flow: Overlay
         align: Align{x: 0.5, y: 0.5}
         show_bg: true,
         draw_bg +: {
@@ -322,32 +323,6 @@ script_mod! {
                     }
                 }
 
-                proxy_settings_button_anchor := View {
-                    width: Fill, height: Fill
-                    flow: Down
-                    align: Align{x: 0.0, y: 0.0}
-
-                    View {
-                        width: Fill, height: Fit
-                        flow: Right
-                        padding: Inset{top: 10, right: 10}
-
-                        View {
-                            width: Fill, height: Fit
-                        }
-
-                        proxy_settings_button := RobrixNeutralIconButton {
-                            width: Fit, height: Fit
-                            spacing: 0
-                            padding: 8
-                            text: ""
-                            label_walk: Walk{width: 0, height: 0, margin: 0}
-                            icon_walk: Walk{width: 14, height: 14, margin: 0}
-                            draw_icon.svg: (ICON_SETTINGS)
-                        }
-                    }
-                }
-
                 // The modal that pops up to display login status messages,
                 // such as when the user is logging in or when there is an error.
                 login_status_modal := Modal {
@@ -571,6 +546,33 @@ script_mod! {
                             }
                         }
                     }
+                }
+            }
+
+        }
+
+        proxy_settings_button_anchor := View {
+            width: Fill, height: Fill
+            flow: Down
+            align: Align{x: 0.0, y: 0.0}
+
+            View {
+                width: Fill, height: Fit
+                flow: Right
+                padding: Inset{top: 10, right: 10}
+
+                View {
+                    width: Fill, height: Fit
+                }
+
+                proxy_settings_button := RobrixNeutralIconButton {
+                    width: Fit, height: Fit
+                    spacing: 0
+                    padding: 8
+                    text: ""
+                    label_walk: Walk{width: 0, height: 0, margin: 0}
+                    icon_walk: Walk{width: 14, height: 14, margin: 0}
+                    draw_icon.svg: (ICON_SETTINGS)
                 }
             }
         }
