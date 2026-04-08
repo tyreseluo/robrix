@@ -152,8 +152,8 @@ These are generally sorted in order of priority. If you're interested in helping
 - [x] Cache fetched media on a per-room basis 
 - [x] Fetch and display user profile avatars
 - [x] Backwards pagination to view a room's older history
-- [x] Dynamic backwards pagination based on scroll position/movement: https://github.com/Project-Robius-China/robrix2/issues/109
-- [x] Loading animation while waiting for pagination request: https://github.com/Project-Robius-China/robrix2/issues/109
+- [x] Dynamic backwards pagination based on scroll position/movement: https://github.com/project-robius/robrix/issues/109
+- [x] Loading animation while waiting for pagination request: https://github.com/project-robius/robrix/issues/109
 - [x] Stable vertical position of events during timeline update
 - [x] Display simple plaintext messages
 - [x] Display image messages (PNG, JPEG)
@@ -161,33 +161,33 @@ These are generally sorted in order of priority. If you're interested in helping
 - [x] Display reactions (annotations)
 - [x] Handle opening links on click
 - [x] Linkify plaintext hyperlinks
-- [x] Show reply previews above messages: https://github.com/Project-Robius-China/robrix2/issues/82
+- [x] Show reply previews above messages: https://github.com/project-robius/robrix/issues/82
 - [x] Send standalone messages
-- [x] Interactive reaction button, send reactions: https://github.com/Project-Robius-China/robrix2/issues/115
-- [x] Show reply button, send reply: https://github.com/Project-Robius-China/robrix2/issues/83
+- [x] Interactive reaction button, send reactions: https://github.com/project-robius/robrix/issues/115
+- [x] Show reply button, send reply: https://github.com/project-robius/robrix/issues/83
 - [x] Edit existing messages
-- [x] E2EE device verification, decrypt message content: https://github.com/Project-Robius-China/robrix2/issues/116
-- [ ] Re-spawn timeline as focused on an old event after a full timeline clear: https://github.com/Project-Robius-China/robrix2/issues/103
+- [x] E2EE device verification, decrypt message content: https://github.com/project-robius/robrix/issues/116
+- [ ] Re-spawn timeline as focused on an old event after a full timeline clear: https://github.com/project-robius/robrix/issues/103
 
 
 
 ### Auxiliary features, login, registration, settings
-- [x] Persistence of app session to disk: https://github.com/Project-Robius-China/robrix2/issues/112
-- [x] Username/password login screen: https://github.com/Project-Robius-China/robrix2/issues/113
-- [x] SSO, other 3rd-party auth providers login screen: https://github.com/Project-Robius-China/robrix2/issues/114
-- [x] Client logout, with server-side logout and app state reset: https://github.com/Project-Robius-China/robrix2/pull/432
+- [x] Persistence of app session to disk: https://github.com/project-robius/robrix/issues/112
+- [x] Username/password login screen: https://github.com/project-robius/robrix/issues/113
+- [x] SSO, other 3rd-party auth providers login screen: https://github.com/project-robius/robrix/issues/114
+- [x] Client logout, with server-side logout and app state reset: https://github.com/project-robius/robrix/pull/432
 - [x] Side panel showing detailed user profile info (click on their Avatar)
 - [x] Ignore and unignore users (see known issues)
-- [x] Display read receipts besides messages: https://github.com/Project-Robius-China/robrix2/pull/162
-- [x] Mention users within a room (or the whole `@room`): https://github.com/Project-Robius-China/robrix2/issues/452
-- [x] Dedicated view of direct messages (DMs): https://github.com/Project-Robius-China/robrix2/issues/139
-- [x] Keyword filters for the list of all rooms: https://github.com/Project-Robius-China/robrix2/issues/123
-- [ ] Collapsible/expandable view of contiguous "small" events: https://github.com/Project-Robius-China/robrix2/issues/118
-- [ ] Display multimedia (audio/video/gif) message events: https://github.com/Project-Robius-China/robrix2/issues/120
+- [x] Display read receipts besides messages: https://github.com/project-robius/robrix/pull/162
+- [x] Mention users within a room (or the whole `@room`): https://github.com/project-robius/robrix/issues/452
+- [x] Dedicated view of direct messages (DMs): https://github.com/project-robius/robrix/issues/139
+- [x] Keyword filters for the list of all rooms: https://github.com/project-robius/robrix/issues/123
+- [ ] Collapsible/expandable view of contiguous "small" events: https://github.com/project-robius/robrix/issues/118
+- [ ] Display multimedia (audio/video/gif) message events: https://github.com/project-robius/robrix/issues/120
 - [x] User settings screen
-- [x] Dedicated view of spaces: https://github.com/Project-Robius-China/robrix2/pull/636
-- [x] Link previews beneath messages: https://github.com/Project-Robius-China/robrix2/issues/81, https://github.com/Project-Robius-China/robrix2/pull/585
-- [ ] Search messages within a room: https://github.com/Project-Robius-China/robrix2/issues/122
+- [x] Dedicated view of spaces: https://github.com/project-robius/robrix/pull/636
+- [x] Link previews beneath messages: https://github.com/project-robius/robrix/issues/81, https://github.com/project-robius/robrix/pull/585
+- [ ] Search messages within a room: https://github.com/project-robius/robrix/issues/122
 - [ ] Room browser, search for public rooms
 - [x] Accept/reject room invites
 - [x] Join room by accepting invite
@@ -197,13 +197,13 @@ These are generally sorted in order of priority. If you're interested in helping
 - [ ] Room settings/info screen
 - [ ] Room members pane
 - [ ] Administrative abilities: ban, kick, etc
-- [x] Offline mode with persistent event cache: https://github.com/Project-Robius-China/robrix2/pull/445
+- [x] Offline mode with persistent event cache: https://github.com/project-robius/robrix/pull/445
 
 
 ## Packaging Robrix for Distribution on Desktop Platforms
 
 > [!TIP]
-> We already have [pre-built releases of Robrix](https://github.com/Project-Robius-China/robrix2/releases) available for download.
+> We already have [pre-built releases of Robrix](https://github.com/project-robius/robrix/releases) available for download.
 
 
 1. Install `cargo-packager`:
