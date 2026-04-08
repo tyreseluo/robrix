@@ -256,19 +256,16 @@ script_mod! {
                             text: "Contribute to Robrix on GitHub: https://github.com/Project-Robius-China/robrix2"
                         }
 
-                        contribute_repo_link := Html {
-                            width: Fit
-                            height: Fit
-                            flow: Flow.Right{wrap: true}
+                        contribute_repo_link := LinkLabel {
+                            width: Fit, height: Fit,
+                            flow: Flow.Right{wrap: true},
                             margin: Inset{left: 5, right: 8, top: 0, bottom: 4}
-                            padding: 0
-                            font_size: 10.5
-                            font_color: #x2A6FDB
                             draw_text +: {
-                                color: #x2A6FDB
                                 text_style: REGULAR_TEXT { font_size: 10.5 }
+                                color: #x0000EE,
+                                color_hover: (COLOR_LINK_HOVER),
                             }
-                            body: "<a href=\"https://github.com/Project-Robius-China/robrix2\"><u>https://github.com/Project-Robius-China/robrix2</u></a>"
+                            text: "https://github.com/Project-Robius-China/robrix2"
                         }
 
                         about_title := TitleLabel {
@@ -581,6 +578,11 @@ impl SettingsScreen {
         self.view
             .label(cx, ids!(contribute_description))
             .set_text(cx, tr_key(self.app_language, "settings.contribute.description"));
+        let contribute_repo_link = self.view.link_label(cx, ids!(contribute_repo_link));
+        contribute_repo_link.set_text(cx, CONTRIBUTE_REPO_URL);
+        if let Some(mut contribute_repo_link) = contribute_repo_link.borrow_mut() {
+            contribute_repo_link.url = CONTRIBUTE_REPO_URL.to_string();
+        }
         self.view
             .label(cx, ids!(about_title))
             .set_text(cx, tr_key(self.app_language, "settings.about.title"));

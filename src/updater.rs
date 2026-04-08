@@ -16,8 +16,29 @@ pub enum UpdateCheckOutcome {
 const DEFAULT_UPDATER_ENDPOINT: &str = "https://github.com/Project-Robius-China/robrix2/releases/latest/download/latest.json";
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-fn check_latest_version_without_signature(endpoint: &str) -> Result<Option<String>, String> {
+fn parse_latest_version_payload(payload_text: &str) -> Result<Option<String>, String> {
     use serde_json::Value;
+    let payload: Value = serde_json::from_str(payload_text)
+        .map_err(|error| format!("Failed to parse updater metadata JSON: {error}"))?;
+    let latest_version = payload
+        .get("version")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    Ok(latest_version)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn endpoint_with_current_tag(endpoint: &str, current_version: &str) -> Option<String> {
+    endpoint
+        .strip_suffix("/releases/latest/download/latest.json")
+        .map(|base| format!("{base}/releases/download/v{current_version}/latest.json"))
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn check_latest_version_without_signature(endpoint: &str, current_version: &str) -> Result<Option<String>, String> {
+    use matrix_sdk::reqwest::StatusCode;
     use tokio::runtime::Runtime;
 
     let runtime = Runtime::new().map_err(|error| format!("Failed to create async runtime: {error}"))?;
@@ -25,22 +46,31 @@ fn check_latest_version_without_signature(endpoint: &str) -> Result<Option<Strin
         let response = matrix_sdk::reqwest::get(endpoint)
             .await
             .map_err(|error| format!("Failed to fetch updater metadata: {error}"))?;
-        if !response.status().is_success() {
-            return Err(format!("Updater metadata request failed with status {}", response.status()));
+        if response.status().is_success() {
+            let payload_text = response
+                .text()
+                .await
+                .map_err(|error| format!("Failed to read updater metadata body: {error}"))?;
+            return parse_latest_version_payload(&payload_text);
         }
-        let payload_text = response
-            .text()
-            .await
-            .map_err(|error| format!("Failed to read updater metadata body: {error}"))?;
-        let payload: Value = serde_json::from_str(&payload_text)
-            .map_err(|error| format!("Failed to parse updater metadata JSON: {error}"))?;
-        let latest_version = payload
-            .get("version")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned);
-        Ok(latest_version)
+
+        if response.status() == StatusCode::NOT_FOUND && current_version.contains('-') {
+            if let Some(fallback_endpoint) = endpoint_with_current_tag(endpoint, current_version) {
+                let fallback_response = matrix_sdk::reqwest::get(&fallback_endpoint)
+                    .await
+                    .map_err(|error| format!("Failed to fetch updater metadata: {error}"))?;
+                if fallback_response.status().is_success() {
+                    let payload_text = fallback_response
+                        .text()
+                        .await
+                        .map_err(|error| format!("Failed to read updater metadata body: {error}"))?;
+                    return parse_latest_version_payload(&payload_text);
+                }
+                return Err(format!("Updater metadata request failed with status {}", fallback_response.status()));
+            }
+        }
+
+        Err(format!("Updater metadata request failed with status {}", response.status()))
     })
 }
 
@@ -110,7 +140,7 @@ pub fn check_for_updates() -> UpdateCheckOutcome {
             Err(error) => UpdateCheckOutcome::Error(error.to_string()),
         }
     } else {
-        match check_latest_version_without_signature(&endpoint) {
+        match check_latest_version_without_signature(&endpoint, &current_version) {
             Ok(Some(latest_version)) => {
                 let latest_semver = match Version::parse(&latest_version) {
                     Ok(version) => version,
