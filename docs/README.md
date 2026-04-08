@@ -35,6 +35,23 @@ For users who want to deploy a complete AI chat system — running your own Matr
 
 ---
 
+## Robrix + OpenClaw (AI Agent Framework)
+
+For users who want to connect OpenClaw AI agents to Matrix, then use Robrix to chat with them:
+
+| Guide | Goal |
+|-------|------|
+| [1. Deploying OpenClaw with Matrix](robrix-with-openclaw/01-deploying-openclaw-with-matrix.md) | **Get OpenClaw connected to a Matrix homeserver.** Create a bot account, configure the Matrix channel plugin, and verify the connection so Robrix can chat with OpenClaw agents. |
+| [2. Using Robrix with OpenClaw](robrix-with-openclaw/02-using-robrix-with-openclaw.md) | **Use Robrix to chat with OpenClaw agents.** Start conversations via DM or rooms, understand feature compatibility, and learn the differences from the Octos workflow. |
+| [3. How Robrix and OpenClaw Work Together](robrix-with-openclaw/03-how-robrix-and-openclaw-work-together.md) | **Understand the client-based integration model.** Learn how OpenClaw connects to Matrix as a regular client (vs. Octos's Appservice model), how messages flow, and how E2EE works. |
+
+> Chinese:
+> [1. 部署 OpenClaw + Matrix](robrix-with-openclaw/01-deploying-openclaw-with-matrix-zh.md) ·
+> [2. 在 Robrix 上使用 OpenClaw](robrix-with-openclaw/02-using-robrix-with-openclaw-zh.md) ·
+> [3. Robrix 与 OpenClaw 协作原理](robrix-with-openclaw/03-how-robrix-and-openclaw-work-together-zh.md)
+
+---
+
 ## Palpo and Octos Deployment Files
 
 The [`palpo-and-octos-deploy/`](../palpo-and-octos-deploy/) directory (at the repository root) contains the runnable deployment files for Palpo and Octos, including Docker Compose and configuration templates:
