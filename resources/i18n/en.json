@@ -6,7 +6,7 @@
   "settings.category.contribute": "Contribute & About",
   "settings.category.about": "About",
   "settings.contribute.title": "Contribute",
-  "settings.contribute.description": "Contribute to Robrix on GitHub: https://github.com/Project-Robius-China/robrix2",
+  "settings.contribute.description": "Contribute to Robrix on GitHub:",
   "settings.about.title": "About Robrix",
   "settings.about.description": "Robrix is a multi-platform Matrix chat client built with Makepad and Robius.",
   "settings.update.current_version": "Current version: {version}",

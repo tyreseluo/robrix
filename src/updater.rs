@@ -21,15 +21,17 @@ fn check_latest_version_without_signature(endpoint: &str) -> Result<Option<Strin
 
     let runtime = Runtime::new().map_err(|error| format!("Failed to create async runtime: {error}"))?;
     runtime.block_on(async move {
-        let response = reqwest::get(endpoint)
+        let response = matrix_sdk::reqwest::get(endpoint)
             .await
             .map_err(|error| format!("Failed to fetch updater metadata: {error}"))?;
         if !response.status().is_success() {
             return Err(format!("Updater metadata request failed with status {}", response.status()));
         }
-        let payload: Value = response
-            .json()
+        let payload_text = response
+            .text()
             .await
+            .map_err(|error| format!("Failed to read updater metadata body: {error}"))?;
+        let payload: Value = serde_json::from_str(&payload_text)
             .map_err(|error| format!("Failed to parse updater metadata JSON: {error}"))?;
         let latest_version = payload
             .get("version")

@@ -3,6 +3,8 @@ use makepad_widgets::*;
 
 use crate::{app::{AppState, BotSettingsState}, home::navigation_tab_bar::{NavigationBarAction, get_own_profile}, i18n::{AppLanguage, I18nKey, language_dropdown_labels, tr, tr_fmt, tr_key}, persistence, profile::user_profile::UserProfile, settings::{account_settings::AccountSettingsWidgetExt, bot_settings::BotSettingsWidgetExt, translation_settings::TranslationSettingsWidgetExt}, shared::{expand_arrow::ExpandArrow, popup_list::{PopupKind, enqueue_popup_notification}, styles::{apply_neutral_button_style, apply_primary_button_style}}, sliding_sync::current_user_id, updater::{UpdateCheckOutcome, check_for_updates}};
 
+const CONTRIBUTE_REPO_URL: &str = "https://github.com/Project-Robius-China/robrix2";
+
 script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
@@ -254,6 +256,21 @@ script_mod! {
                             text: "Contribute to Robrix on GitHub: https://github.com/Project-Robius-China/robrix2"
                         }
 
+                        contribute_repo_link := Html {
+                            width: Fit
+                            height: Fit
+                            flow: Flow.Right{wrap: true}
+                            margin: Inset{left: 5, right: 8, top: 0, bottom: 4}
+                            padding: 0
+                            font_size: 10.5
+                            font_color: #x2A6FDB
+                            draw_text +: {
+                                color: #x2A6FDB
+                                text_style: REGULAR_TEXT { font_size: 10.5 }
+                            }
+                            body: "<a href=\"https://github.com/Project-Robius-China/robrix2\"><u>https://github.com/Project-Robius-China/robrix2</u></a>"
+                        }
+
                         about_title := TitleLabel {
                             text: "About Robrix"
                         }
@@ -447,6 +464,18 @@ impl Widget for SettingsScreen {
             }
 
             for action in actions {
+                if let HtmlLinkAction::Clicked { url, .. } = action.as_widget_action().cast() {
+                    if url == CONTRIBUTE_REPO_URL {
+                        if let Err(e) = robius_open::Uri::new(&url).open() {
+                            error!("Failed to open URL {:?}. Error: {:?}", url, e);
+                            enqueue_popup_notification(
+                                tr_fmt(self.app_language, "room_screen.popup.open_url_failed", &[("url", url.as_str())]),
+                                PopupKind::Error,
+                                Some(10.0),
+                            );
+                        }
+                    }
+                }
                 match action.downcast_ref() {
                     Some(SettingsUpdateAction::CheckFinished(result)) => {
                         self.set_update_checking(cx, false);
