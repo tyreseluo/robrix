@@ -207,7 +207,7 @@ Edit `~/.openclaw/openclaw.json`. Two complete configurations are provided below
 
 | Field | Value | Key Notes |
 |-------|-------|-----------|
-| `mode` | `"local"` | **Required.** Without this field, gateway refuses to start with "missing gateway.mode" error. |
+| `mode` | `"local"` | **Required.** Without this field, gateway refuses to start with "missing gateway.mode" error. `"local"` means the OpenClaw gateway itself runs locally (listens on 127.0.0.1 only) -- this is unrelated to whether the LLM is remote. DeepSeek API calls still go over the internet. |
 
 #### `models.providers` Configuration
 
@@ -289,7 +289,7 @@ matrix: device is verified by its owner and ready for encrypted rooms  ← Encry
 ### 6.3 Test in Robrix
 
 1. **Launch Robrix** and log in with your **personal account**
-2. **Search for the bot**: Click the search icon, type the bot's Matrix ID (e.g., `@chalice:127.0.0.1:8128`), switch to the **People** tab
+2. **Search for the bot**: Click the search icon, type the bot's Matrix ID (e.g., `@chalice:127.0.0.1:8128`), switch to the **People** tab (the bot is a regular user, so you must search under People)
 3. **Start a DM**: Select the bot to enter a conversation
 4. **Send a message** and wait for a reply
 

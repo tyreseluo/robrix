@@ -35,9 +35,9 @@ Confirm the following:
 1. Open Robrix and log in with your **personal account**
 2. Click the **search icon** at the top
 3. Type the bot's full Matrix ID, e.g., `@chalice:127.0.0.1:8128`
-4. Switch to the **People** tab
+4. Switch to the **People** tab (the bot is a regular user, so you must search under People)
 
-<!-- Screenshot: Searching for the bot in Robrix -->
+<img src="../images/openclaw-search-bot.png" width="400" alt="Searching for OpenClaw bot in Robrix">
 
 ### 2.2 Send the First Message
 

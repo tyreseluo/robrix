@@ -35,9 +35,9 @@
 1. 打开 Robrix，用你的**个人账号**登录
 2. 点击顶部的**搜索图标**
 3. 输入 Bot 的完整 Matrix ID，例如 `@chalice:127.0.0.1:8128`
-4. 切换到 **People** 标签页
+4. 切换到 **People** 标签页（Bot 是普通用户身份，必须在 People 中搜索）
 
-<!-- 截图：在 Robrix 中搜索 Bot -->
+<img src="../images/openclaw-search-bot.png" width="400" alt="在 Robrix 中搜索 OpenClaw Bot">
 
 ### 2.2 发送第一条消息
 
