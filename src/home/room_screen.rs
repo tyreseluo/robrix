@@ -1,7 +1,7 @@
 //! The `RoomScreen` widget is the UI view that displays a single room or thread's timeline
 //! of events (messages，state changes, etc.), along with an input bar at the bottom.
 
-use std::{borrow::Cow, cell::RefCell, ops::{DerefMut, Range}, sync::Arc, time::Duration};
+use std::{borrow::Cow, cell::{Cell, RefCell}, ops::{DerefMut, Range}, sync::Arc, time::Duration};
 
 use bytesize::ByteSize;
 use hashbrown::{HashMap, HashSet};
@@ -67,6 +67,18 @@ const TRANSLATION_LANG_POPUP_SCROLL_HEIGHT: f64 = 288.0;
 const TRANSLATION_LANG_POPUP_HEIGHT: f64 = TRANSLATION_LANG_POPUP_SCROLL_HEIGHT + 8.0;
 const TRANSLATION_LANG_POPUP_GAP: f64 = 6.0;
 const TRANSLATION_LANG_POPUP_MARGIN: f64 = 8.0;
+
+thread_local! {
+    static ROOM_INFO_ACTION_MODAL_OPEN: Cell<bool> = const { Cell::new(false) };
+}
+
+fn set_room_info_action_modal_open(open: bool) {
+    ROOM_INFO_ACTION_MODAL_OPEN.with(|state| state.set(open));
+}
+
+fn is_room_info_action_modal_open() -> bool {
+    ROOM_INFO_ACTION_MODAL_OPEN.with(|state| state.get())
+}
 
 
 /// #FFF4E5
@@ -2437,7 +2449,7 @@ impl Widget for RoomInfoSlidingPane {
         }
 
         let area = self.view.area();
-        let close_pane = if is_invite_modal_open() {
+        let close_pane = if is_invite_modal_open() || is_room_info_action_modal_open() {
             matches!(
                 event,
                 Event::Actions(actions) if self.button(cx, ids!(close_button)).clicked(actions)
@@ -2856,8 +2868,14 @@ impl Widget for RoomScreen {
         let portal_list = self.portal_list(cx, ids!(timeline.list));
         let user_profile_sliding_pane = self.user_profile_sliding_pane(cx, ids!(user_profile_sliding_pane));
         let threads_sliding_pane = self.threads_sliding_pane(cx, ids!(threads_sliding_pane));
+        let threads_sliding_pane_widget_uid = threads_sliding_pane.widget_uid();
         let room_info_sliding_pane = self.room_info_sliding_pane(cx, ids!(room_info_sliding_pane));
+        let room_info_sliding_pane_widget_uid = room_info_sliding_pane.widget_uid();
         let loading_pane = self.loading_pane(cx, ids!(loading_pane));
+        set_room_info_action_modal_open(
+            self.view.modal(cx, ids!(report_room_modal)).is_open()
+                || self.view.modal(cx, ids!(leave_room_confirm_modal)).is_open()
+        );
 
         // Streaming animation frame handler
         if let Some(_ne) = self.streaming_next_frame.is_event(event) {
@@ -3069,6 +3087,23 @@ impl Widget for RoomScreen {
             self.handle_message_actions(cx, actions, &portal_list, &loading_pane);
 
             for action in actions {
+                if let Some(RoomsListAction::Selected(selected_room)) = action.downcast_ref() {
+                    if self.timeline_kind.as_ref() != selected_room.timeline_kind().as_ref() {
+                        self.close_report_room_modal(cx);
+                        self.close_leave_room_confirm_modal(cx);
+                    }
+                }
+                if let Some(AppStateAction::RoomFocused(selected_room)) = action.downcast_ref() {
+                    if self.timeline_kind.as_ref() != selected_room.timeline_kind().as_ref() {
+                        self.close_report_room_modal(cx);
+                        self.close_leave_room_confirm_modal(cx);
+                    }
+                }
+                if let Some(AppStateAction::FocusNone) = action.downcast_ref() {
+                    self.close_report_room_modal(cx);
+                    self.close_leave_room_confirm_modal(cx);
+                }
+
                 // Handle actions related to restoring the previously-saved state of rooms.
                 if let Some(AppStateAction::RoomLoadedSuccessfully { room_name_id, ..}) = action.downcast_ref() {
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_name_id.room_id()) {
@@ -3148,7 +3183,11 @@ impl Widget for RoomScreen {
                     }
                 }
 
-                match action.as_widget_action().cast_ref() {
+                match action
+                    .as_widget_action()
+                    .widget_uid_eq(threads_sliding_pane_widget_uid)
+                    .cast_ref()
+                {
                     ThreadsPaneAction::OpenThread(thread_root_event_id) => {
                         let Some(room_name_id) = self.room_name_id.as_ref().cloned() else { continue };
                         threads_sliding_pane.hide(cx);
@@ -3166,7 +3205,11 @@ impl Widget for RoomScreen {
                     ThreadsPaneAction::None => {}
                 }
 
-                match action.as_widget_action().cast_ref() {
+                match action
+                    .as_widget_action()
+                    .widget_uid_eq(room_info_sliding_pane_widget_uid)
+                    .cast_ref()
+                {
                     RoomInfoPaneAction::InviteUser => {
                         if let Some(room_name_id) = self.room_name_id.as_ref().cloned() {
                             cx.action(InviteModalAction::Open(room_name_id));
@@ -3334,9 +3377,15 @@ impl Widget for RoomScreen {
         // We check which overlay views are visible in the order of those views' z-ordering,
         // such that the top-most views get a chance to handle the event first.
         //
+        let room_info_action_modal_open =
+            self.view.modal(cx, ids!(report_room_modal)).is_open()
+            || self.view.modal(cx, ids!(leave_room_confirm_modal)).is_open();
         let is_interactive_hit = utils::is_interactive_hit_event(event);
         let is_pane_shown: bool;
-        if loading_pane.is_currently_shown(cx) {
+        if room_info_action_modal_open {
+            is_pane_shown = true;
+        }
+        else if loading_pane.is_currently_shown(cx) {
             is_pane_shown = true;
             if is_interactive_hit {
                 loading_pane.handle_event(cx, event, scope);
@@ -3369,7 +3418,7 @@ impl Widget for RoomScreen {
         //       Makepad already delivers most events to all views regardless of visibility,
         //       so the only thing we'd need here is the conditional below.
 
-        if !is_pane_shown || !is_interactive_hit {
+        if room_info_action_modal_open || !is_pane_shown || !is_interactive_hit {
             // Create a Scope with RoomScreenProps containing the room members.
             // This scope is needed by child widgets like MentionableTextInput during event handling.
             let room_props = if let Some(tl) = self.tl_state.as_ref() {
