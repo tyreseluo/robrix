@@ -189,21 +189,23 @@ script_mod! {
         View {
             width: Fill, height: Fit
             flow: Down,
-            spacing: 8,
+            spacing: 10,
             margin: Inset{left: 5, right: 5, bottom: 10}
 
             // Account entries will be shown here
             // Active account (current)
             active_account_view := RoundedView {
                 width: Fill, height: Fit
-                flow: Right,
+                flow: Down,
                 align: Align{y: 0.5}
-                padding: Inset{left: 10, right: 10, top: 8, bottom: 8}
-                spacing: 10
+                padding: Inset{left: 12, right: 12, top: 10, bottom: 10}
+                spacing: 6
                 show_bg: true
                 draw_bg +: {
-                    color: (COLOR_ACTIVE_PRIMARY)
-                    border_radius: 4.0
+                    color: #xEEF6FF
+                    border_radius: 8.0
+                    border_size: 1.0
+                    border_color: #xC7DFFF
                 }
 
                 View {
@@ -214,8 +216,8 @@ script_mod! {
                     active_account_label := Label {
                         width: Fill, height: Fit
                         draw_text +: {
-                            color: (COLOR_TEXT),
-                            text_style: MESSAGE_TEXT_STYLE { font_size: 11 },
+                            color: #x24324D,
+                            text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 },
                         }
                         text: "@user:server"
                     }
@@ -223,8 +225,8 @@ script_mod! {
                     active_account_status_label := Label {
                         width: Fit, height: Fit
                         draw_text +: {
-                            color: (COLOR_FG_ACCEPT_GREEN),
-                            text_style: MESSAGE_TEXT_STYLE { font_size: 9 },
+                            color: (COLOR_ACTIVE_PRIMARY_DARKER),
+                            text_style: MESSAGE_TEXT_STYLE { font_size: 9.0 },
                         }
                         text: "Active"
                     }
@@ -237,8 +239,8 @@ script_mod! {
                 margin: Inset{top: 5, left: 2}
                 visible: false
                 draw_text +: {
-                    color: (MESSAGE_TEXT_COLOR),
-                    text_style: MESSAGE_TEXT_STYLE { font_size: 10 },
+                    color: #x5B6D8A,
+                    text_style: MESSAGE_TEXT_STYLE { font_size: 9.5 },
                 }
                 text: "Other accounts:"
             }
@@ -246,49 +248,56 @@ script_mod! {
             // Container for other account entries (simplified: show one other account)
             other_account_entry := RoundedView {
                 width: Fill, height: Fit
-                flow: Right,
+                flow: Down,
                 align: Align{y: 0.5}
-                padding: Inset{left: 10, right: 10, top: 8, bottom: 8}
-                spacing: 10
+                padding: Inset{left: 12, right: 12, top: 10, bottom: 10}
+                spacing: 8
                 visible: false
                 show_bg: true
                 draw_bg +: {
-                    color: (COLOR_SECONDARY)
-                    border_radius: 4.0
+                    color: #xF8FAFE
+                    border_radius: 8.0
                     border_size: 1.0
-                    border_color: #555
+                    border_color: #xD9E4F3
                 }
 
                 View {
                     width: Fill, height: Fit
-                    flow: Down,
-                    spacing: 2
+                    flow: Right,
+                    align: Align{y: 0.5}
+                    spacing: 8
 
                     other_account_label := Label {
                         width: Fill, height: Fit
                         draw_text +: {
-                            color: (COLOR_TEXT),
-                            text_style: MESSAGE_TEXT_STYLE { font_size: 11 },
+                            color: #x24324D,
+                            text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 },
                         }
                         text: "@other:server"
                     }
                 }
 
-                switch_account_button := RobrixIconButton {
-                    width: Fit, height: Fit
-                    padding: Inset{top: 6, bottom: 6, left: 10, right: 10}
-                    draw_icon.svg: (ICON_JUMP)
-                    icon_walk: Walk{width: 14, height: 14}
-                    text: "Switch"
+                View {
+                    width: Fill, height: Fit
+                    flow: Right
+                    align: Align{x: 1.0, y: 0.5}
+
+                    switch_account_button := RobrixNeutralIconButton {
+                        width: Fit, height: Fit
+                        padding: Inset{top: 7, bottom: 7, left: 10, right: 10}
+                        draw_icon.svg: (ICON_JUMP)
+                        icon_walk: Walk{width: 14, height: 14}
+                        text: "Switch"
+                    }
                 }
             }
 
             account_count_label := Label {
                 width: Fill, height: Fit
-                margin: Inset{top: 5, bottom: 5, left: 5}
+                margin: Inset{top: 2, bottom: 4, left: 2}
                 draw_text +: {
-                    color: (MESSAGE_TEXT_COLOR),
-                    text_style: MESSAGE_TEXT_STYLE { font_size: 10 },
+                    color: #x5B6D8A,
+                    text_style: MESSAGE_TEXT_STYLE { font_size: 9.5 },
                 }
                 text: "1 account logged in"
             }

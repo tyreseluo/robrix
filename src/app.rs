@@ -793,6 +793,9 @@ impl MatchEvent for App {
             if let Some(LoginAction::AddAccountSuccess) = action.downcast_ref() {
                 log!("Received LoginAction::AddAccountSuccess, hiding login view.");
                 self.app_state.adding_account = false;
+                self.ui
+                    .modal(cx, ids!(login_screen_view.login_screen.login_status_modal))
+                    .close(cx);
                 self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, false);
                 self.ui.redraw(cx);
                 continue;
@@ -802,6 +805,9 @@ impl MatchEvent for App {
             if let Some(LoginAction::CancelAddAccount) = action.downcast_ref() {
                 log!("Received LoginAction::CancelAddAccount, hiding login view.");
                 self.app_state.adding_account = false;
+                self.ui
+                    .modal(cx, ids!(login_screen_view.login_screen.login_status_modal))
+                    .close(cx);
                 self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, false);
                 self.ui.redraw(cx);
                 continue;
@@ -848,7 +854,7 @@ impl MatchEvent for App {
             // by `handle_session_changes`), navigate back to the login screen.
             // When not yet logged in, the login_screen widget handles displaying the failure modal.
             if let Some(LoginAction::LoginFailure(_)) = action.downcast_ref() {
-                if self.app_state.logged_in {
+                if self.app_state.logged_in && !self.app_state.adding_account {
                     log!("Received LoginAction::LoginFailure while logged in; showing login screen.");
                     self.app_state.logged_in = false;
                     self.update_login_visibility(cx);
