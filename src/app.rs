@@ -1803,7 +1803,7 @@ impl App {
                 true,
             );
         } else {
-            self.set_room_filter_modal_empty_state(cx, "", false);
+            self.set_room_filter_modal_empty_state(cx, "", true);
         }
 
         self.refresh_room_filter_modal_result_buttons(cx);
