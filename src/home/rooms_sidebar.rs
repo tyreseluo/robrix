@@ -216,6 +216,17 @@ script_mod! {
                         }
                     }
 
+                    remote_search_hint := Label {
+                        visible: false
+                        width: Fill,
+                        height: Fit,
+                        text: ""
+                        draw_text +: {
+                            color: (COLOR_TEXT_INPUT_IDLE)
+                            text_style: REGULAR_TEXT {font_size: 9.5}
+                        }
+                    }
+
                     remote_search_options := View {
                         visible: false
                         width: Fill
@@ -497,6 +508,8 @@ impl RoomsSideBar {
     }
 
     fn sync_mobile_remote_option_labels(&self, cx: &mut Cx) {
+        self.view.label(cx, ids!(mobile_inline_search_panel.remote_search_hint))
+            .set_text(cx, tr_key(self.app_language, "app.room_filter.remote.hint"));
         let options_view = self.view.view(cx, ids!(mobile_inline_search_panel.remote_search_options));
         options_view.button(cx, ids!(mobile_remote_search_people_button))
             .set_text(cx, tr_key(self.app_language, "app.room_filter.remote.people"));
@@ -555,6 +568,8 @@ impl RoomsSideBar {
         if !text.is_empty() {
             empty_label.set_text(cx, text);
         }
+        self.view.label(cx, ids!(mobile_inline_search_panel.remote_search_hint))
+            .set_visible(cx, show_remote_options);
         self.view.view(cx, ids!(mobile_inline_search_panel.remote_search_options))
             .set_visible(cx, show_remote_options);
         self.view.view(cx, ids!(mobile_inline_search_panel.search_results_list))
