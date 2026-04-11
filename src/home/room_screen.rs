@@ -67,6 +67,55 @@ const TRANSLATION_LANG_POPUP_SCROLL_HEIGHT: f64 = 288.0;
 const TRANSLATION_LANG_POPUP_HEIGHT: f64 = TRANSLATION_LANG_POPUP_SCROLL_HEIGHT + 8.0;
 const TRANSLATION_LANG_POPUP_GAP: f64 = 6.0;
 const TRANSLATION_LANG_POPUP_MARGIN: f64 = 8.0;
+const MESSAGE_PROFILE_TOP_MARGIN: f64 = 4.5;
+const MESSAGE_PROFILE_AVATAR_SIZE: f64 = 48.0;
+const MESSAGE_USERNAME_ROW_HEIGHT: f64 = 18.0;
+const MESSAGE_USERNAME_ROW_BOTTOM_MARGIN: f64 = 9.0;
+const MESSAGE_USERNAME_RIGHT_MARGIN: f64 = 4.0;
+const BOT_BADGE_HEIGHT: f64 = 16.0;
+const BOT_BADGE_HORIZONTAL_PADDING: f64 = 6.0;
+const BOT_BADGE_BORDER_RADIUS: f64 = 3.0;
+const BOT_BADGE_TEXT_FONT_SIZE: f64 = 8.5;
+const BOT_BADGE_TEXT_TOP_DROP: f64 = -0.08;
+
+const fn centered_top_margin(outer_top_margin: f64, outer_height: f64, inner_height: f64) -> f64 {
+    outer_top_margin + ((outer_height - inner_height) * 0.5)
+}
+
+#[cfg(test)]
+const fn center_y(top_margin: f64, height: f64) -> f64 {
+    top_margin + (height * 0.5)
+}
+
+const MESSAGE_USERNAME_ROW_TOP_MARGIN: f64 = centered_top_margin(
+    MESSAGE_PROFILE_TOP_MARGIN,
+    MESSAGE_PROFILE_AVATAR_SIZE,
+    MESSAGE_USERNAME_ROW_HEIGHT,
+);
+
+#[cfg(test)]
+fn message_profile_avatar_center_y() -> f64 {
+    center_y(MESSAGE_PROFILE_TOP_MARGIN, MESSAGE_PROFILE_AVATAR_SIZE)
+}
+
+#[cfg(test)]
+fn message_username_row_center_y() -> f64 {
+    center_y(MESSAGE_USERNAME_ROW_TOP_MARGIN, MESSAGE_USERNAME_ROW_HEIGHT)
+}
+
+#[cfg(test)]
+fn bot_badge_center_y_within_username_row() -> f64 {
+    let bot_badge_top_margin = MESSAGE_USERNAME_ROW_TOP_MARGIN
+        + ((MESSAGE_USERNAME_ROW_HEIGHT - BOT_BADGE_HEIGHT) * 0.5);
+    center_y(bot_badge_top_margin, BOT_BADGE_HEIGHT)
+}
+
+#[cfg(test)]
+fn bot_badge_label_center_y() -> f64 {
+    let bot_badge_label_top_margin = (BOT_BADGE_HEIGHT - BOT_BADGE_TEXT_FONT_SIZE) * 0.5
+        + (BOT_BADGE_TEXT_FONT_SIZE * BOT_BADGE_TEXT_TOP_DROP);
+    center_y(bot_badge_label_top_margin, BOT_BADGE_TEXT_FONT_SIZE)
+}
 
 thread_local! {
     static ROOM_INFO_ACTION_MODAL_OPEN: Cell<bool> = const { Cell::new(false) };
@@ -643,11 +692,11 @@ script_mod! {
                 align: Align{x: 0.5, y: 0.0} // centered horizontally, top aligned
                 width: 65.0,
                 height: Fit,
-                margin: Inset{top: 4.5, right: 10}
+                margin: Inset{top: #(MESSAGE_PROFILE_TOP_MARGIN), right: 10}
                 flow: Down,
                 avatar := Avatar {
-                    width: 48,
-                    height: 48,
+                    width: #(MESSAGE_PROFILE_AVATAR_SIZE),
+                    height: #(MESSAGE_PROFILE_AVATAR_SIZE),
                 }
                 timestamp := Timestamp {
                     margin: Inset{ top: 5.9 }
@@ -664,13 +713,18 @@ script_mod! {
 
                 username_view := View {
                     flow: Right,
-                    width: Fill,
-                    height: Fit,
+                    align: Align{y: 0.5},
+                    width: Fit,
+                    height: #(MESSAGE_USERNAME_ROW_HEIGHT),
+                    margin: Inset{
+                        top: #(MESSAGE_USERNAME_ROW_TOP_MARGIN),
+                        bottom: #(MESSAGE_USERNAME_ROW_BOTTOM_MARGIN),
+                    }
                     username := Label {
-                        width: Fill,
+                        width: Fit,
                         flow: Right, // do not wrap
                         padding: 0,
-                        margin: Inset{bottom: 9.0, top: 20.0, right: 10.0,}
+                        margin: Inset{right: #(MESSAGE_USERNAME_RIGHT_MARGIN)}
                         max_lines: 1
                         text_overflow: Ellipsis
                         draw_text +: {
@@ -678,6 +732,32 @@ script_mod! {
                             color: (USERNAME_TEXT_COLOR)
                         }
                         text: ""
+                    }
+                    bot_badge := RoundedView {
+                        visible: false
+                        width: Fit
+                        height: #(BOT_BADGE_HEIGHT)
+                        align: Align{x: 0.5, y: 0.5}
+                        new_batch: true
+                        padding: Inset{left: #(BOT_BADGE_HORIZONTAL_PADDING), right: #(BOT_BADGE_HORIZONTAL_PADDING)}
+                        show_bg: true
+                        draw_bg +: {
+                            color: (COLOR_ACTIVE_PRIMARY)
+                            border_radius: #(BOT_BADGE_BORDER_RADIUS)
+                        }
+                        bot_badge_label := Label {
+                            width: Fit
+                            height: Fit
+                            padding: 0
+                            draw_text +: {
+                                text_style: REGULAR_TEXT {
+                                    font_size: #(BOT_BADGE_TEXT_FONT_SIZE)
+                                    top_drop: #(BOT_BADGE_TEXT_TOP_DROP)
+                                }
+                                color: #fff
+                            }
+                            text: "bot"
+                        }
                     }
                 }
 
@@ -7379,6 +7459,10 @@ fn populate_message_view(
             }
             username_label.set_text(cx, &username);
             new_drawn_status.profile_drawn = profile_drawn;
+
+            // Show/hide the bot badge based on sender's user ID
+            let sender_is_bot = is_likely_bot_user_id(event_tl_item.sender(), None);
+            item.view(cx, ids!(content.username_view.bot_badge)).set_visible(cx, sender_is_bot);
         }
         else {
             // Server notices are drawn with a red color avatar background and username.
@@ -7390,6 +7474,7 @@ fn populate_message_view(
                     color: (mod.widgets.COLOR_FG_DANGER_RED)
                 }
             });
+            item.view(cx, ids!(content.username_view.bot_badge)).set_visible(cx, false);
             new_drawn_status.profile_drawn = true;
         }
     }
@@ -9103,5 +9188,26 @@ mod tests {
             popup_pos.x + TRANSLATION_LANG_POPUP_WIDTH,
             container_rect.size.x - TRANSLATION_LANG_POPUP_MARGIN
         );
+    }
+
+    #[test]
+    fn center_username_row_aligns_with_avatar_center() {
+        assert_eq!(
+            message_profile_avatar_center_y(),
+            message_username_row_center_y(),
+        );
+    }
+
+    #[test]
+    fn center_bot_badge_aligns_with_username_row_center() {
+        assert_eq!(
+            message_username_row_center_y(),
+            bot_badge_center_y_within_username_row(),
+        );
+    }
+
+    #[test]
+    fn bot_badge_text_is_centered_within_badge() {
+        assert!(bot_badge_label_center_y() < (BOT_BADGE_HEIGHT * 0.5));
     }
 }
