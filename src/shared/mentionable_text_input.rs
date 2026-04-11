@@ -94,7 +94,9 @@
 //! - [`MentionSearchState`]: State machine enum managing search lifecycle
 //! - [`MentionableTextInputAction`]: Actions for external communication (power levels, member updates)
 //!
+use crate::app::AppState;
 use crate::avatar_cache::*;
+use crate::i18n::{AppLanguage, tr_key};
 use crate::shared::avatar::AvatarWidgetRefExt;
 use crate::shared::bouncing_dots::BouncingDotsWidgetRefExt;
 use crate::shared::styles::COLOR_UNKNOWN_ROOM_AVATAR;
@@ -173,6 +175,75 @@ enum PopupStatusItemKind {
 
 fn popup_status_item_is_selectable(_kind: PopupStatusItemKind) -> bool {
     false
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum PopupMode {
+    #[default]
+    None,
+    Mention,
+    SlashCommand,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SlashCommand {
+    command: &'static str,
+    description_key: &'static str,
+}
+
+const MENTION_POPUP_HEADER_TEXT: &str = "Users in this Room";
+const SLASH_COMMANDS: &[SlashCommand] = &[
+    SlashCommand {
+        command: "/createbot",
+        description_key: "slash_command.createbot.description",
+    },
+    SlashCommand {
+        command: "/deletebot",
+        description_key: "slash_command.deletebot.description",
+    },
+    SlashCommand {
+        command: "/listbots",
+        description_key: "slash_command.listbots.description",
+    },
+    SlashCommand {
+        command: "/bothelp",
+        description_key: "slash_command.bothelp.description",
+    },
+];
+
+fn bot_command_popup_enabled(app_service_enabled: bool, _app_service_room_bound: bool) -> bool {
+    app_service_enabled
+}
+
+fn find_slash_command_trigger_position(text: &str, cursor_pos: usize) -> Option<usize> {
+    if cursor_pos == 0 || cursor_pos > text.len() {
+        return None;
+    }
+
+    let current_segment = text.get(..cursor_pos)?;
+    let line_start = current_segment.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    let line = text.get(line_start..cursor_pos)?;
+
+    if !line.starts_with('/') || line[1..].chars().any(char::is_whitespace) {
+        return None;
+    }
+
+    Some(line_start)
+}
+
+fn matching_slash_commands(search_text: &str) -> Vec<SlashCommand> {
+    let query = search_text.trim().trim_start_matches('/').to_ascii_lowercase();
+    SLASH_COMMANDS
+        .iter()
+        .copied()
+        .filter(|command| {
+            command
+                .command
+                .trim_start_matches('/')
+                .to_ascii_lowercase()
+                .starts_with(&query)
+        })
+        .collect()
 }
 
 fn member_list_ready_for_mentions(member_count: usize, sync_pending: bool) -> bool {
@@ -329,6 +400,62 @@ script_mod! {
                 text_style: REGULAR_TEXT {font_size: 10.0}
             }
             text: "@room"
+        }
+    }
+
+    mod.widgets.SlashCommandListItem = View {
+        width: Fill
+        height: Fit
+        margin: Inset{left: 4 right: 4}
+        padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+        cursor: MouseCursor.Hand
+        show_bg: true
+        draw_bg +: {
+            color: (COLOR_PRIMARY)
+            border_radius: 4.0
+            selected: instance(0.0)
+
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y self.border_radius)
+                let highlight = #x1E90FF30
+                sdf.fill(Pal.premul(self.color.mix(highlight self.selected)))
+                return sdf.result
+            }
+        }
+
+        animator: Animator {
+            highlight: {
+                default: @off
+                off: AnimatorState {
+                    from: { all: Forward { duration: 0.12 } }
+                    apply: { draw_bg: { selected: 0.0 } }
+                }
+                on: AnimatorState {
+                    from: { all: Forward { duration: 0.08 } }
+                    apply: { draw_bg: { selected: 1.0 } }
+                }
+            }
+        }
+
+        flow: Down
+        spacing: 2.0
+
+        command_name := Label {
+            height: Fit
+            draw_text +: {
+                color: (COLOR_ACTIVE_PRIMARY)
+                text_style: BOLD_TEXT {font_size: 11.0}
+            }
+        }
+
+        description := Label {
+            width: Fill
+            height: Fit
+            draw_text +: {
+                color: #666
+                text_style: REGULAR_TEXT {font_size: 10.0}
+            }
         }
     }
 
@@ -494,6 +621,9 @@ pub struct MentionableTextInput {
     /// Template for the @room mention list item
     #[live]
     room_mention_list_item: Option<LivePtr>,
+    /// Template for slash command list items
+    #[live]
+    slash_command_list_item: Option<LivePtr>,
     /// Template for loading indicator
     #[live]
     loading_indicator: Option<LivePtr>,
@@ -546,6 +676,9 @@ pub struct MentionableTextInput {
     /// Whether focus should be restored in the next draw_walk cycle
     #[rust]
     pending_draw_focus_restore: bool,
+    /// Which kind of popup content is currently active.
+    #[rust]
+    active_popup_mode: PopupMode,
 }
 
 impl Widget for MentionableTextInput {
@@ -567,6 +700,17 @@ impl Widget for MentionableTextInput {
 
                     self.redraw(cx);
                     return; // Don't process other events
+                }
+            }
+        }
+
+        if self.is_slash_command_popup_active() {
+            if let Event::KeyDown(key_event) = event {
+                if key_event.key_code == KeyCode::Escape {
+                    self.close_mention_popup(cx);
+                    self.pending_draw_focus_restore = true;
+                    self.redraw(cx);
+                    return;
                 }
             }
         }
@@ -633,7 +777,7 @@ impl Widget for MentionableTextInput {
 
             // Handle item selection from mention popup
             if let Some(selected) = self.cmd_text_input.item_selected(actions) {
-                self.on_user_selected(cx, scope, selected);
+                self.on_popup_item_selected(cx, scope, selected);
             }
 
             // Handle build items request
@@ -796,6 +940,8 @@ impl Widget for MentionableTextInput {
                 self.pending_popup_cleanup = true;
                 // Guarantee cleanup executes even if search completes and stops requesting frames
                 cx.new_next_frame();
+            } else if !has_focus && self.is_slash_command_popup_active() {
+                self.close_mention_popup(cx);
             }
         }
 
@@ -830,6 +976,32 @@ impl Widget for MentionableTextInput {
 }
 
 impl MentionableTextInput {
+    fn current_app_language(scope: &mut Scope) -> AppLanguage {
+        scope
+            .data
+            .get::<AppState>()
+            .map(|app_state| app_state.app_language)
+            .unwrap_or_default()
+    }
+
+    fn set_popup_header_text(&mut self, cx: &mut Cx, text: &str) {
+        self.cmd_text_input
+            .view(cx, ids!(popup.header_view))
+            .set_visible(cx, true);
+        self.cmd_text_input
+            .label(cx, ids!(popup.header_view.header_label))
+            .set_text(cx, text);
+    }
+
+    fn set_popup_header_for_mentions(&mut self, cx: &mut Cx) {
+        self.set_popup_header_text(cx, MENTION_POPUP_HEADER_TEXT);
+    }
+
+    fn set_popup_header_for_slash_commands(&mut self, cx: &mut Cx, scope: &mut Scope) {
+        let app_language = Self::current_app_language(scope);
+        self.set_popup_header_text(cx, tr_key(app_language, "slash_command.header"));
+    }
+
     fn active_search_text(&self) -> Option<String> {
         match &self.search_state {
             MentionSearchState::WaitingForMembers {
@@ -899,6 +1071,10 @@ impl MentionableTextInput {
             self.search_state,
             MentionSearchState::WaitingForMembers { .. } | MentionSearchState::Searching { .. }
         )
+    }
+
+    fn is_slash_command_popup_active(&self) -> bool {
+        self.active_popup_mode == PopupMode::SlashCommand
     }
 
     /// Generate the next unique identifier for a background search job.
@@ -1101,6 +1277,86 @@ impl MentionableTextInput {
         items_added
     }
 
+    fn add_slash_command_items(
+        &mut self,
+        cx: &mut Cx,
+        app_language: AppLanguage,
+        commands: &[SlashCommand],
+    ) -> usize {
+        let Some(item_ptr) = self.slash_command_list_item else {
+            return 0;
+        };
+
+        let mut items_added = 0;
+        for command in commands {
+            let item = crate::widget_ref_from_live_ptr(cx, Some(item_ptr));
+            item.label(cx, ids!(command_name))
+                .set_text(cx, command.command);
+            item.label(cx, ids!(description))
+                .set_text(cx, tr_key(app_language, command.description_key));
+            self.cmd_text_input.add_item(cx, item);
+            items_added += 1;
+        }
+
+        items_added
+    }
+
+    fn update_slash_command_list(&mut self, cx: &mut Cx, scope: &mut Scope, search_text: &str) {
+        let room_props = scope
+            .props
+            .get::<RoomScreenProps>()
+            .expect("RoomScreenProps should be available in scope for MentionableTextInput");
+
+        if !bot_command_popup_enabled(
+            room_props.app_service_enabled,
+            room_props.app_service_room_bound,
+        ) {
+            if self.is_slash_command_popup_active() {
+                self.close_mention_popup(cx);
+            }
+            return;
+        }
+
+        self.cancel_active_search();
+        self.search_state = MentionSearchState::Idle;
+        self.last_search_text = None;
+        self.loading_indicator_ref = None;
+        self.active_popup_mode = PopupMode::SlashCommand;
+
+        self.cmd_text_input.clear_items(cx);
+        self.cmd_text_input.reset_list_scroll(cx);
+        self.set_popup_header_for_slash_commands(cx, scope);
+
+        let commands = matching_slash_commands(search_text);
+        if commands.is_empty() {
+            self.close_mention_popup(cx);
+            return;
+        }
+
+        let app_language = Self::current_app_language(scope);
+        let items_added = self.add_slash_command_items(cx, app_language, &commands);
+
+        const SLASH_COMMAND_ITEM_HEIGHT: f64 = 48.0;
+        const LIST_PADDING: f64 = 4.0;
+        let max_scroll_height = if cx.display_context.is_desktop() {
+            DESKTOP_MAX_SCROLL_HEIGHT
+        } else {
+            MOBILE_MAX_SCROLL_HEIGHT
+        };
+        let content_height = (items_added as f64 * SLASH_COMMAND_ITEM_HEIGHT) + LIST_PADDING;
+        self.set_list_scroll_height(cx, content_height.min(max_scroll_height));
+
+        let popup = self.cmd_text_input.view(cx, ids!(popup));
+        popup.set_visible(cx, items_added > 0);
+
+        let text_input_area = self.cmd_text_input.text_input_ref().area();
+        if cx.has_key_focus(text_input_area) {
+            self.cmd_text_input.text_input_ref().set_key_focus(cx);
+        }
+
+        self.redraw(cx);
+    }
+
     /// Update popup visibility and layout based on current state
     fn update_popup_visibility(&mut self, cx: &mut Cx, scope: &mut Scope, has_items: bool) {
         let popup = self.cmd_text_input.view(cx, ids!(popup));
@@ -1245,6 +1501,49 @@ impl MentionableTextInput {
         self.pending_draw_focus_restore = true;
     }
 
+    fn on_slash_command_selected(&mut self, cx: &mut Cx, selected: WidgetRef) {
+        let command = selected.label(cx, ids!(command_name)).text();
+        if command.is_empty() {
+            return;
+        }
+
+        let text_input_ref = self.cmd_text_input.text_input_ref();
+        let current_text = text_input_ref.text();
+        let head = text_input_ref.borrow().map_or(0, |p| p.cursor().index);
+
+        if let Some(start_idx) = find_slash_command_trigger_position(&current_text, head) {
+            let command_to_insert = format!("{command} ");
+            let new_text = utils::safe_replace_by_byte_indices(
+                &current_text,
+                start_idx,
+                head,
+                &command_to_insert,
+            );
+
+            self.cmd_text_input.set_text(cx, &new_text);
+            let new_pos = start_idx + command_to_insert.len();
+            text_input_ref.set_cursor(
+                cx,
+                Cursor {
+                    index: new_pos,
+                    prefer_next_row: false,
+                },
+                false,
+            );
+        }
+
+        self.close_mention_popup(cx);
+        self.pending_draw_focus_restore = true;
+    }
+
+    fn on_popup_item_selected(&mut self, cx: &mut Cx, scope: &mut Scope, selected: WidgetRef) {
+        match self.active_popup_mode {
+            PopupMode::Mention => self.on_user_selected(cx, scope, selected),
+            PopupMode::SlashCommand => self.on_slash_command_selected(cx, selected),
+            PopupMode::None => {}
+        }
+    }
+
     /// Core text change handler that manages mention context
     fn handle_text_change(&mut self, cx: &mut Cx, scope: &mut Scope, text: String) {
         // If search was just cancelled, clear the flag and don't re-trigger search
@@ -1258,7 +1557,7 @@ impl MentionableTextInput {
         if trimmed_text.is_empty() {
             self.possible_mentions.clear();
             self.possible_room_mention = false;
-            if self.is_searching() {
+            if self.is_searching() || self.is_slash_command_popup_active() {
                 self.close_mention_popup(cx);
             }
             return;
@@ -1271,15 +1570,23 @@ impl MentionableTextInput {
             .map_or(0, |p| p.cursor().index);
 
         // Check if we're currently searching and the @ symbol was deleted
-        if let Some(start_pos) = self.get_trigger_position() {
-            // Check if the @ symbol at the start position still exists
-            if start_pos >= text.len()
-                || text.get(start_pos..start_pos + 1).is_some_and(|c| c != "@")
-            {
-                // The @ symbol was deleted, stop searching
-                self.close_mention_popup(cx);
-                return;
+        if self.active_popup_mode == PopupMode::Mention {
+            if let Some(start_pos) = self.get_trigger_position() {
+                // Check if the @ symbol at the start position still exists
+                if start_pos >= text.len()
+                    || text.get(start_pos..start_pos + 1).is_some_and(|c| c != "@")
+                {
+                    // The @ symbol was deleted, stop searching
+                    self.close_mention_popup(cx);
+                    return;
+                }
             }
+        }
+
+        if self.active_popup_mode == PopupMode::SlashCommand
+            && find_slash_command_trigger_position(&text, cursor_pos).is_none()
+        {
+            self.close_mention_popup(cx);
         }
 
         // Look for trigger position for @ menu
@@ -1318,7 +1625,11 @@ impl MentionableTextInput {
 
             // Redraw to ensure UI updates are visible
             self.redraw(cx);
-        } else if self.is_searching() {
+        } else if let Some(trigger_pos) = find_slash_command_trigger_position(&text, cursor_pos) {
+            let search_text =
+                utils::safe_substring_by_byte_indices(&text, trigger_pos + 1, cursor_pos);
+            self.update_slash_command_list(cx, scope, &search_text);
+        } else if self.is_searching() || self.is_slash_command_popup_active() {
             self.close_mention_popup(cx);
         }
     }
@@ -1542,6 +1853,9 @@ impl MentionableTextInput {
             .props
             .get::<RoomScreenProps>()
             .expect("RoomScreenProps should be available in scope for MentionableTextInput");
+
+        self.active_popup_mode = PopupMode::Mention;
+        self.set_popup_header_for_mentions(cx);
 
         // Get trigger position from current state (if in searching mode)
         let trigger_pos = match &self.search_state {
@@ -1891,6 +2205,7 @@ impl MentionableTextInput {
         self.last_search_text = None;
         self.search_results_pending = false;
         self.loading_indicator_ref = None;
+        self.active_popup_mode = PopupMode::None;
 
         // Reset change detection state
         self.last_member_count = 0;
@@ -2138,5 +2453,46 @@ mod tests {
                 pending_search_text: "al".to_owned(),
             },
         ));
+    }
+
+    #[test]
+    fn slash_command_popup_requires_enabled_bot_features_even_when_unbound() {
+        assert!(bot_command_popup_enabled(true, true));
+        assert!(bot_command_popup_enabled(true, false));
+        assert!(!bot_command_popup_enabled(false, true));
+    }
+
+    #[test]
+    fn slash_command_trigger_is_found_at_input_start() {
+        assert_eq!(find_slash_command_trigger_position("/li", "/li".len()), Some(0));
+    }
+
+    #[test]
+    fn slash_command_trigger_is_found_after_newline() {
+        let text = "hello\n/list";
+        assert_eq!(
+            find_slash_command_trigger_position(text, text.len()),
+            Some("hello\n".len())
+        );
+    }
+
+    #[test]
+    fn slash_command_trigger_is_not_found_mid_line() {
+        let text = "hello /list";
+        assert_eq!(find_slash_command_trigger_position(text, text.len()), None);
+    }
+
+    #[test]
+    fn slash_commands_filter_by_prefix_without_leading_slash() {
+        let commands = matching_slash_commands("li");
+        assert_eq!(commands, vec![SlashCommand {
+            command: "/listbots",
+            description_key: "slash_command.listbots.description",
+        }]);
+    }
+
+    #[test]
+    fn slash_commands_return_empty_for_unknown_prefix() {
+        assert!(matching_slash_commands("zzzznotacommand").is_empty());
     }
 }
