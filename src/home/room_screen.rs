@@ -39,6 +39,7 @@ use crate::{
 };
 use crate::home::event_reaction_list::ReactionListWidgetRefExt;
 use crate::home::room_read_receipt::AvatarRowWidgetRefExt;
+use crate::home::streaming_animation::StreamingAnimState;
 use crate::room::room_input_bar::RoomInputBarWidgetExt;
 use crate::shared::mentionable_text_input::MentionableTextInputAction;
 
@@ -115,6 +116,323 @@ fn bot_badge_label_center_y() -> f64 {
     let bot_badge_label_top_margin = (BOT_BADGE_HEIGHT - BOT_BADGE_TEXT_FONT_SIZE) * 0.5
         + (BOT_BADGE_TEXT_FONT_SIZE * BOT_BADGE_TEXT_TOP_DROP);
     center_y(bot_badge_label_top_margin, BOT_BADGE_TEXT_FONT_SIZE)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BotTimelineLayers {
+    status: Option<String>,
+    provider: Option<String>,
+    body: String,
+    footer: Option<String>,
+}
+
+impl BotTimelineLayers {
+    fn plain(body: &str) -> Self {
+        Self {
+            status: None,
+            provider: None,
+            body: body.to_string(),
+            footer: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BotTimelineRenderState {
+    show_card: bool,
+    show_body_card: bool,
+    show_status_strip: bool,
+    show_metadata_footer: bool,
+    status: Option<String>,
+    provider: Option<String>,
+    body: String,
+    footer: Option<String>,
+}
+
+fn is_bot_provider_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("via ") && trimmed.contains('(') && trimmed.ends_with(')')
+}
+
+fn strip_streaming_cursor_suffix(line: &str) -> &str {
+    line
+        .trim_end()
+        .strip_suffix('\u{25CF}')
+        .map(str::trim_end)
+        .unwrap_or_else(|| line.trim_end())
+}
+
+fn is_bot_footer_line(line: &str) -> bool {
+    let trimmed = strip_streaming_cursor_suffix(line);
+    trimmed.starts_with('_')
+        && trimmed.ends_with('_')
+        && trimmed.contains("·")
+        && trimmed.contains(" in")
+        && trimmed.contains(" out")
+}
+
+fn looks_like_metrics_line(line: &str) -> bool {
+    let trimmed = strip_streaming_cursor_suffix(line).trim();
+    !trimmed.is_empty()
+        && trimmed.chars().count() <= 40
+        && trimmed.chars().any(|ch| ch.is_ascii_digit())
+        && (trimmed.contains('s') || trimmed.contains(" in") || trimmed.contains(" out"))
+}
+
+fn looks_like_status_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with("via ")
+        && !trimmed.starts_with('_')
+        && trimmed.chars().count() <= 32
+        && !trimmed.contains("  ")
+}
+
+fn trim_structured_body_lines(lines: &[&str]) -> String {
+    let mut start = 0;
+    let mut end = lines.len();
+
+    while start < end && lines[start].trim().is_empty() {
+        start += 1;
+    }
+    while end > start && lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+
+    lines[start..end].join("\n")
+}
+
+fn is_viable_bot_body(body: &str) -> bool {
+    let trimmed = body.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().any(|c| c.is_alphanumeric())
+}
+
+fn parse_bot_timeline_layers(raw_body: &str, is_bot_sender: bool) -> BotTimelineLayers {
+    if !is_bot_sender || raw_body.trim().is_empty() {
+        return BotTimelineLayers::plain(raw_body);
+    }
+
+    let lines: Vec<&str> = raw_body.lines().collect();
+    if lines.is_empty() {
+        return BotTimelineLayers::plain(raw_body);
+    }
+
+    let (status, provider_idx) =
+        if lines.len() >= 2 && looks_like_status_line(lines[0]) && is_bot_provider_line(lines[1]) {
+            (Some(lines[0].trim().to_string()), 1usize)
+        } else if is_bot_provider_line(lines[0]) {
+            (None, 0usize)
+        } else {
+            return BotTimelineLayers::plain(raw_body);
+        };
+
+    let provider = Some(lines[provider_idx].trim().to_string());
+
+    let mut content_start = provider_idx + 1;
+    while content_start < lines.len() && lines[content_start].trim().is_empty() {
+        content_start += 1;
+    }
+
+    if content_start >= lines.len() {
+        return BotTimelineLayers::plain(raw_body);
+    }
+
+    let mut footer = None;
+    let mut content_end = lines.len();
+    let last_non_empty = lines.iter().rposition(|line| !line.trim().is_empty());
+
+    if let Some(last_idx) = last_non_empty {
+        if is_bot_footer_line(lines[last_idx]) {
+            footer = Some(strip_streaming_cursor_suffix(lines[last_idx]).trim().to_string());
+            content_end = last_idx;
+            while content_end > content_start && lines[content_end - 1].trim().is_empty() {
+                content_end -= 1;
+            }
+        }
+    }
+
+    if content_start >= content_end {
+        return BotTimelineLayers::plain(raw_body);
+    }
+
+    let content_lines = &lines[content_start..content_end];
+    let mut body = trim_structured_body_lines(content_lines);
+    if footer.is_none() && content_lines.len() == 1 && looks_like_metrics_line(content_lines[0]) {
+        footer = Some(strip_streaming_cursor_suffix(content_lines[0]).trim().to_string());
+        body.clear();
+    }
+    if !is_viable_bot_body(&body) {
+        return if status.is_some() || provider.is_some() || footer.is_some() {
+            BotTimelineLayers {
+                status,
+                provider,
+                body,
+                footer,
+            }
+        } else {
+            BotTimelineLayers::plain(raw_body)
+        };
+    }
+
+    BotTimelineLayers {
+        status,
+        provider,
+        body,
+        footer,
+    }
+}
+
+fn compute_bot_timeline_render_state(raw_body: &str, is_bot_sender: bool) -> BotTimelineRenderState {
+    let layers = parse_bot_timeline_layers(raw_body, is_bot_sender);
+    let show_card = is_bot_sender;
+    let show_body_card = show_card && !layers.body.trim().is_empty();
+
+    BotTimelineRenderState {
+        show_card,
+        show_body_card,
+        show_status_strip: show_card && layers.status.is_some(),
+        show_metadata_footer: show_card && (layers.provider.is_some() || layers.footer.is_some()),
+        status: layers.status,
+        provider: layers.provider,
+        body: layers.body,
+        footer: layers.footer,
+    }
+}
+
+fn display_bot_footer_text(footer: &str) -> &str {
+    strip_streaming_cursor_suffix(footer)
+        .strip_prefix('_')
+        .and_then(|trimmed| trimmed.strip_suffix('_'))
+        .unwrap_or(footer)
+}
+
+fn has_rich_markdown_syntax(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && (
+            trimmed.contains("```")
+            || trimmed.starts_with("## ")
+            || trimmed.starts_with("### ")
+            || trimmed.contains("\n## ")
+            || trimmed.contains("\n### ")
+            || trimmed.starts_with("|")
+            || trimmed.contains("\n|")
+            || trimmed.starts_with("- ")
+            || trimmed.contains("\n- ")
+            || trimmed.starts_with("* ")
+            || trimmed.contains("\n* ")
+            || trimmed.contains("**")
+            || trimmed.contains("`")
+        )
+}
+
+fn should_render_streaming_full_snapshot(
+    body: &str,
+    formatted_body: Option<&FormattedBody>,
+    is_bot_sender: bool,
+) -> bool {
+    is_bot_sender
+        && (
+            formatted_body.is_some_and(|formatted| formatted.format == MessageFormat::Html)
+            || has_rich_markdown_syntax(body)
+        )
+}
+
+fn select_bot_timeline_body_formatted_body(
+    render_state: &BotTimelineRenderState,
+    formatted_body: Option<&FormattedBody>,
+) -> Option<FormattedBody> {
+    if render_state.status.is_none()
+        && render_state.provider.is_none()
+        && render_state.footer.is_none()
+    {
+        return formatted_body
+            .cloned()
+            .or_else(|| has_rich_markdown_syntax(&render_state.body)
+                .then(|| FormattedBody::markdown(&render_state.body))
+                .flatten());
+    }
+
+    FormattedBody::markdown(&render_state.body)
+}
+
+fn should_render_bot_timeline_body_with_markdown_widget(
+    render_state: &BotTimelineRenderState,
+) -> bool {
+    render_state.show_body_card
+        && render_state.body.contains("```")
+}
+
+fn contains_cjk(text: &str) -> bool {
+    text.chars().any(|ch|
+        matches!(ch as u32,
+            0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2A6DF
+            | 0x2A700..=0x2B73F
+            | 0x2B740..=0x2B81F
+            | 0x2B820..=0x2CEAF
+            | 0x2CEB0..=0x2EBEF
+            | 0x3000..=0x303F
+            | 0x3040..=0x30FF
+            | 0x31F0..=0x31FF
+            | 0xAC00..=0xD7AF
+        )
+    )
+}
+
+fn fenced_code_blocks_contain_cjk(text: &str) -> bool {
+    let mut in_fence = false;
+    let mut fence_has_cjk = false;
+
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            if in_fence && fence_has_cjk {
+                return true;
+            }
+            in_fence = !in_fence;
+            fence_has_cjk = false;
+            continue;
+        }
+
+        if in_fence && contains_cjk(line) {
+            fence_has_cjk = true;
+        }
+    }
+
+    in_fence && fence_has_cjk
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BotTimelineCodeBlockMode {
+    None,
+    Highlighted,
+    Plain,
+}
+
+fn bot_timeline_code_block_mode(render_state: &BotTimelineRenderState) -> BotTimelineCodeBlockMode {
+    if !should_render_bot_timeline_body_with_markdown_widget(render_state) {
+        return BotTimelineCodeBlockMode::None;
+    }
+
+    if fenced_code_blocks_contain_cjk(&render_state.body) {
+        BotTimelineCodeBlockMode::Plain
+    } else {
+        BotTimelineCodeBlockMode::Highlighted
+    }
+}
+
+fn streaming_update_requires_content_invalidation(
+    state: &StreamingAnimState,
+    new_text: &str,
+    is_live: bool,
+    render_full_target: bool,
+) -> bool {
+    state.target_text != new_text
+        || state.is_live != is_live
+        || state.render_full_target != render_full_target
 }
 
 thread_local! {
@@ -599,6 +917,124 @@ script_mod! {
     mod.widgets.COLOR_THREAD_SUMMARY_BG_HOVER = #FFEACC
     mod.widgets.COLOR_THREAD_SUMMARY_BORDER = #E8C99A
     mod.widgets.COLOR_THREAD_SUMMARY_REPLY_COUNT = #A35A00
+    mod.widgets.COLOR_BOT_CARD_BG = #xF7FAFE
+    mod.widgets.COLOR_BOT_CARD_BORDER = #xD8E3F0
+    mod.widgets.COLOR_BOT_STATUS_BG = #xEEF4FB
+    mod.widgets.COLOR_BOT_STATUS_TEXT = #x5A6F86
+    mod.widgets.COLOR_BOT_PROVIDER_TEXT = #x708399
+    mod.widgets.COLOR_BOT_FOOTER_TEXT = #x8B98A7
+    mod.widgets.COLOR_BOT_CODE_BG = #xECF2F8
+    mod.widgets.COLOR_BOT_CODE_BORDER = #xD5E0ED
+
+    mod.widgets.BotTimelineMarkdown = Markdown {
+        width: Fill
+        height: Fit
+        padding: 0.0
+        font_size: (MESSAGE_FONT_SIZE)
+        font_color: (MESSAGE_TEXT_COLOR)
+        paragraph_spacing: 10.0
+        pre_code_spacing: 8.0
+        heading_base_scale: 1.45
+        inline_code_padding: Inset{ top: 3, bottom: 3, left: 4, right: 4 }
+        inline_code_margin: Inset{ left: 3, right: 3, bottom: 2, top: 2 }
+        use_code_block_widget: true
+
+        draw_text +: {
+            color: (MESSAGE_TEXT_COLOR)
+        }
+        text_style_normal: mod.widgets.MESSAGE_TEXT_STYLE {
+            font_size: (MESSAGE_FONT_SIZE)
+            line_spacing: (MESSAGE_TEXT_LINE_SPACING)
+        }
+        text_style_italic: theme.font_italic {
+            font_size: (MESSAGE_FONT_SIZE)
+            line_spacing: (MESSAGE_TEXT_LINE_SPACING)
+        }
+        text_style_bold: theme.font_bold {
+            font_size: (MESSAGE_FONT_SIZE)
+            line_spacing: (MESSAGE_TEXT_LINE_SPACING)
+        }
+        text_style_bold_italic: theme.font_bold_italic {
+            font_size: (MESSAGE_FONT_SIZE)
+            line_spacing: (MESSAGE_TEXT_LINE_SPACING)
+        }
+        text_style_fixed: mod.widgets.MESSAGE_CODE_TEXT_STYLE {
+            font_size: (MESSAGE_FONT_SIZE - 0.5)
+            line_spacing: (MESSAGE_TEXT_LINE_SPACING)
+        }
+        draw_block +: {
+            line_color: (MESSAGE_TEXT_COLOR)
+            sep_color: (mod.widgets.COLOR_BOT_CODE_BORDER)
+            quote_bg_color: #xEFF5FB
+            quote_fg_color: #x7892AC
+            code_color: (mod.widgets.COLOR_BOT_CODE_BG)
+        }
+        code_layout: Layout{
+            flow: Flow.Right{wrap: true}
+            padding: Inset{ left: 0.0, right: 0.0, top: 0.0, bottom: 0.0 }
+        }
+        code_walk: Walk{ width: Fill, height: Fit, margin: Inset{ top: 10.0, bottom: 10.0 } }
+        quote_layout: Layout{
+            flow: Flow.Right{wrap: true}
+            padding: Inset{ left: 12.0, right: 12.0, top: 8.0, bottom: 8.0 }
+        }
+        quote_walk: Walk{ width: Fill, height: Fit, margin: Inset{ top: 6.0, bottom: 6.0 } }
+        list_item_layout: Layout{
+            flow: Flow.Right{wrap: true}
+            padding: Inset{ left: 0.0, right: 0.0, top: 1.0, bottom: 1.0 }
+        }
+        list_item_walk: Walk{ width: Fill, height: Fit, margin: Inset{ top: 0.0, bottom: 1.0 } }
+
+        code_block := RoundedView {
+            width: Fill
+            height: Fit
+            flow: Overlay
+            padding: 0.0
+            new_batch: true
+            show_bg: true
+            draw_bg +: {
+                color: (mod.widgets.COLOR_BOT_CODE_BG)
+                border_radius: 10.0
+                border_size: 1.0
+                border_color: (mod.widgets.COLOR_BOT_CODE_BORDER)
+            }
+
+            code_view := mod.widgets.CodeView {
+                keep_cursor_at_end: false
+                editor +: {
+                    width: Fill
+                    height: Fit
+                    margin: Inset{ left: 12.0, right: 12.0, top: 10.0, bottom: 10.0 }
+                    draw_bg +: { color: #0000 }
+                    draw_text +: {
+                        text_style: mod.widgets.MESSAGE_CODE_TEXT_STYLE {
+                            font_size: (MESSAGE_FONT_SIZE - 0.5)
+                            line_spacing: (MESSAGE_TEXT_LINE_SPACING)
+                        }
+                    }
+                    token_colors +: {
+                        whitespace: #x6a737d
+                        delimiter: #x24292e
+                        delimiter_highlight: #x005cc5
+                        error_decoration: #xcb2431
+                        warning_decoration: #xb08800
+                        unknown: #x24292e
+                        branch_keyword: #xd73a49
+                        constant: #x005cc5
+                        identifier: #x24292e
+                        loop_keyword: #xd73a49
+                        number: #x005cc5
+                        other_keyword: #xd73a49
+                        punctuator: #x24292e
+                        string: #x22863a
+                        function: #x6f42c1
+                        typename: #xe36209
+                        comment: #x6a737d
+                    }
+                }
+            }
+        }
+    }
 
     // An empty view that takes up no space in the portal list.
     mod.widgets.Empty = View { }
@@ -816,6 +1252,93 @@ script_mod! {
                     }
                 }
 
+                bot_message_card := View {
+                    visible: false
+                    width: Fill
+                    height: Fit
+                    flow: Down
+                    spacing: 6.0
+                    margin: Inset{ top: 1.0, bottom: 3.0 }
+
+                    bot_status_strip := RoundedView {
+                        visible: false
+                        width: Fit
+                        height: Fit
+                        new_batch: true
+                        padding: Inset{ left: 10.0, right: 10.0, top: 5.0, bottom: 5.0 }
+                        show_bg: true
+                        draw_bg +: {
+                            color: (mod.widgets.COLOR_BOT_STATUS_BG)
+                            border_radius: 10.0
+                        }
+
+                        bot_status_label := Label {
+                            width: Fit
+                            height: Fit
+                            draw_text +: {
+                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                color: (mod.widgets.COLOR_BOT_STATUS_TEXT)
+                            }
+                            text: ""
+                        }
+                    }
+
+                    bot_body_card := RoundedView {
+                        width: Fill
+                        height: Fit
+                        flow: Down
+                        new_batch: true
+                        padding: Inset{ left: 14.0, right: 14.0, top: 12.0, bottom: 12.0 }
+                        show_bg: true
+                        draw_bg +: {
+                            color: (mod.widgets.COLOR_BOT_CARD_BG)
+                            border_radius: 14.0
+                            border_size: 1.0
+                            border_color: (mod.widgets.COLOR_BOT_CARD_BORDER)
+                        }
+
+                        bot_card_body := HtmlOrPlaintext { }
+                        bot_card_markdown := mod.widgets.BotTimelineMarkdown {
+                            visible: false
+                            body: ""
+                        }
+                        bot_card_markdown_plain := mod.widgets.BotTimelineMarkdown {
+                            visible: false
+                            use_code_block_widget: false
+                            body: ""
+                        }
+                    }
+
+                    bot_metadata_footer := View {
+                        visible: false
+                        width: Fill
+                        height: Fit
+                        flow: Down
+                        spacing: 2.0
+                        padding: Inset{ left: 2.0 }
+
+                        bot_provider_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: REGULAR_TEXT { font_size: 10.0 }
+                                color: (mod.widgets.COLOR_BOT_PROVIDER_TEXT)
+                            }
+                            text: ""
+                        }
+
+                        bot_footer_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                color: (mod.widgets.COLOR_BOT_FOOTER_TEXT)
+                            }
+                            text: ""
+                        }
+                    }
+                }
+
                 message := HtmlOrPlaintext { }
                 link_preview_view := mod.widgets.LinkPreview {}
                 View {
@@ -860,6 +1383,93 @@ script_mod! {
                 height: Fit,
                 flow: Down,
                 padding: Inset{ left: 10.0 }
+
+                bot_message_card := View {
+                    visible: false
+                    width: Fill
+                    height: Fit
+                    flow: Down
+                    spacing: 6.0
+                    margin: Inset{ top: 1.0, bottom: 3.0 }
+
+                    bot_status_strip := RoundedView {
+                        visible: false
+                        width: Fit
+                        height: Fit
+                        new_batch: true
+                        padding: Inset{ left: 10.0, right: 10.0, top: 5.0, bottom: 5.0 }
+                        show_bg: true
+                        draw_bg +: {
+                            color: (mod.widgets.COLOR_BOT_STATUS_BG)
+                            border_radius: 10.0
+                        }
+
+                        bot_status_label := Label {
+                            width: Fit
+                            height: Fit
+                            draw_text +: {
+                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                color: (mod.widgets.COLOR_BOT_STATUS_TEXT)
+                            }
+                            text: ""
+                        }
+                    }
+
+                    bot_body_card := RoundedView {
+                        width: Fill
+                        height: Fit
+                        flow: Down
+                        new_batch: true
+                        padding: Inset{ left: 14.0, right: 14.0, top: 12.0, bottom: 12.0 }
+                        show_bg: true
+                        draw_bg +: {
+                            color: (mod.widgets.COLOR_BOT_CARD_BG)
+                            border_radius: 14.0
+                            border_size: 1.0
+                            border_color: (mod.widgets.COLOR_BOT_CARD_BORDER)
+                        }
+
+                        bot_card_body := HtmlOrPlaintext { }
+                        bot_card_markdown := mod.widgets.BotTimelineMarkdown {
+                            visible: false
+                            body: ""
+                        }
+                        bot_card_markdown_plain := mod.widgets.BotTimelineMarkdown {
+                            visible: false
+                            use_code_block_widget: false
+                            body: ""
+                        }
+                    }
+
+                    bot_metadata_footer := View {
+                        visible: false
+                        width: Fill
+                        height: Fit
+                        flow: Down
+                        spacing: 2.0
+                        padding: Inset{ left: 2.0 }
+
+                        bot_provider_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: REGULAR_TEXT { font_size: 10.0 }
+                                color: (mod.widgets.COLOR_BOT_PROVIDER_TEXT)
+                            }
+                            text: ""
+                        }
+
+                        bot_footer_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                color: (mod.widgets.COLOR_BOT_FOOTER_TEXT)
+                            }
+                            text: ""
+                        }
+                    }
+                }
 
                 message := HtmlOrPlaintext { }
                 link_preview_view := mod.widgets.LinkPreview {}
@@ -4868,8 +5478,6 @@ impl RoomScreen {
                             self.streaming_next_frame = cx.new_next_frame();
                         }
                     } else if !new_items.is_empty() {
-                        use crate::home::streaming_animation::StreamingAnimState;
-
                         let mut should_schedule_frame = false;
                         let scan_range = streaming_scan_range(
                             clear_cache,
@@ -4888,16 +5496,40 @@ impl RoomScreen {
                             let Some(event_id) = new_evt.event_id().map(|id| id.to_owned()) else { continue };
                             let live = is_msc4357_live(new_evt);
                             let Some(new_text) = Self::extract_message_text(new_item) else { continue };
+                            let render_full_target = should_render_streaming_full_snapshot(
+                                &new_text,
+                                new_evt.content()
+                                    .as_message()
+                                    .and_then(|message| match message.msgtype() {
+                                        MessageType::Text(TextMessageEventContent { formatted, .. }) => formatted.as_ref(),
+                                        MessageType::Notice(NoticeMessageEventContent { formatted, .. }) => formatted.as_ref(),
+                                        _ => None,
+                                    }),
+                                is_likely_bot_user_id(new_evt.sender(), None),
+                            );
 
                             if let Some(state) = tl.streaming_messages.get_mut(&event_id) {
+                                let should_invalidate_content = streaming_update_requires_content_invalidation(
+                                    state,
+                                    &new_text,
+                                    live,
+                                    render_full_target,
+                                );
                                 state.update_target(&new_text, live);
+                                state.set_render_full_target(render_full_target);
+                                if should_invalidate_content
+                                    && let Some(idx) = state.timeline_index
+                                {
+                                    tl.content_drawn_since_last_update.remove(idx .. idx + 1);
+                                }
                                 // Schedule frame for animation OR for cleanup of just-completed state
                                 should_schedule_frame |= state.needs_frame() || state.is_complete();
                                 continue;
                             }
 
                             if live && !old_event_ids.contains(&*event_id) {
-                                let state = StreamingAnimState::new(&new_text, true);
+                                let mut state = StreamingAnimState::new(&new_text, true);
+                                state.set_render_full_target(render_full_target);
                                 should_schedule_frame |= state.needs_frame();
                                 tl.streaming_messages.insert(event_id, state);
                             }
@@ -7005,6 +7637,7 @@ fn populate_message_view(
 ) -> (WidgetRef, ItemDrawnStatus) {
     let mut new_drawn_status = item_drawn_status;
     let ts_millis = event_tl_item.timestamp();
+    let sender_is_bot = is_likely_bot_user_id(event_tl_item.sender(), None);
 
     let mut is_notice = false; // whether this message is a Notice (automated bot message)
     let mut is_server_notice = false; // whether this message is a Server Notice
@@ -7044,31 +7677,55 @@ fn populate_message_view(
                     if existed && item_drawn_status.content_drawn {
                         (item, true)
                     } else {
-                        let html_or_plaintext_ref =
-                            item.html_or_plaintext(cx, ids!(content.message));
-
                         // Check if this message is being streamed
                         let is_streaming = event_tl_item.event_id()
                             .and_then(|eid| streaming_messages.get_mut(&eid.to_owned()));
 
                         if let Some(state) = is_streaming {
-                            // STREAMING MODE: show partial plaintext with cursor
-                            state.fill_display_buffer();
-                            html_or_plaintext_ref.show_plaintext(cx, &state.display_buffer);
+                            let render_full_snapshot = should_render_streaming_full_snapshot(
+                                body,
+                                formatted.as_ref(),
+                                sender_is_bot,
+                            );
+                            state.set_render_full_target(render_full_snapshot);
+
+                            // STREAMING MODE:
+                            // - markdown-rich bot replies render the latest full snapshot directly
+                            // - plain text keeps the local typewriter prefix with cursor
+                            let mut link_preview_ref =
+                                item.link_preview(cx, ids!(content.link_preview_view));
+                            let (stream_body, stream_formatted) = if render_full_snapshot {
+                                (body.as_str(), formatted.as_ref())
+                            } else {
+                                state.fill_display_buffer();
+                                (state.display_buffer.as_str(), None)
+                            };
+                            let _ = populate_bot_text_message_content(
+                                cx,
+                                &item,
+                                app_language,
+                                stream_body,
+                                stream_formatted,
+                                Some(&mut link_preview_ref),
+                                Some(media_cache),
+                                Some(link_preview_cache),
+                                sender_is_bot,
+                            );
                             new_drawn_status.content_drawn = false; // force re-render
                         } else {
                             // NORMAL MODE: existing logic
                             let mut link_preview_ref =
                                 item.link_preview(cx, ids!(content.link_preview_view));
-                            new_drawn_status.content_drawn = populate_text_message_content(
+                            new_drawn_status.content_drawn = populate_bot_text_message_content(
                                 cx,
-                                &html_or_plaintext_ref,
+                                &item,
                                 app_language,
                                 body,
                                 formatted.as_ref(),
                                 Some(&mut link_preview_ref),
                                 Some(media_cache),
                                 Some(link_preview_cache),
+                                sender_is_bot,
                             );
                         }
                         (item, false)
@@ -7088,26 +7745,29 @@ fn populate_message_view(
                     if existed && item_drawn_status.content_drawn {
                         (item, true)
                     } else {
-                        let html_or_plaintext_ref = item.html_or_plaintext(cx, ids!(content.message));
-                        // Apply gray color to all text styles for notice messages.
-                        let mut html_widget = html_or_plaintext_ref.html(cx, ids!(html_view.html));
-                        script_apply_eval!(cx, html_widget, {
-                            font_color: mod.widgets.COLOR_MESSAGE_NOTICE_TEXT,
-                            draw_block +: {
-                                quote_fg_color: mod.widgets.COLOR_MESSAGE_NOTICE_TEXT,
-                            }
-                        });
+                        if !sender_is_bot {
+                            let html_or_plaintext_ref = item.html_or_plaintext(cx, ids!(content.message));
+                            // Apply gray color to all text styles for notice messages.
+                            let mut html_widget = html_or_plaintext_ref.html(cx, ids!(html_view.html));
+                            script_apply_eval!(cx, html_widget, {
+                                font_color: mod.widgets.COLOR_MESSAGE_NOTICE_TEXT,
+                                draw_block +: {
+                                    quote_fg_color: mod.widgets.COLOR_MESSAGE_NOTICE_TEXT,
+                                }
+                            });
+                        }
                         let mut link_preview_ref =
                             item.link_preview(cx, ids!(content.link_preview_view));
-                        new_drawn_status.content_drawn = populate_text_message_content(
+                        new_drawn_status.content_drawn = populate_bot_text_message_content(
                             cx,
-                            &html_or_plaintext_ref,
+                            &item,
                             app_language,
                             body,
                             formatted.as_ref(),
                             Some(&mut link_preview_ref),
                             Some(media_cache),
                             Some(link_preview_cache),
+                            sender_is_bot,
                         );
                         (item, false)
                     }
@@ -7568,7 +8228,6 @@ fn populate_message_view(
             new_drawn_status.profile_drawn = profile_drawn;
 
             // Show/hide the bot badge based on sender's user ID
-            let sender_is_bot = is_likely_bot_user_id(event_tl_item.sender(), None);
             item.view(cx, ids!(content.username_view.bot_badge)).set_visible(cx, sender_is_bot);
         }
         else {
@@ -7695,6 +8354,124 @@ fn populate_text_message_content(
                 )
             },
         )
+    } else {
+        true
+    }
+}
+
+fn populate_bot_text_message_content(
+    cx: &mut Cx,
+    item: &WidgetRef,
+    app_language: AppLanguage,
+    body: &str,
+    formatted_body: Option<&FormattedBody>,
+    link_preview_ref: Option<&mut LinkPreviewRef>,
+    media_cache: Option<&mut MediaCache>,
+    link_preview_cache: Option<&mut LinkPreviewCache>,
+    is_bot_sender: bool,
+) -> bool {
+    let render_state = compute_bot_timeline_render_state(body, is_bot_sender);
+    let bot_card_view = item.view(cx, ids!(content.bot_message_card));
+    let message_view = item.html_or_plaintext(cx, ids!(content.message));
+
+    bot_card_view.set_visible(cx, render_state.show_card);
+    message_view.set_visible(cx, !render_state.show_card);
+
+    if !render_state.show_card {
+        return populate_text_message_content(
+            cx,
+            &message_view,
+            app_language,
+            body,
+            formatted_body,
+            link_preview_ref,
+            media_cache,
+            link_preview_cache,
+        );
+    }
+
+    let status_strip = item.view(cx, ids!(content.bot_message_card.bot_status_strip));
+    status_strip.set_visible(cx, render_state.show_status_strip);
+    if let Some(status) = render_state.status.as_ref() {
+        item.label(cx, ids!(content.bot_message_card.bot_status_strip.bot_status_label))
+            .set_text(cx, status);
+    }
+
+    let provider_label = item.label(cx, ids!(content.bot_message_card.bot_metadata_footer.bot_provider_label));
+    if let Some(provider) = render_state.provider.as_ref() {
+        provider_label.set_text(cx, provider);
+        provider_label.set_visible(cx, true);
+    } else {
+        provider_label.set_visible(cx, false);
+    }
+
+    let footer_label = item.label(cx, ids!(content.bot_message_card.bot_metadata_footer.bot_footer_label));
+    if let Some(footer) = render_state.footer.as_ref() {
+        footer_label.set_text(cx, display_bot_footer_text(footer));
+        footer_label.set_visible(cx, true);
+    } else {
+        footer_label.set_visible(cx, false);
+    }
+    item.view(cx, ids!(content.bot_message_card.bot_metadata_footer))
+        .set_visible(cx, render_state.show_metadata_footer);
+
+    let body_card = item.view(cx, ids!(content.bot_message_card.bot_body_card));
+    body_card.set_visible(cx, render_state.show_body_card);
+    let body_widget = item.html_or_plaintext(cx, ids!(content.bot_message_card.bot_body_card.bot_card_body));
+    let mut markdown_widget = item.markdown(cx, ids!(content.bot_message_card.bot_body_card.bot_card_markdown));
+    let mut markdown_plain_widget = item.markdown(cx, ids!(content.bot_message_card.bot_body_card.bot_card_markdown_plain));
+    let code_block_mode = bot_timeline_code_block_mode(&render_state);
+    body_widget.set_visible(cx, code_block_mode == BotTimelineCodeBlockMode::None);
+    markdown_widget.set_visible(cx, code_block_mode == BotTimelineCodeBlockMode::Highlighted);
+    markdown_plain_widget.set_visible(cx, code_block_mode == BotTimelineCodeBlockMode::Plain);
+
+    if render_state.show_body_card {
+        if code_block_mode != BotTimelineCodeBlockMode::None {
+            match code_block_mode {
+                BotTimelineCodeBlockMode::Highlighted => markdown_widget.set_text(cx, &render_state.body),
+                BotTimelineCodeBlockMode::Plain => markdown_plain_widget.set_text(cx, &render_state.body),
+                BotTimelineCodeBlockMode::None => { }
+            }
+
+            if let (Some(link_preview_ref), Some(media_cache), Some(link_preview_cache)) =
+                (link_preview_ref, media_cache, link_preview_cache)
+            {
+                let mut links = Vec::new();
+                let _ = utils::linkify_get_urls(&render_state.body, false, Some(&mut links));
+                link_preview_ref.populate_below_message(
+                    cx,
+                    &links,
+                    media_cache,
+                    link_preview_cache,
+                    &|cx, text_or_image_ref, image_info_source, original_source, body, media_cache| {
+                        populate_image_message_content(
+                            cx,
+                            text_or_image_ref,
+                            app_language,
+                            image_info_source,
+                            original_source,
+                            body,
+                            media_cache,
+                        )
+                    },
+                )
+            } else {
+                true
+            }
+        } else {
+            let formatted_body_for_card =
+                select_bot_timeline_body_formatted_body(&render_state, formatted_body);
+            populate_text_message_content(
+                cx,
+                &body_widget,
+                app_language,
+                &render_state.body,
+                formatted_body_for_card.as_ref(),
+                link_preview_ref,
+                media_cache,
+                link_preview_cache,
+            )
+        }
     } else {
         true
     }
@@ -9363,5 +10140,278 @@ mod tests {
             None,
             &known_bot_user_ids,
         ));
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_extracts_status_provider_body_and_footer() {
+        let body = "施法中\nvia moonshot@api (kimi-k2.5)\n\n你好！我是 **Alex**\n\n_moonshot@api/kimi-k2.5 · 5.3K in · 330 out · 6s_";
+
+        let layers = parse_bot_timeline_layers(body, true);
+
+        assert_eq!(layers.status.as_deref(), Some("施法中"));
+        assert_eq!(layers.provider.as_deref(), Some("via moonshot@api (kimi-k2.5)"));
+        assert_eq!(layers.body, "你好！我是 **Alex**");
+        assert_eq!(
+            layers.footer.as_deref(),
+            Some("_moonshot@api/kimi-k2.5 · 5.3K in · 330 out · 6s_"),
+        );
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_falls_back_for_unmatched_bot_text() {
+        let body = "你好！我是 Alex。\n今天可以帮你查天气。";
+
+        let layers = parse_bot_timeline_layers(body, true);
+
+        assert_eq!(layers, BotTimelineLayers::plain(body));
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_ignores_regular_user_messages() {
+        let body = "via moonshot@api (kimi-k2.5)\n\n这不是 bot 消息。";
+
+        let layers = parse_bot_timeline_layers(body, false);
+
+        assert_eq!(layers, BotTimelineLayers::plain(body));
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_prefers_safe_fallback_for_malformed_metadata() {
+        let body = "施法中\n这个不是 provider 行\n\n你好，我还在。";
+
+        let layers = parse_bot_timeline_layers(body, true);
+
+        assert_eq!(layers, BotTimelineLayers::plain(body));
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_invalid_metadata_does_not_panic() {
+        let body = "施法中\nvia moonshot@api (kimi-k2.5)\n\n_\n";
+
+        let layers = parse_bot_timeline_layers(body, true);
+
+        assert_eq!(layers, BotTimelineLayers::plain(body));
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_tolerates_streaming_cursor_in_footer() {
+        let body = "via moonshot@api (kimi-k2.5)\n\n你好！我是 **Alex**\n\n_moonshot@api/kimi-k2.5 · 5.3K in · 330 out · 6s_ ●";
+
+        let layers = parse_bot_timeline_layers(body, true);
+
+        assert_eq!(layers.body, "你好！我是 **Alex**");
+        assert_eq!(
+            layers.footer.as_deref(),
+            Some("_moonshot@api/kimi-k2.5 · 5.3K in · 330 out · 6s_"),
+        );
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_promotes_metrics_only_body_to_footer() {
+        let body = "疯狂输出中\nvia moonshot@api (kimi-k2.5)\n4s";
+
+        let layers = parse_bot_timeline_layers(body, true);
+
+        assert_eq!(layers.status.as_deref(), Some("疯狂输出中"));
+        assert_eq!(layers.provider.as_deref(), Some("via moonshot@api (kimi-k2.5)"));
+        assert!(layers.body.is_empty());
+        assert_eq!(layers.footer.as_deref(), Some("4s"));
+    }
+
+    #[test]
+    fn test_rich_markdown_streaming_prefers_full_snapshot_rendering() {
+        let formatted = FormattedBody::html("<p><strong>OpenClaw</strong></p>");
+        assert!(should_render_streaming_full_snapshot(
+            "根据搜索结果， **OpenClaw** 有两个不同的项目。",
+            Some(&formatted),
+            true,
+        ));
+    }
+
+    #[test]
+    fn test_plain_text_streaming_keeps_typewriter_path() {
+        assert!(!should_render_streaming_full_snapshot(
+            "你好，我是 Octos。",
+            None,
+            true,
+        ));
+    }
+
+    #[test]
+    fn test_bot_timeline_card_visible_for_bot_text_message() {
+        let state = compute_bot_timeline_render_state(
+            "施法中\nvia moonshot@api (kimi-k2.5)\n\n你好！我是 Alex。\n\n_moonshot@api/kimi-k2.5 · 1.2K in · 88 out · 2s_",
+            true,
+        );
+
+        assert!(state.show_card);
+        assert_eq!(state.body, "你好！我是 Alex。");
+    }
+
+    #[test]
+    fn test_bot_timeline_card_hidden_for_regular_user_message() {
+        let state = compute_bot_timeline_render_state("你好", false);
+
+        assert!(!state.show_card);
+    }
+
+    #[test]
+    fn test_bot_status_strip_renders_above_body_and_not_inside_body() {
+        let state = compute_bot_timeline_render_state(
+            "施法中\nvia moonshot@api (kimi-k2.5)\n\n你好！我是 Alex。",
+            true,
+        );
+
+        assert_eq!(state.status.as_deref(), Some("施法中"));
+        assert!(state.show_status_strip);
+        assert!(!state.body.starts_with("施法中"));
+    }
+
+    #[test]
+    fn test_bot_metadata_footer_renders_below_body() {
+        let state = compute_bot_timeline_render_state(
+            "via moonshot@api (kimi-k2.5)\n\n你好！我是 Alex。\n\n_moonshot@api/kimi-k2.5 · 1.2K in · 88 out · 2s_",
+            true,
+        );
+
+        assert!(state.show_metadata_footer);
+        assert_eq!(state.provider.as_deref(), Some("via moonshot@api (kimi-k2.5)"));
+        assert_eq!(
+            state.footer.as_deref(),
+            Some("_moonshot@api/kimi-k2.5 · 1.2K in · 88 out · 2s_"),
+        );
+    }
+
+    #[test]
+    fn test_bot_progress_message_hides_body_card_when_only_metrics_remain() {
+        let state = compute_bot_timeline_render_state(
+            "疯狂输出中\nvia moonshot@api (kimi-k2.5)\n4s",
+            true,
+        );
+
+        assert!(state.show_card);
+        assert!(!state.show_body_card);
+        assert!(state.show_status_strip);
+        assert!(state.show_metadata_footer);
+        assert_eq!(state.footer.as_deref(), Some("4s"));
+    }
+
+    #[test]
+    fn test_bot_timeline_card_body_uses_html_or_plaintext_rendering() {
+        let state = compute_bot_timeline_render_state(
+            "施法中\nvia moonshot@api (kimi-k2.5)\n\n你好！我是 **Alex**",
+            true,
+        );
+
+        let formatted = select_bot_timeline_body_formatted_body(&state, None)
+            .expect("structured bot body should still produce formatted content");
+
+        assert_eq!(formatted.format, MessageFormat::Html);
+        assert!(formatted.body.contains("<strong>Alex</strong>"));
+    }
+
+    #[test]
+    fn test_bot_plain_markdown_body_without_formatted_html_still_renders_as_markdown() {
+        let state = compute_bot_timeline_render_state(
+            "## 标题\n\n```rust\n// 中文注释\nlet answer = 42;\n```",
+            true,
+        );
+
+        let formatted = select_bot_timeline_body_formatted_body(&state, None)
+            .expect("rich markdown bot body should synthesize HTML during streaming");
+
+        assert_eq!(formatted.format, MessageFormat::Html);
+        assert!(formatted.body.contains("<h2>标题</h2>"));
+        assert!(formatted.body.contains("中文注释"));
+    }
+
+    #[test]
+    fn test_bot_timeline_body_prefers_markdown_widget_for_fenced_code_blocks() {
+        let state = compute_bot_timeline_render_state(
+            "## 标题\n\n```rust\nlet answer = 42;\n```\n\n这里是中文说明。",
+            true,
+        );
+
+        assert!(should_render_bot_timeline_body_with_markdown_widget(&state));
+        assert_eq!(
+            bot_timeline_code_block_mode(&state),
+            BotTimelineCodeBlockMode::Highlighted,
+        );
+    }
+
+    #[test]
+    fn test_bot_timeline_body_keeps_html_widget_for_non_code_markdown() {
+        let state = compute_bot_timeline_render_state(
+            "## 标题\n\n这里有 **加粗**，但没有代码块。",
+            true,
+        );
+
+        assert!(!should_render_bot_timeline_body_with_markdown_widget(&state));
+        assert_eq!(
+            bot_timeline_code_block_mode(&state),
+            BotTimelineCodeBlockMode::None,
+        );
+    }
+
+    #[test]
+    fn test_bot_timeline_body_uses_plain_markdown_code_block_for_cjk_code() {
+        let state = compute_bot_timeline_render_state(
+            "```rust\n// 中文注释\nprintln!(\"你好\");\n```",
+            true,
+        );
+
+        assert_eq!(
+            bot_timeline_code_block_mode(&state),
+            BotTimelineCodeBlockMode::Plain,
+        );
+    }
+
+    #[test]
+    fn test_fenced_code_blocks_ignore_cjk_outside_code_block() {
+        let body = "## 标题\n\n```rust\nlet answer = 42;\n```\n\n这里是中文总结。";
+
+        assert!(!fenced_code_blocks_contain_cjk(body));
+    }
+
+    #[test]
+    fn test_streaming_update_requires_content_invalidation_for_new_full_snapshot_text() {
+        let state = StreamingAnimState::new("你好", true);
+
+        assert!(streaming_update_requires_content_invalidation(
+            &state,
+            "## 标题\n\n内容",
+            true,
+            true,
+        ));
+    }
+
+    #[test]
+    fn test_streaming_update_skips_invalidation_when_target_and_mode_are_unchanged() {
+        let mut state = StreamingAnimState::new("## 标题\n\n内容", true);
+        state.set_render_full_target(true);
+
+        assert!(!streaming_update_requires_content_invalidation(
+            &state,
+            "## 标题\n\n内容",
+            true,
+            true,
+        ));
+    }
+
+    #[test]
+    fn test_bot_timeline_card_preserves_reply_preview_and_condensed_layout() {
+        let reply_state = compute_bot_timeline_render_state(
+            "via moonshot@api (kimi-k2.5)\n\n第一条回复",
+            true,
+        );
+        let condensed_state = compute_bot_timeline_render_state(
+            "via moonshot@api (kimi-k2.5)\n\n第二条回复",
+            true,
+        );
+
+        assert!(reply_state.show_card);
+        assert!(condensed_state.show_card);
+        assert!(reply_state.show_metadata_footer);
+        assert!(condensed_state.show_metadata_footer);
     }
 }

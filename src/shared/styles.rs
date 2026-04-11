@@ -87,6 +87,31 @@ script_mod! {
         line_spacing: (mod.widgets.MESSAGE_TEXT_LINE_SPACING),
     }
 
+    // Code blocks need a real monospace latin font for CodeView layout,
+    // plus a Chinese fallback so mixed CJK comments remain readable.
+    mod.widgets.MESSAGE_CODE_TEXT_STYLE = TextStyle {
+        font_family: FontFamily{
+            latin := FontMember{
+                res: crate_resource("self://resources/fonts/LiberationMono-Regular.ttf")
+                asc: 0.0
+                desc: 0.0
+            }
+            chinese := FontMember{
+                res: crate_resource("self://resources/fonts/LXGWWenKaiRegular.ttf")
+                asc: 0.0
+                desc: 0.0
+            }
+            emoji := FontMember{
+                res: crate_resource("self://resources/fonts/NotoColorEmoji.ttf")
+                asc: 0.0
+                desc: 0.0
+            }
+        }
+        font_size: (mod.widgets.MESSAGE_FONT_SIZE),
+        line_spacing: (mod.widgets.MESSAGE_TEXT_LINE_SPACING),
+        top_drop: 0.21,
+    }
+
     mod.widgets.MESSAGE_REPLY_PREVIEW_FONT_SIZE = 9.5
 
 
