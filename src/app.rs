@@ -793,6 +793,9 @@ impl MatchEvent for App {
             if let Some(LoginAction::AddAccountSuccess) = action.downcast_ref() {
                 log!("Received LoginAction::AddAccountSuccess, hiding login view.");
                 self.app_state.adding_account = false;
+                self.ui
+                    .modal(cx, ids!(login_screen_view.login_screen.login_status_modal))
+                    .close(cx);
                 self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, false);
                 self.ui.redraw(cx);
                 continue;
@@ -802,6 +805,9 @@ impl MatchEvent for App {
             if let Some(LoginAction::CancelAddAccount) = action.downcast_ref() {
                 log!("Received LoginAction::CancelAddAccount, hiding login view.");
                 self.app_state.adding_account = false;
+                self.ui
+                    .modal(cx, ids!(login_screen_view.login_screen.login_status_modal))
+                    .close(cx);
                 self.ui.view(cx, ids!(login_screen_view)).set_visible(cx, false);
                 self.ui.redraw(cx);
                 continue;
@@ -848,7 +854,7 @@ impl MatchEvent for App {
             // by `handle_session_changes`), navigate back to the login screen.
             // When not yet logged in, the login_screen widget handles displaying the failure modal.
             if let Some(LoginAction::LoginFailure(_)) = action.downcast_ref() {
-                if self.app_state.logged_in {
+                if self.app_state.logged_in && !self.app_state.adding_account {
                     log!("Received LoginAction::LoginFailure while logged in; showing login screen.");
                     self.app_state.logged_in = false;
                     self.update_login_visibility(cx);
@@ -936,10 +942,10 @@ impl MatchEvent for App {
             }
 
             // Handle an action requesting to open the new message context menu.
-            if let MessageAction::OpenMessageContextMenu { details, abs_pos } = action.as_widget_action().cast() {
+            if let MessageAction::OpenMessageContextMenu { details, abs_pos, opening_gesture } = action.as_widget_action().cast() {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let new_message_context_menu = self.ui.new_message_context_menu(cx, ids!(new_message_context_menu));
-                let expected_dimensions = new_message_context_menu.show(cx, details, self.app_state.app_language);
+                let expected_dimensions = new_message_context_menu.show(cx, details, self.app_state.app_language, opening_gesture);
                 // Use the overlay container's rect (not the window's) to correctly position
                 // the context menu relative to the body area, which excludes the caption bar.
                 let rect = self.ui.view(cx, ids!(overlay_container)).area().rect(cx);
@@ -960,10 +966,10 @@ impl MatchEvent for App {
             }
 
             // Handle an action requesting to open the room context menu.
-            if let RoomsListAction::OpenRoomContextMenu { details, pos } = action.as_widget_action().cast() {
+            if let RoomsListAction::OpenRoomContextMenu { details, pos, opening_gesture } = action.as_widget_action().cast() {
                 self.ui.callout_tooltip(cx, ids!(app_tooltip)).hide(cx);
                 let room_context_menu = self.ui.room_context_menu(cx, ids!(room_context_menu));
-                let expected_dimensions = room_context_menu.show(cx, details, self.app_state.app_language);
+                let expected_dimensions = room_context_menu.show(cx, details, self.app_state.app_language, opening_gesture);
                 // Use the overlay container's rect (not the window's) to correctly position
                 // the context menu relative to the body area, which excludes the caption bar.
                 let rect = self.ui.view(cx, ids!(overlay_container)).area().rect(cx);

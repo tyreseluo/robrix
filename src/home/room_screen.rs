@@ -1,7 +1,7 @@
 //! The `RoomScreen` widget is the UI view that displays a single room or thread's timeline
 //! of events (messages，state changes, etc.), along with an input bar at the bottom.
 
-use std::{borrow::Cow, cell::RefCell, ops::{DerefMut, Range}, sync::Arc, time::Duration};
+use std::{borrow::Cow, cell::{Cell, RefCell}, ops::{DerefMut, Range}, sync::Arc, time::Duration};
 
 use bytesize::ByteSize;
 use hashbrown::{HashMap, HashSet};
@@ -44,7 +44,7 @@ use crate::shared::mentionable_text_input::MentionableTextInputAction;
 
 use rangemap::RangeSet;
 
-use super::{event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
+use super::{ContextMenuOpenGesture, event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
 
 /// The maximum number of timeline items to search through
 /// when looking for a particular event.
@@ -67,6 +67,18 @@ const TRANSLATION_LANG_POPUP_SCROLL_HEIGHT: f64 = 288.0;
 const TRANSLATION_LANG_POPUP_HEIGHT: f64 = TRANSLATION_LANG_POPUP_SCROLL_HEIGHT + 8.0;
 const TRANSLATION_LANG_POPUP_GAP: f64 = 6.0;
 const TRANSLATION_LANG_POPUP_MARGIN: f64 = 8.0;
+
+thread_local! {
+    static ROOM_INFO_ACTION_MODAL_OPEN: Cell<bool> = const { Cell::new(false) };
+}
+
+fn set_room_info_action_modal_open(open: bool) {
+    ROOM_INFO_ACTION_MODAL_OPEN.with(|state| state.set(open));
+}
+
+fn is_room_info_action_modal_open() -> bool {
+    ROOM_INFO_ACTION_MODAL_OPEN.with(|state| state.get())
+}
 
 
 /// #FFF4E5
@@ -165,6 +177,17 @@ where
             state.timeline_index = Some(idx);
         }
     }
+}
+
+fn any_timeline_indices_visible<I, F>(
+    indices: I,
+    is_visible: F,
+) -> bool
+where
+    I: IntoIterator<Item = Option<usize>>,
+    F: FnMut(usize) -> bool,
+{
+    indices.into_iter().flatten().any(is_visible)
 }
 
 fn streaming_candidates_from_items<'a>(
@@ -2437,7 +2460,7 @@ impl Widget for RoomInfoSlidingPane {
         }
 
         let area = self.view.area();
-        let close_pane = if is_invite_modal_open() {
+        let close_pane = if is_invite_modal_open() || is_room_info_action_modal_open() {
             matches!(
                 event,
                 Event::Actions(actions) if self.button(cx, ids!(close_button)).clicked(actions)
@@ -2856,8 +2879,14 @@ impl Widget for RoomScreen {
         let portal_list = self.portal_list(cx, ids!(timeline.list));
         let user_profile_sliding_pane = self.user_profile_sliding_pane(cx, ids!(user_profile_sliding_pane));
         let threads_sliding_pane = self.threads_sliding_pane(cx, ids!(threads_sliding_pane));
+        let threads_sliding_pane_widget_uid = threads_sliding_pane.widget_uid();
         let room_info_sliding_pane = self.room_info_sliding_pane(cx, ids!(room_info_sliding_pane));
+        let room_info_sliding_pane_widget_uid = room_info_sliding_pane.widget_uid();
         let loading_pane = self.loading_pane(cx, ids!(loading_pane));
+        set_room_info_action_modal_open(
+            self.view.modal(cx, ids!(report_room_modal)).is_open()
+                || self.view.modal(cx, ids!(leave_room_confirm_modal)).is_open()
+        );
 
         // Streaming animation frame handler
         if let Some(_ne) = self.streaming_next_frame.is_event(event) {
@@ -2866,24 +2895,25 @@ impl Widget for RoomScreen {
             let frame_start = std::time::Instant::now();
 
             if let Some(tl) = self.tl_state.as_mut() {
-                let mut any_active = false;
                 let mut needs_another_frame = false;
                 let mut completed_ids = Vec::new();
+                let mut redraw_candidate_indices = Vec::new();
 
                 for (event_id, state) in tl.streaming_messages.iter_mut() {
                     if state.needs_frame() {
                         if state.tick() {
-                            any_active = true;
                             // Invalidate draw cache so item gets re-populated
                             if let Some(idx) = state.timeline_index {
                                 tl.content_drawn_since_last_update.remove(idx..idx + 1);
                             }
+                            redraw_candidate_indices.push(state.timeline_index);
                         }
                         needs_another_frame |= state.needs_frame();
                     }
 
                     if state.is_complete() || state.is_timed_out() {
                         completed_ids.push(event_id.clone());
+                        redraw_candidate_indices.push(state.timeline_index);
                     }
                 }
 
@@ -2893,12 +2923,12 @@ impl Widget for RoomScreen {
 
                 // Safety cap: max 50 streaming entries
                 while tl.streaming_messages.len() > 50 {
-                    if let Some(oldest_id) = tl.streaming_messages.iter()
+                    if let Some((oldest_id, oldest_idx)) = tl.streaming_messages.iter()
                         .min_by_key(|(_, s)| s.animation_start_time)
-                        .map(|(id, _)| id.clone())
+                        .map(|(id, state)| (id.clone(), state.timeline_index))
                     {
                         tl.streaming_messages.remove(&oldest_id);
-                        any_active = true;
+                        redraw_candidate_indices.push(oldest_idx);
                     }
                 }
 
@@ -2906,8 +2936,11 @@ impl Widget for RoomScreen {
                     self.streaming_next_frame = cx.new_next_frame();
                 }
 
-                if any_active || !completed_ids.is_empty() {
-                    self.redraw(cx);
+                if any_timeline_indices_visible(
+                    redraw_candidate_indices.iter().copied(),
+                    |idx| portal_list.get_item(idx).is_some(),
+                ) {
+                    self.redraw_timeline_list(cx);
                 }
             }
 
@@ -2927,24 +2960,27 @@ impl Widget for RoomScreen {
 
         if self.streaming_timeout_timer.is_event(event).is_some() {
             if let Some(tl) = self.tl_state.as_mut() {
-                let timed_out_ids: Vec<OwnedEventId> = tl
+                let timed_out_entries: Vec<(OwnedEventId, Option<usize>)> = tl
                     .streaming_messages
                     .iter()
                     .filter_map(|(event_id, state)| {
                         if state.is_timed_out() || state.is_complete() {
-                            Some(event_id.clone())
+                            Some((event_id.clone(), state.timeline_index))
                         } else {
                             None
                         }
                     })
                     .collect();
 
-                for event_id in &timed_out_ids {
+                for (event_id, _) in &timed_out_entries {
                     tl.streaming_messages.remove(event_id);
                 }
 
-                if !timed_out_ids.is_empty() {
-                    self.redraw(cx);
+                if any_timeline_indices_visible(
+                    timed_out_entries.iter().map(|(_, idx)| *idx),
+                    |idx| portal_list.get_item(idx).is_some(),
+                ) {
+                    self.redraw_timeline_list(cx);
                 }
             }
 
@@ -3069,6 +3105,23 @@ impl Widget for RoomScreen {
             self.handle_message_actions(cx, actions, &portal_list, &loading_pane);
 
             for action in actions {
+                if let Some(RoomsListAction::Selected(selected_room)) = action.downcast_ref() {
+                    if self.timeline_kind.as_ref() != selected_room.timeline_kind().as_ref() {
+                        self.close_report_room_modal(cx);
+                        self.close_leave_room_confirm_modal(cx);
+                    }
+                }
+                if let Some(AppStateAction::RoomFocused(selected_room)) = action.downcast_ref() {
+                    if self.timeline_kind.as_ref() != selected_room.timeline_kind().as_ref() {
+                        self.close_report_room_modal(cx);
+                        self.close_leave_room_confirm_modal(cx);
+                    }
+                }
+                if let Some(AppStateAction::FocusNone) = action.downcast_ref() {
+                    self.close_report_room_modal(cx);
+                    self.close_leave_room_confirm_modal(cx);
+                }
+
                 // Handle actions related to restoring the previously-saved state of rooms.
                 if let Some(AppStateAction::RoomLoadedSuccessfully { room_name_id, ..}) = action.downcast_ref() {
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_name_id.room_id()) {
@@ -3148,7 +3201,11 @@ impl Widget for RoomScreen {
                     }
                 }
 
-                match action.as_widget_action().cast_ref() {
+                match action
+                    .as_widget_action()
+                    .widget_uid_eq(threads_sliding_pane_widget_uid)
+                    .cast_ref()
+                {
                     ThreadsPaneAction::OpenThread(thread_root_event_id) => {
                         let Some(room_name_id) = self.room_name_id.as_ref().cloned() else { continue };
                         threads_sliding_pane.hide(cx);
@@ -3166,7 +3223,11 @@ impl Widget for RoomScreen {
                     ThreadsPaneAction::None => {}
                 }
 
-                match action.as_widget_action().cast_ref() {
+                match action
+                    .as_widget_action()
+                    .widget_uid_eq(room_info_sliding_pane_widget_uid)
+                    .cast_ref()
+                {
                     RoomInfoPaneAction::InviteUser => {
                         if let Some(room_name_id) = self.room_name_id.as_ref().cloned() {
                             cx.action(InviteModalAction::Open(room_name_id));
@@ -3334,9 +3395,15 @@ impl Widget for RoomScreen {
         // We check which overlay views are visible in the order of those views' z-ordering,
         // such that the top-most views get a chance to handle the event first.
         //
+        let room_info_action_modal_open =
+            self.view.modal(cx, ids!(report_room_modal)).is_open()
+            || self.view.modal(cx, ids!(leave_room_confirm_modal)).is_open();
         let is_interactive_hit = utils::is_interactive_hit_event(event);
         let is_pane_shown: bool;
-        if loading_pane.is_currently_shown(cx) {
+        if room_info_action_modal_open {
+            is_pane_shown = true;
+        }
+        else if loading_pane.is_currently_shown(cx) {
             is_pane_shown = true;
             if is_interactive_hit {
                 loading_pane.handle_event(cx, event, scope);
@@ -3369,7 +3436,7 @@ impl Widget for RoomScreen {
         //       Makepad already delivers most events to all views regardless of visibility,
         //       so the only thing we'd need here is the conditional below.
 
-        if !is_pane_shown || !is_interactive_hit {
+        if room_info_action_modal_open || !is_pane_shown || !is_interactive_hit {
             // Create a Scope with RoomScreenProps containing the room members.
             // This scope is needed by child widgets like MentionableTextInput during event handling.
             let room_props = if let Some(tl) = self.tl_state.as_ref() {
@@ -4035,6 +4102,13 @@ impl RoomScreen {
             .set_app_language(cx, self.app_language);
         self.sync_translation_lang_popup(cx);
         self.view.redraw(cx);
+    }
+
+    fn redraw_timeline_list(&self, cx: &mut Cx) {
+        let portal_list = self.portal_list(cx, ids!(timeline.list));
+        if let Some(mut list) = portal_list.borrow_mut() {
+            list.redraw(cx);
+        }
     }
 
     fn sync_translation_lang_popup(&mut self, cx: &mut Cx) {
@@ -5235,6 +5309,15 @@ impl RoomScreen {
                             Some(5.0),
                         );
                     }
+                }
+                MessageAction::MessageSubmittedLocally => {
+                    let Some(tl) = self.tl_state.as_ref() else { continue };
+                    let last_item_idx = tl.items.len().saturating_sub(1);
+                    portal_list.set_first_id_and_scroll(last_item_idx, 0.0);
+                    portal_list.set_tail_range(true);
+                    self.jump_to_bottom_button(cx, ids!(jump_to_bottom_button))
+                        .update_visibility(cx, true);
+                    self.redraw(cx);
                 }
                 MessageAction::Pin(details) => {
                     let Some(tl) = self.tl_state.as_ref() else { return };
@@ -8405,6 +8488,8 @@ pub enum MessageAction {
     Edit(MessageDetails),
     /// The user requested to edit their latest message in this room.
     EditLatest,
+    /// The user submitted a new local message and the timeline should follow the live tail.
+    MessageSubmittedLocally,
     /// The user clicked the "pin" button on a message.
     Pin(MessageDetails),
     /// The user clicked the "unpin" button on a message.
@@ -8444,6 +8529,7 @@ pub enum MessageAction {
         /// The absolute position where we should show the context menu,
         /// in which the (0,0) origin coordinate is the top left corner of the app window.
         abs_pos: DVec2,
+        opening_gesture: ContextMenuOpenGesture,
     },
     ToggleTranslationLangPopup {
         button_rect: Rect,
@@ -8687,6 +8773,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: fe.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                         }
                     );
                 }
@@ -8697,6 +8784,7 @@ impl Widget for Message {
                     MessageAction::OpenMessageContextMenu {
                         details: details.clone(),
                         abs_pos: lp.abs,
+                        opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                     }
                 );
             }
@@ -8728,6 +8816,7 @@ impl Widget for Message {
                             MessageAction::OpenMessageContextMenu {
                                 details: details.clone(),
                                 abs_pos: fe.abs,
+                                opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                             }
                         );
                     }
@@ -8744,6 +8833,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: lp.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                         }
                     );
                 }
@@ -8779,6 +8869,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: fe.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                         }
                     );
                 }
@@ -8789,6 +8880,7 @@ impl Widget for Message {
                     MessageAction::OpenMessageContextMenu {
                         details: details.clone(),
                         abs_pos: lp.abs,
+                        opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                     }
                 );
             }

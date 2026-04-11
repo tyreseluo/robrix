@@ -610,6 +610,33 @@ impl LoginScreen {
         });
     }
 
+    fn set_sso_pending_state(&mut self, cx: &mut Cx, pending: bool) {
+        let mask = if pending { 1.0 } else { 0.0 };
+        let cursor = if pending { MouseCursor::NotAllowed } else { MouseCursor::Hand };
+        let button_set: &[&[LiveId]] = ids_array!(
+            apple_button,
+            facebook_button,
+            github_button,
+            gitlab_button,
+            google_button,
+            twitter_button
+        );
+        for view_ref in self.view_set(cx, button_set).iter() {
+            let Some(mut view_mut) = view_ref.borrow_mut() else { continue };
+            let mut image = view_mut.image(cx, ids!(image));
+            script_apply_eval!(cx, image, {
+                draw_bg.mask: #(mask)
+            });
+            view_mut.cursor = Some(cursor);
+        }
+        self.sso_pending = pending;
+    }
+
+    fn reset_sso_state(&mut self, cx: &mut Cx) {
+        self.sso_redirect_url = None;
+        self.set_sso_pending_state(cx, false);
+    }
+
     fn sync_mode_texts(&mut self, cx: &mut Cx) {
         self.view.label(cx, ids!(title)).set_text(cx,
             if self.signup_mode {
@@ -915,6 +942,7 @@ impl WidgetMatchEvent for LoginScreen {
         // Handle cancel button for add-account mode
         if cancel_button.clicked(actions) {
             self.adding_account = false;
+            self.reset_sso_state(cx);
             // Reset the UI back to normal login mode
             self.view.label(cx, ids!(title)).set_text(cx, tr_key(self.app_language, "login.title.login_to_robrix"));
             cancel_button.set_visible(cx, false);
@@ -1093,17 +1121,7 @@ impl WidgetMatchEvent for LoginScreen {
                     self.redraw(cx);
                 }
                 Some(LoginAction::SsoPending(pending)) => {
-                    let mask = if *pending { 1.0 } else { 0.0 };
-                    let cursor = if *pending { MouseCursor::NotAllowed } else { MouseCursor::Hand };
-                    for view_ref in self.view_set(cx, button_set).iter() {
-                        let Some(mut view_mut) = view_ref.borrow_mut() else { continue };
-                        let mut image = view_mut.image(cx, ids!(image));
-                        script_apply_eval!(cx, image, {
-                            draw_bg.mask: #(mask)
-                        });
-                        view_mut.cursor = Some(cursor);
-                    }
-                    self.sso_pending = *pending;
+                    self.set_sso_pending_state(cx, *pending);
                     self.redraw(cx);
                 }
                 Some(LoginAction::SsoSetRedirectUrl(url)) => {
@@ -1111,6 +1129,7 @@ impl WidgetMatchEvent for LoginScreen {
                 }
                 Some(LoginAction::ShowAddAccountScreen) => {
                     self.adding_account = true;
+                    self.reset_sso_state(cx);
                     // Update UI to "add account" mode
                     self.view.label(cx, ids!(title)).set_text(cx, tr_key(self.app_language, "settings.account.button.add_another_account"));
                     cancel_button.set_visible(cx, true);
@@ -1121,6 +1140,7 @@ impl WidgetMatchEvent for LoginScreen {
                 Some(LoginAction::AddAccountSuccess) => {
                     // Reset the login screen state
                     self.adding_account = false;
+                    self.reset_sso_state(cx);
                     user_id_input.set_text(cx, "");
                     password_input.set_text(cx, "");
                     homeserver_input.set_text(cx, "");
@@ -1159,7 +1179,8 @@ impl WidgetMatchEvent for LoginScreen {
                 let request_id = id!(SSO_CANCEL_BUTTON);
                 let request = HttpRequest::new(format!("{}/?login_token=",sso_redirect_url), HttpMethod::GET);
                 cx.http_request(request_id, request);
-                self.sso_redirect_url = None;
+                self.reset_sso_state(cx);
+                self.redraw(cx);
             }
         }
 
