@@ -85,6 +85,7 @@ pub mod utils;
 /// Multi-account management for supporting multiple Matrix accounts simultaneously.
 pub mod account_manager;
 pub mod temp_storage;
+pub mod proxy_config;
 pub mod location;
 pub mod image_utils;
 
