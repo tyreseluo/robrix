@@ -101,7 +101,9 @@ impl From<LoginByPassword> for Cli {
             homeserver: login.homeserver
                 .map(|homeserver| homeserver.trim().to_owned())
                 .filter(|homeserver| !homeserver.is_empty()),
-            proxy: None,
+            proxy: login.proxy
+                .map(|proxy| proxy.trim().to_owned())
+                .filter(|proxy| !proxy.is_empty()),
             login_screen: false,
             verbose: false,
         }
@@ -116,7 +118,9 @@ impl From<RegisterAccount> for Cli {
             homeserver: registration.homeserver
                 .map(|homeserver| homeserver.trim().to_owned())
                 .filter(|homeserver| !homeserver.is_empty()),
-            proxy: None,
+            proxy: registration.proxy
+                .map(|proxy| proxy.trim().to_owned())
+                .filter(|proxy| !proxy.is_empty()),
             login_screen: false,
             verbose: false,
         }
@@ -349,8 +353,14 @@ async fn build_client(
         .with_enable_share_history_on_invite(true)
         .handle_refresh_tokens();
 
-    if let Some(proxy) = cli.proxy.as_ref() {
-        builder = builder.proxy(proxy.clone());
+    let effective_proxy = crate::proxy_config::resolve_effective_proxy_url(cli.proxy.as_deref());
+    if let Some(proxy) = effective_proxy.as_deref() {
+        if let Err(e) = crate::proxy_config::apply_proxy_to_process_env(Some(proxy)) {
+            warning!("Failed to apply proxy env before building Matrix client: {e}");
+        }
+    }
+    if let Some(proxy) = effective_proxy {
+        builder = builder.proxy(proxy);
     }
 
     // Use a 60 second timeout for all requests to the homeserver.
@@ -427,6 +437,7 @@ async fn login(
                 user_id: registration.user_id.clone(),
                 password: registration.password.clone(),
                 homeserver: registration.homeserver.clone(),
+                proxy: registration.proxy.clone(),
             });
             let localpart = registration_localpart(&registration.user_id)?;
             let (client, client_session) = build_client(&cli, app_data_dir()).await?;
@@ -944,6 +955,7 @@ pub enum MatrixRequest {
         brand: String,
         homeserver_url: String,
         identity_provider_id: String,
+        proxy: Option<String>,
     },
     /// Subscribe to typing notices for the given room.
     ///
@@ -1135,6 +1147,7 @@ pub struct LoginByPassword {
     pub user_id: String,
     pub password: String,
     pub homeserver: Option<String>,
+    pub proxy: Option<String>,
     /// Whether this login is for adding another account (multi-account mode).
     pub is_add_account: bool,
 }
@@ -1145,6 +1158,7 @@ pub struct RegisterAccount {
     pub user_id: String,
     pub password: String,
     pub homeserver: Option<String>,
+    pub proxy: Option<String>,
 }
 
 
@@ -2548,8 +2562,8 @@ async fn matrix_worker_task(
                 subscribers_pinned_events.insert(room_id, subscribe_pinned_events_task);
             }
 
-            MatrixRequest::SpawnSSOServer { brand, homeserver_url, identity_provider_id} => {
-                spawn_sso_server(brand, homeserver_url, identity_provider_id, login_sender.clone()).await;
+            MatrixRequest::SpawnSSOServer { brand, homeserver_url, identity_provider_id, proxy } => {
+                spawn_sso_server(brand, homeserver_url, identity_provider_id, proxy, login_sender.clone()).await;
             }
 
             MatrixRequest::ResolveRoomAlias(room_alias) => {
@@ -3157,6 +3171,8 @@ pub fn block_on_async_with_timeout<T>(
 ///
 /// Returns a handle to the Tokio runtime that is used to run async background tasks.
 pub fn start_matrix_tokio() -> Result<tokio::runtime::Handle> {
+    crate::proxy_config::load_and_apply_saved_proxy_to_process_env();
+
     // Create a Tokio runtime, and save it in a static variable to ensure it isn't dropped.
     let rt_handle = TOKIO_RUNTIME.lock().unwrap().get_or_insert_with(|| {
         tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime")
@@ -5556,6 +5572,7 @@ async fn spawn_sso_server(
     brand: String,
     homeserver_url: String,
     identity_provider_id: String,
+    proxy: Option<String>,
     login_sender: Sender<LoginRequest>,
 ) {
     Cx::post_action(LoginAction::SsoPending(true));
@@ -5575,6 +5592,13 @@ async fn spawn_sso_server(
     let client_and_session_opt = DEFAULT_SSO_CLIENT.lock().unwrap().take();
 
     Handle::current().spawn(async move {
+        let effective_proxy = crate::proxy_config::resolve_effective_proxy_url(proxy.as_deref());
+        if let Some(proxy) = effective_proxy.as_deref() {
+            if let Err(e) = crate::proxy_config::apply_proxy_to_process_env(Some(proxy)) {
+                warning!("Failed to apply proxy env before SSO login: {e}");
+            }
+        }
+
         // Try to use the DEFAULT_SSO_CLIENT that we proactively created
         // during initialization (to speed up opening the SSO browser window).
         let mut client_and_session = client_and_session_opt;
@@ -5583,7 +5607,7 @@ async fn spawn_sso_server(
         // or if the homeserver_url is *not* empty and isn't the default,
         // we cannot use the DEFAULT_SSO_CLIENT, so we must build a new one.
         let mut build_client_error = None;
-        if client_and_session.is_none() || (
+        if client_and_session.is_none() || effective_proxy.is_some() || (
             !homeserver_url.is_empty()
                 && homeserver_url != "matrix.org"
                 && Url::parse(&homeserver_url) != Url::parse("https://matrix-client.matrix.org/")
@@ -5592,6 +5616,7 @@ async fn spawn_sso_server(
             match build_client(
                 &Cli {
                     homeserver: homeserver_url.is_empty().not().then_some(homeserver_url),
+                    proxy: effective_proxy,
                     ..Default::default()
                 },
                 app_data_dir(),

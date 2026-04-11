@@ -178,15 +178,23 @@ pub async fn restore_session(
         status: status_str,
     });
     // Build the client with the previous settings from the session.
-    let client = Client::builder()
+    let mut client_builder = Client::builder()
         .homeserver_url(client_session.homeserver.clone())
         .sqlite_store(client_session.db_path.clone(), Some(&client_session.passphrase))
         .with_threading_support(matrix_sdk::ThreadingSupport::Enabled {
             with_subscriptions: true,
         })
-        .handle_refresh_tokens()
-        .build()
-        .await?;
+        .handle_refresh_tokens();
+    let saved_proxy = crate::proxy_config::load_saved_proxy_url();
+    if let Some(proxy) = saved_proxy.as_deref() {
+        if let Err(e) = crate::proxy_config::apply_proxy_to_process_env(Some(proxy)) {
+            warning!("Failed to apply proxy env before restoring Matrix session: {e}");
+        }
+    }
+    if let Some(proxy) = saved_proxy {
+        client_builder = client_builder.proxy(proxy);
+    }
+    let client = client_builder.build().await?;
     let sliding_sync_version = sliding_sync_version.into();
     client.set_sliding_sync_version(sliding_sync_version);
     let status_str = format!("Authenticating previous login session for {}...", user_session.meta.user_id);

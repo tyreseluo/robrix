@@ -47,6 +47,7 @@ script_mod! {
         ..mod.widgets.SolidView
 
         width: Fill, height: Fill,
+        flow: Overlay
         align: Align{x: 0.5, y: 0.5}
         show_bg: true,
         draw_bg +: {
@@ -211,7 +212,6 @@ script_mod! {
                             LineH { draw_bg.color: #C8C8C8 }
                         }
                     }
-                    
 
                     login_button := RobrixIconButton {
                         width: 275,
@@ -314,7 +314,7 @@ script_mod! {
 
                     // Cancel button for add-account mode (hidden by default)
                     cancel_button := RobrixIconButton {
-                        width: Fit, height: Fit
+                        width: Fit, height: Fit,
                         padding: Inset{left: 15, right: 15, top: 10, bottom: 10}
                         margin: Inset{top: 10, bottom: 5}
                         align: Align{x: 0.5, y: 0.5}
@@ -331,12 +331,255 @@ script_mod! {
                         login_status_modal_inner := mod.widgets.LoginStatusModal {}
                     }
                 }
+
+                proxy_settings_modal := Modal {
+                    can_dismiss: true,
+                    content +: {
+                        proxy_settings_modal_inner := RoundedView {
+                            width: 380, height: Fit,
+                            flow: Down
+                            spacing: 12.0
+                            padding: Inset{top: 18, left: 16, right: 16, bottom: 16}
+                            show_bg: true
+                            draw_bg +: {
+                                color: (COLOR_PRIMARY)
+                                border_radius: 10.0
+                                border_size: 1.0
+                                border_color: #D8D8D8
+                            }
+
+                            proxy_settings_header := View {
+                                width: Fill, height: Fit,
+                                flow: Right,
+                                align: Align{x: 1.0, y: 0.5}
+                                spacing: 8.0
+
+                                proxy_settings_title := Label {
+                                    width: Fill, height: Fit
+                                    draw_text +: {
+                                        color: (COLOR_ACTIVE_PRIMARY)
+                                        text_style: TITLE_TEXT {font_size: 14}
+                                    }
+                                    text: "Network proxy settings"
+                                }
+
+                                proxy_settings_close_button := RobrixNeutralIconButton {
+                                    width: Fit, height: Fit
+                                    padding: Inset{left: 7, right: 4, top: 7, bottom: 7}
+                                    text: ""
+                                    icon_walk: Walk{width: 14, height: 14, margin: 0}
+                                    draw_icon.svg: (ICON_CLOSE)
+                                }
+                            }
+
+                            proxy_use_card := RoundedView {
+                                width: Fill, height: Fit,
+                                flow: Right,
+                                align: Align{x: 1.0, y: 0.5}
+                                show_bg: true
+                                draw_bg +: {
+                                    color: #F5F5F5
+                                    border_radius: 8.0
+                                    border_size: 1.0
+                                    border_color: #DADADA
+                                }
+                                padding: Inset{top: 12, bottom: 12, left: 12, right: 12}
+
+                                proxy_use_label := Label {
+                                    width: Fill, height: Fit
+                                    draw_text +: {
+                                        color: (COLOR_TEXT)
+                                        text_style: TITLE_TEXT {font_size: 12}
+                                    }
+                                    text: "Use proxy"
+                                }
+
+                                proxy_use_toggle := Toggle {
+                                    width: 52, height: 28
+                                    text: ""
+                                    active: false
+                                    icon_walk: Walk{width: 0, height: 0, margin: 0}
+                                    label_walk: Walk{width: 0, height: 0, margin: 0}
+                                    draw_bg +: {
+                                        size: 18.0
+                                        color: #E3E7EF
+                                        color_hover: #E3E7EF
+                                        color_down: #D5DBE6
+                                        color_active: (COLOR_ACTIVE_PRIMARY)
+                                        border_radius: 14.0
+                                        border_size: 1.5
+                                        border_color: #7E879A
+                                        border_color_hover: #7E879A
+                                        border_color_down: #6F788D
+                                        border_color_active: (COLOR_ACTIVE_PRIMARY_DARKER)
+                                        mark_color: #2D3A57
+                                        mark_color_hover: #2D3A57
+                                        mark_color_down: #2D3A57
+                                        mark_color_active: #FFFFFF
+                                        mark_color_active_hover: #FFFFFF
+                                    }
+                                }
+                            }
+
+                            proxy_fields_section := RoundedView {
+                                visible: false
+                                width: Fill, height: Fit,
+                                flow: Down
+                                spacing: 0
+                                show_bg: true
+                                draw_bg +: {
+                                    color: #F5F5F5
+                                    border_radius: 8.0
+                                    border_size: 1.0
+                                    border_color: #DADADA
+                                }
+                                padding: Inset{top: 4, left: 12, right: 12, bottom: 8}
+
+                                proxy_address_row := View {
+                                    width: Fill, height: Fit,
+                                    flow: Right
+                                    align: Align{y: 0.5}
+                                    spacing: 8.0
+                                    padding: Inset{top: 8, bottom: 8}
+
+                                    proxy_address_label := Label {
+                                        width: 90, height: Fit
+                                        draw_text +: {
+                                            color: (COLOR_TEXT)
+                                            text_style: TITLE_TEXT {font_size: 12}
+                                        }
+                                        text: "Address"
+                                    }
+
+                                    proxy_address_input := RobrixTextInput {
+                                        width: Fill, height: Fit,
+                                        flow: Right,
+                                        empty_text: "127.0.0.1"
+                                        padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                    }
+                                }
+
+                                LineH { draw_bg.color: #DDDDDD }
+
+                                proxy_port_row := View {
+                                    width: Fill, height: Fit,
+                                    flow: Right
+                                    align: Align{y: 0.5}
+                                    spacing: 8.0
+                                    padding: Inset{top: 8, bottom: 8}
+
+                                    proxy_port_label := Label {
+                                        width: 90, height: Fit
+                                        draw_text +: {
+                                            color: (COLOR_TEXT)
+                                            text_style: TITLE_TEXT {font_size: 12}
+                                        }
+                                        text: "Port"
+                                    }
+
+                                    proxy_port_input := RobrixTextInput {
+                                        width: Fill, height: Fit,
+                                        flow: Right,
+                                        empty_text: "7890"
+                                        padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                    }
+                                }
+
+                                LineH { draw_bg.color: #DDDDDD }
+
+                                proxy_account_row := View {
+                                    width: Fill, height: Fit,
+                                    flow: Right
+                                    align: Align{y: 0.5}
+                                    spacing: 8.0
+                                    padding: Inset{top: 8, bottom: 8}
+
+                                    proxy_account_label := Label {
+                                        width: 90, height: Fit
+                                        draw_text +: {
+                                            color: (COLOR_TEXT)
+                                            text_style: TITLE_TEXT {font_size: 12}
+                                        }
+                                        text: "Account"
+                                    }
+
+                                    proxy_account_input := RobrixTextInput {
+                                        width: Fill, height: Fit,
+                                        flow: Right,
+                                        empty_text: ""
+                                        padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                    }
+                                }
+
+                                LineH { draw_bg.color: #DDDDDD }
+
+                                proxy_password_row := View {
+                                    width: Fill, height: Fit,
+                                    flow: Right
+                                    align: Align{y: 0.5}
+                                    spacing: 8.0
+                                    padding: Inset{top: 8, bottom: 8}
+
+                                    proxy_password_label := Label {
+                                        width: 90, height: Fit
+                                        draw_text +: {
+                                            color: (COLOR_TEXT)
+                                            text_style: TITLE_TEXT {font_size: 12}
+                                        }
+                                        text: "Password"
+                                    }
+
+                                    proxy_password_input := RobrixTextInput {
+                                        width: Fill, height: Fit,
+                                        flow: Right,
+                                        empty_text: ""
+                                        is_password: true,
+                                        padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
+                                    }
+                                }
+                            }
+
+                            proxy_settings_save_button := RobrixIconButton {
+                                width: 120, height: 40
+                                align: Align{x: 0.5, y: 0.5}
+                                text: "Save"
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+
+        proxy_settings_button_anchor := View {
+            width: Fill, height: Fill
+            flow: Down
+            align: Align{x: 0.0, y: 0.0}
+
+            View {
+                width: Fill, height: Fit
+                flow: Right
+                padding: Inset{top: 10, right: 10}
+
+                View {
+                    width: Fill, height: Fit
+                }
+
+                proxy_settings_button := RobrixNeutralIconButton {
+                    width: Fit, height: Fit
+                    spacing: 0
+                    padding: 8
+                    text: ""
+                    label_walk: Walk{width: 0, height: 0, margin: 0}
+                    icon_walk: Walk{width: 14, height: 14, margin: 0}
+                    draw_icon.svg: (ICON_SETTINGS)
+                }
             }
         }
     }
 }
 
-#[derive(Script, ScriptHook, Widget)]
+#[derive(Script, Widget)]
 pub struct LoginScreen {
     #[source] source: ScriptObjectRef,
     #[deref] view: View,
@@ -353,9 +596,20 @@ pub struct LoginScreen {
     #[rust] app_language: AppLanguage,
     /// Boolean to indicate if we're in "add account" mode (adding another Matrix account).
     #[rust] adding_account: bool,
+    #[rust] use_proxy_enabled: bool,
 }
 
 impl LoginScreen {
+    fn sync_proxy_settings_modal_layout(&mut self, cx: &mut Cx) {
+        let rect = self.view.area().rect(cx);
+        let available_width = (rect.size.x - 24.0).max(260.0);
+        let modal_width = available_width.min(380.0);
+        let mut proxy_settings_modal_inner = self.view.view(cx, ids!(proxy_settings_modal_inner));
+        script_apply_eval!(cx, proxy_settings_modal_inner, {
+            width: #(modal_width)
+        });
+    }
+
     fn set_sso_pending_state(&mut self, cx: &mut Cx, pending: bool) {
         let mask = if pending { 1.0 } else { 0.0 };
         let cursor = if pending { MouseCursor::NotAllowed } else { MouseCursor::Hand };
@@ -424,14 +678,151 @@ impl LoginScreen {
             .set_empty_text(cx, tr_key(self.app_language, "login.input.confirm_password").to_string());
         self.view.text_input(cx, ids!(homeserver_input))
             .set_empty_text(cx, tr_key(self.app_language, "login.input.homeserver").to_string());
+        self.view.text_input(cx, ids!(proxy_address_input))
+            .set_empty_text(cx, tr_key(self.app_language, "login.proxy_settings.input.address").to_string());
+        self.view.text_input(cx, ids!(proxy_port_input))
+            .set_empty_text(cx, tr_key(self.app_language, "login.proxy_settings.input.port").to_string());
+        self.view.text_input(cx, ids!(proxy_account_input))
+            .set_empty_text(cx, tr_key(self.app_language, "login.proxy_settings.input.account").to_string());
+        self.view.text_input(cx, ids!(proxy_password_input))
+            .set_empty_text(cx, tr_key(self.app_language, "login.proxy_settings.input.password").to_string());
         self.view.label(cx, ids!(homeserver_hint_label))
             .set_text(cx, tr_key(self.app_language, "login.label.homeserver_optional"));
+        self.view.label(cx, ids!(proxy_settings_title))
+            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.title"));
+        self.view.label(cx, ids!(proxy_use_label))
+            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.use_proxy"));
+        self.view.label(cx, ids!(proxy_address_label))
+            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.address"));
+        self.view.label(cx, ids!(proxy_port_label))
+            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.port"));
+        self.view.label(cx, ids!(proxy_account_label))
+            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.account"));
+        self.view.label(cx, ids!(proxy_password_label))
+            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.password"));
+        self.view.button(cx, ids!(proxy_settings_save_button))
+            .set_text(cx, tr_key(self.app_language, "login.proxy_settings.save"));
         self.view.label(cx, ids!(sso_prompt_label))
             .set_text(cx, tr_key(self.app_language, "login.sso.prompt"));
         let login_status_modal_inner = self.view.login_status_modal(cx, ids!(login_status_modal_inner));
         login_status_modal_inner.set_title(cx, tr_key(self.app_language, "login_status_modal.title"));
         login_status_modal_inner.button_ref(cx).set_text(cx, tr_key(self.app_language, "login_status_modal.button.cancel"));
         self.sync_mode_texts(cx);
+    }
+
+    fn set_use_proxy_enabled(&mut self, cx: &mut Cx, enabled: bool) {
+        self.use_proxy_enabled = enabled;
+        self.view
+            .check_box(cx, ids!(proxy_use_toggle))
+            .set_active(cx, enabled);
+        self.view
+            .view(cx, ids!(proxy_fields_section))
+            .set_visible(cx, enabled);
+        self.redraw(cx);
+    }
+
+    fn load_saved_proxy_to_form(&mut self, cx: &mut Cx) {
+        let saved_proxy = crate::proxy_config::load_saved_proxy_url();
+        let Some(saved_proxy) = saved_proxy else {
+            self.set_use_proxy_enabled(cx, false);
+            self.view.text_input(cx, ids!(proxy_address_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(proxy_port_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(proxy_account_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(proxy_password_input)).set_text(cx, "");
+            return;
+        };
+
+        let Ok(parsed_url) = Url::parse(&saved_proxy) else {
+            self.set_use_proxy_enabled(cx, true);
+            self.view.text_input(cx, ids!(proxy_address_input)).set_text(cx, &saved_proxy);
+            self.view.text_input(cx, ids!(proxy_port_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(proxy_account_input)).set_text(cx, "");
+            self.view.text_input(cx, ids!(proxy_password_input)).set_text(cx, "");
+            return;
+        };
+
+        self.set_use_proxy_enabled(cx, true);
+        self.view
+            .text_input(cx, ids!(proxy_address_input))
+            .set_text(cx, parsed_url.host_str().unwrap_or_default());
+        self.view
+            .text_input(cx, ids!(proxy_port_input))
+            .set_text(cx, &parsed_url.port().map(|p| p.to_string()).unwrap_or_default());
+        self.view
+            .text_input(cx, ids!(proxy_account_input))
+            .set_text(cx, parsed_url.username());
+        self.view
+            .text_input(cx, ids!(proxy_password_input))
+            .set_text(cx, parsed_url.password().unwrap_or_default());
+    }
+
+    fn build_proxy_url_from_form(&mut self, cx: &mut Cx) -> Result<Option<String>, String> {
+        if !self.use_proxy_enabled {
+            return Ok(None);
+        }
+
+        let address = self.view.text_input(cx, ids!(proxy_address_input)).text();
+        let port_text = self.view.text_input(cx, ids!(proxy_port_input)).text();
+        let account = self.view.text_input(cx, ids!(proxy_account_input)).text();
+        let password = self.view.text_input(cx, ids!(proxy_password_input)).text();
+
+        let address = address.trim().to_owned();
+        let port_text = port_text.trim().to_owned();
+        let account = account.trim().to_owned();
+        let password = password.trim().to_owned();
+
+        if address.is_empty() {
+            return Err(tr_key(self.app_language, "login.proxy_settings.error.missing_address").to_string());
+        }
+
+        if port_text.is_empty() {
+            return Err(tr_key(self.app_language, "login.proxy_settings.error.missing_port").to_string());
+        }
+
+        let port: u16 = port_text
+            .parse()
+            .map_err(|_| tr_key(self.app_language, "login.proxy_settings.error.invalid_port").to_string())?;
+
+        let mut proxy_url = if address.contains("://") {
+            Url::parse(&address)
+                .map_err(|e| format!("Invalid proxy URL: {e}"))?
+        } else {
+            let mut url = Url::parse("http://127.0.0.1")
+                .map_err(|e| format!("Failed to initialize proxy URL builder: {e}"))?;
+            url.set_host(Some(&address))
+                .map_err(|e| format!("Invalid proxy address `{address}`: {e}"))?;
+            url
+        };
+
+        proxy_url
+            .set_port(Some(port))
+            .map_err(|()| format!("Invalid proxy port `{port}`"))?;
+
+        if account.is_empty() {
+            proxy_url
+                .set_username("")
+                .map_err(|()| String::from("Invalid proxy account value"))?;
+            proxy_url
+                .set_password(None)
+                .map_err(|()| String::from("Invalid proxy password value"))?;
+        } else {
+            proxy_url
+                .set_username(&account)
+                .map_err(|()| String::from("Invalid proxy account value"))?;
+            if password.is_empty() {
+                proxy_url
+                    .set_password(None)
+                    .map_err(|()| String::from("Invalid proxy password value"))?;
+            } else {
+                proxy_url
+                    .set_password(Some(&password))
+                    .map_err(|()| String::from("Invalid proxy password value"))?;
+            }
+        }
+
+        let proxy_url = proxy_url.to_string();
+        crate::proxy_config::validate_proxy_url(&proxy_url)?;
+        Ok(Some(proxy_url))
     }
 
     fn set_signup_mode(&mut self, cx: &mut Cx, signup_mode: bool) {
@@ -448,6 +839,16 @@ impl LoginScreen {
     }
 }
 
+impl ScriptHook for LoginScreen {
+    fn on_after_new(&mut self, vm: &mut ScriptVm) {
+        vm.with_cx_mut(|cx| {
+            self.load_saved_proxy_to_form(cx);
+            self.set_app_language(cx, self.app_language);
+            self.sync_proxy_settings_modal_layout(cx);
+        });
+    }
+}
+
 
 impl Widget for LoginScreen {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
@@ -456,6 +857,9 @@ impl Widget for LoginScreen {
             .unwrap_or_default();
         if self.app_language != app_language {
             self.set_app_language(cx, app_language);
+        }
+        if matches!(event, Event::WindowGeomChange(_)) {
+            self.sync_proxy_settings_modal_layout(cx);
         }
         self.view.handle_event(cx, event, scope);
         self.widget_match_event(cx, event, scope);
@@ -484,6 +888,56 @@ impl WidgetMatchEvent for LoginScreen {
 
         let login_status_modal = self.view.modal(cx, ids!(login_status_modal));
         let login_status_modal_inner = self.view.login_status_modal(cx, ids!(login_status_modal_inner));
+        let proxy_settings_modal = self.view.modal(cx, ids!(proxy_settings_modal));
+
+        if self.view.button(cx, ids!(proxy_settings_button)).clicked(actions) {
+            self.sync_proxy_settings_modal_layout(cx);
+            proxy_settings_modal.open(cx);
+            self.redraw(cx);
+        }
+
+        if self.view.button(cx, ids!(proxy_settings_close_button)).clicked(actions) {
+            proxy_settings_modal.close(cx);
+            self.redraw(cx);
+        }
+
+        if let Some(enabled) = self.view.check_box(cx, ids!(proxy_use_toggle)).changed(actions) {
+            self.set_use_proxy_enabled(cx, enabled);
+        }
+
+        if self.view.button(cx, ids!(proxy_settings_save_button)).clicked(actions) {
+            match self.build_proxy_url_from_form(cx) {
+                Ok(proxy_url) => {
+                    if let Err(e) = crate::proxy_config::save_proxy_url(proxy_url.as_deref()) {
+                        warning!("Failed to persist proxy configuration from proxy settings modal: {e}");
+                        login_status_modal_inner.set_title(cx, tr_key(self.app_language, "login.status.invalid_proxy.title"));
+                        let error_text = tr_fmt(self.app_language, "login.status.invalid_proxy.body", &[
+                            ("error", e.as_str()),
+                        ]);
+                        login_status_modal_inner.set_status(cx, &error_text);
+                        login_status_modal_inner.button_ref(cx).set_text(cx, tr_key(self.app_language, "login.status.okay"));
+                        login_status_modal.open(cx);
+                    } else {
+                        proxy_settings_modal.close(cx);
+                        login_status_modal_inner.set_title(cx, tr_key(self.app_language, "login.proxy_settings.saved.title"));
+                        login_status_modal_inner.set_status(cx, tr_key(self.app_language, "login.proxy_settings.saved.body"));
+                        login_status_modal_inner.button_ref(cx).set_text(cx, tr_key(self.app_language, "login.status.okay"));
+                        login_status_modal.open(cx);
+                    }
+                    self.redraw(cx);
+                }
+                Err(proxy_validation_error) => {
+                    login_status_modal_inner.set_title(cx, tr_key(self.app_language, "login.status.invalid_proxy.title"));
+                    let error_text = tr_fmt(self.app_language, "login.status.invalid_proxy.body", &[
+                        ("error", proxy_validation_error.as_str()),
+                    ]);
+                    login_status_modal_inner.set_status(cx, &error_text);
+                    login_status_modal_inner.button_ref(cx).set_text(cx, tr_key(self.app_language, "login.status.okay"));
+                    login_status_modal.open(cx);
+                    self.redraw(cx);
+                }
+            }
+        }
 
         // Handle cancel button for add-account mode
         if cancel_button.clicked(actions) {
@@ -536,6 +990,23 @@ impl WidgetMatchEvent for LoginScreen {
                 login_status_modal_inner.set_status(cx, tr_key(self.app_language, "login.status.password_mismatch.body"));
                 login_status_modal_inner.button_ref(cx).set_text(cx, tr_key(self.app_language, "login.status.okay"));
             } else {
+                let proxy = match self.build_proxy_url_from_form(cx) {
+                    Ok(proxy) => proxy,
+                    Err(proxy_validation_error) => {
+                        login_status_modal_inner.set_title(cx, tr_key(self.app_language, "login.status.invalid_proxy.title"));
+                        let error_text = tr_fmt(self.app_language, "login.status.invalid_proxy.body", &[
+                            ("error", proxy_validation_error.as_str()),
+                        ]);
+                        login_status_modal_inner.set_status(cx, &error_text);
+                        login_status_modal_inner.button_ref(cx).set_text(cx, tr_key(self.app_language, "login.status.okay"));
+                        login_status_modal.open(cx);
+                        self.redraw(cx);
+                        return;
+                    }
+                };
+                if let Err(e) = crate::proxy_config::save_proxy_url(proxy.as_deref()) {
+                    warning!("Failed to persist proxy configuration from login screen: {e}");
+                }
                 self.last_failure_message_shown = None;
                 login_status_modal_inner.set_title(cx, if self.signup_mode {
                     tr_key(self.app_language, "login.status.creating_account.title")
@@ -556,12 +1027,14 @@ impl WidgetMatchEvent for LoginScreen {
                         user_id,
                         password,
                         homeserver: homeserver.is_empty().not().then_some(homeserver),
+                        proxy: proxy.clone(),
                     })
                 } else {
                     LoginRequest::LoginByPassword(LoginByPassword {
                         user_id,
                         password,
                         homeserver: homeserver.is_empty().not().then_some(homeserver),
+                        proxy: proxy.clone(),
                         is_add_account: self.adding_account,
                     })
                 }));
@@ -714,10 +1187,30 @@ impl WidgetMatchEvent for LoginScreen {
         // Handle any of the SSO login buttons being clicked
         for (view_ref, brand) in self.view_set(cx, button_set).iter().zip(&provider_brands) {
             if view_ref.finger_up(actions).is_some() && !self.sso_pending {
+                let proxy = match self.build_proxy_url_from_form(cx) {
+                    Ok(proxy) => proxy,
+                    Err(proxy_validation_error) => {
+                        login_status_modal_inner.set_title(cx, tr_key(self.app_language, "login.status.invalid_proxy.title"));
+                        let error_text = tr_fmt(self.app_language, "login.status.invalid_proxy.body", &[
+                            ("error", proxy_validation_error.as_str()),
+                        ]);
+                        login_status_modal_inner.set_status(cx, &error_text);
+                        let login_status_modal_button = login_status_modal_inner.button_ref(cx);
+                        login_status_modal_button.set_text(cx, tr_key(self.app_language, "login.status.okay"));
+                        login_status_modal_button.set_enabled(cx, true);
+                        login_status_modal.open(cx);
+                        self.redraw(cx);
+                        continue;
+                    }
+                };
+                if let Err(e) = crate::proxy_config::save_proxy_url(proxy.as_deref()) {
+                    warning!("Failed to persist proxy configuration from SSO login flow: {e}");
+                }
                 submit_async_request(MatrixRequest::SpawnSSOServer{
                     identity_provider_id: format!("oidc-{}",brand),
                     brand: brand.to_string(),
-                    homeserver_url: homeserver_input.text()
+                    homeserver_url: homeserver_input.text(),
+                    proxy,
                 });
             }
         }
