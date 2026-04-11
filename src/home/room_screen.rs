@@ -44,7 +44,7 @@ use crate::shared::mentionable_text_input::MentionableTextInputAction;
 
 use rangemap::RangeSet;
 
-use super::{event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
+use super::{ContextMenuOpenGesture, event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
 
 /// The maximum number of timeline items to search through
 /// when looking for a particular event.
@@ -177,6 +177,17 @@ where
             state.timeline_index = Some(idx);
         }
     }
+}
+
+fn any_timeline_indices_visible<I, F>(
+    indices: I,
+    is_visible: F,
+) -> bool
+where
+    I: IntoIterator<Item = Option<usize>>,
+    F: FnMut(usize) -> bool,
+{
+    indices.into_iter().flatten().any(is_visible)
 }
 
 fn streaming_candidates_from_items<'a>(
@@ -2884,24 +2895,25 @@ impl Widget for RoomScreen {
             let frame_start = std::time::Instant::now();
 
             if let Some(tl) = self.tl_state.as_mut() {
-                let mut any_active = false;
                 let mut needs_another_frame = false;
                 let mut completed_ids = Vec::new();
+                let mut redraw_candidate_indices = Vec::new();
 
                 for (event_id, state) in tl.streaming_messages.iter_mut() {
                     if state.needs_frame() {
                         if state.tick() {
-                            any_active = true;
                             // Invalidate draw cache so item gets re-populated
                             if let Some(idx) = state.timeline_index {
                                 tl.content_drawn_since_last_update.remove(idx..idx + 1);
                             }
+                            redraw_candidate_indices.push(state.timeline_index);
                         }
                         needs_another_frame |= state.needs_frame();
                     }
 
                     if state.is_complete() || state.is_timed_out() {
                         completed_ids.push(event_id.clone());
+                        redraw_candidate_indices.push(state.timeline_index);
                     }
                 }
 
@@ -2911,12 +2923,12 @@ impl Widget for RoomScreen {
 
                 // Safety cap: max 50 streaming entries
                 while tl.streaming_messages.len() > 50 {
-                    if let Some(oldest_id) = tl.streaming_messages.iter()
+                    if let Some((oldest_id, oldest_idx)) = tl.streaming_messages.iter()
                         .min_by_key(|(_, s)| s.animation_start_time)
-                        .map(|(id, _)| id.clone())
+                        .map(|(id, state)| (id.clone(), state.timeline_index))
                     {
                         tl.streaming_messages.remove(&oldest_id);
-                        any_active = true;
+                        redraw_candidate_indices.push(oldest_idx);
                     }
                 }
 
@@ -2924,8 +2936,11 @@ impl Widget for RoomScreen {
                     self.streaming_next_frame = cx.new_next_frame();
                 }
 
-                if any_active || !completed_ids.is_empty() {
-                    self.redraw(cx);
+                if any_timeline_indices_visible(
+                    redraw_candidate_indices.iter().copied(),
+                    |idx| portal_list.get_item(idx).is_some(),
+                ) {
+                    self.redraw_timeline_list(cx);
                 }
             }
 
@@ -2945,24 +2960,27 @@ impl Widget for RoomScreen {
 
         if self.streaming_timeout_timer.is_event(event).is_some() {
             if let Some(tl) = self.tl_state.as_mut() {
-                let timed_out_ids: Vec<OwnedEventId> = tl
+                let timed_out_entries: Vec<(OwnedEventId, Option<usize>)> = tl
                     .streaming_messages
                     .iter()
                     .filter_map(|(event_id, state)| {
                         if state.is_timed_out() || state.is_complete() {
-                            Some(event_id.clone())
+                            Some((event_id.clone(), state.timeline_index))
                         } else {
                             None
                         }
                     })
                     .collect();
 
-                for event_id in &timed_out_ids {
+                for (event_id, _) in &timed_out_entries {
                     tl.streaming_messages.remove(event_id);
                 }
 
-                if !timed_out_ids.is_empty() {
-                    self.redraw(cx);
+                if any_timeline_indices_visible(
+                    timed_out_entries.iter().map(|(_, idx)| *idx),
+                    |idx| portal_list.get_item(idx).is_some(),
+                ) {
+                    self.redraw_timeline_list(cx);
                 }
             }
 
@@ -4084,6 +4102,13 @@ impl RoomScreen {
             .set_app_language(cx, self.app_language);
         self.sync_translation_lang_popup(cx);
         self.view.redraw(cx);
+    }
+
+    fn redraw_timeline_list(&self, cx: &mut Cx) {
+        let portal_list = self.portal_list(cx, ids!(timeline.list));
+        if let Some(mut list) = portal_list.borrow_mut() {
+            list.redraw(cx);
+        }
     }
 
     fn sync_translation_lang_popup(&mut self, cx: &mut Cx) {
@@ -5284,6 +5309,15 @@ impl RoomScreen {
                             Some(5.0),
                         );
                     }
+                }
+                MessageAction::MessageSubmittedLocally => {
+                    let Some(tl) = self.tl_state.as_ref() else { continue };
+                    let last_item_idx = tl.items.len().saturating_sub(1);
+                    portal_list.set_first_id_and_scroll(last_item_idx, 0.0);
+                    portal_list.set_tail_range(true);
+                    self.jump_to_bottom_button(cx, ids!(jump_to_bottom_button))
+                        .update_visibility(cx, true);
+                    self.redraw(cx);
                 }
                 MessageAction::Pin(details) => {
                     let Some(tl) = self.tl_state.as_ref() else { return };
@@ -8454,6 +8488,8 @@ pub enum MessageAction {
     Edit(MessageDetails),
     /// The user requested to edit their latest message in this room.
     EditLatest,
+    /// The user submitted a new local message and the timeline should follow the live tail.
+    MessageSubmittedLocally,
     /// The user clicked the "pin" button on a message.
     Pin(MessageDetails),
     /// The user clicked the "unpin" button on a message.
@@ -8493,6 +8529,7 @@ pub enum MessageAction {
         /// The absolute position where we should show the context menu,
         /// in which the (0,0) origin coordinate is the top left corner of the app window.
         abs_pos: DVec2,
+        opening_gesture: ContextMenuOpenGesture,
     },
     ToggleTranslationLangPopup {
         button_rect: Rect,
@@ -8736,6 +8773,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: fe.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                         }
                     );
                 }
@@ -8746,6 +8784,7 @@ impl Widget for Message {
                     MessageAction::OpenMessageContextMenu {
                         details: details.clone(),
                         abs_pos: lp.abs,
+                        opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                     }
                 );
             }
@@ -8777,6 +8816,7 @@ impl Widget for Message {
                             MessageAction::OpenMessageContextMenu {
                                 details: details.clone(),
                                 abs_pos: fe.abs,
+                                opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                             }
                         );
                     }
@@ -8793,6 +8833,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: lp.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                         }
                     );
                 }
@@ -8828,6 +8869,7 @@ impl Widget for Message {
                         MessageAction::OpenMessageContextMenu {
                             details: details.clone(),
                             abs_pos: fe.abs,
+                            opening_gesture: ContextMenuOpenGesture::from_finger_down(&fe),
                         }
                     );
                 }
@@ -8838,6 +8880,7 @@ impl Widget for Message {
                     MessageAction::OpenMessageContextMenu {
                         details: details.clone(),
                         abs_pos: lp.abs,
+                        opening_gesture: ContextMenuOpenGesture::from_long_press(&lp),
                     }
                 );
             }
