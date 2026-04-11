@@ -83,6 +83,7 @@ fn compute_translation_apply_outcome(translated_text: &str) -> TranslationApplyO
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 enum ExplicitOverride {
     #[default]
@@ -92,6 +93,7 @@ enum ExplicitOverride {
 }
 
 impl ExplicitOverride {
+    #[allow(dead_code)]
     fn cleared(&self) -> Self {
         Self::None
     }
@@ -100,12 +102,12 @@ impl ExplicitOverride {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ResolvedTarget {
     NoTarget,
-    RoomDefault(OwnedUserId),
     ExplicitBot(OwnedUserId),
     ExplicitRoom,
     ReplyBot(OwnedUserId),
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TargetChipPresentation {
     visible: bool,
@@ -114,10 +116,32 @@ struct TargetChipPresentation {
     dismissible: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TargetMenuSelection {
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TargetMenuSelection {
     Room,
-    BoundBot,
+    Bot(OwnedUserId),
+}
+
+#[cfg(test)]
+fn apply_multi_bot_target_menu_selection(
+    selection: TargetMenuSelection,
+    available_bot_user_ids: &[OwnedUserId],
+    explicit_override: &ExplicitOverride,
+) -> ExplicitOverride {
+    match selection {
+        TargetMenuSelection::Room => ExplicitOverride::Room,
+        TargetMenuSelection::Bot(bot_user_id) => {
+            if available_bot_user_ids
+                .iter()
+                .any(|available_bot_user_id| available_bot_user_id == &bot_user_id)
+            {
+                ExplicitOverride::Bot(bot_user_id)
+            } else {
+                explicit_override.clone()
+            }
+        }
+    }
 }
 
 fn known_bot_candidates<'a>(
@@ -268,12 +292,12 @@ fn routing_directives_for_message(
     resolved_target: &ResolvedTarget,
     message_mentions_bot: bool,
 ) -> (Option<OwnedUserId>, bool) {
-    let explicit_room = matches!(resolved_target, ResolvedTarget::ExplicitRoom);
     let target_user_id = if message_mentions_bot {
         None
     } else {
         resolved_target_user_id(resolved_target)
     };
+    let explicit_room = target_user_id.is_none();
     (target_user_id, explicit_room)
 }
 
@@ -297,99 +321,35 @@ fn resolve_target(
     match explicit_override {
         ExplicitOverride::Bot(bot_user_id) => ResolvedTarget::ExplicitBot(bot_user_id.clone()),
         ExplicitOverride::Room => ResolvedTarget::ExplicitRoom,
-        ExplicitOverride::None => bound_bot_user_id
-            .map(|bot_user_id| ResolvedTarget::RoomDefault(bot_user_id.to_owned()))
-            .unwrap_or(ResolvedTarget::NoTarget),
+        ExplicitOverride::None => {
+            if bound_bot_user_id.is_some() {
+                ResolvedTarget::ExplicitRoom
+            } else {
+                ResolvedTarget::NoTarget
+            }
+        }
     }
 }
 
 fn resolved_target_user_id(target: &ResolvedTarget) -> Option<OwnedUserId> {
     match target {
         ResolvedTarget::NoTarget | ResolvedTarget::ExplicitRoom => None,
-        ResolvedTarget::RoomDefault(bot_user_id)
-        | ResolvedTarget::ExplicitBot(bot_user_id)
+        ResolvedTarget::ExplicitBot(bot_user_id)
         | ResolvedTarget::ReplyBot(bot_user_id) => Some(bot_user_id.clone()),
     }
 }
 
 #[cfg(test)]
-fn clear_explicit_override_result(bound_bot_user_id: Option<&UserId>) -> ResolvedTarget {
-    bound_bot_user_id
-        .map(|bot_user_id| ResolvedTarget::RoomDefault(bot_user_id.to_owned()))
-        .unwrap_or(ResolvedTarget::NoTarget)
-}
-
 fn format_target_chip_presentation(
-    app_language: AppLanguage,
-    resolved_target: &ResolvedTarget,
-    bot_display_name: Option<&str>,
+    _app_language: AppLanguage,
+    _resolved_target: &ResolvedTarget,
+    _bot_display_name: Option<&str>,
 ) -> TargetChipPresentation {
-    let target_label = match resolved_target {
-        ResolvedTarget::RoomDefault(bot_user_id)
-        | ResolvedTarget::ExplicitBot(bot_user_id)
-        | ResolvedTarget::ReplyBot(bot_user_id) => bot_display_name
-            .map(str::trim)
-            .filter(|display_name| !display_name.is_empty())
-            .unwrap_or_else(|| bot_user_id.localpart())
-            .to_string(),
-        ResolvedTarget::NoTarget | ResolvedTarget::ExplicitRoom => String::new(),
-    };
-
-    match resolved_target {
-        ResolvedTarget::NoTarget => TargetChipPresentation {
-            visible: false,
-            label: String::new(),
-            subdued: false,
-            dismissible: false,
-        },
-        ResolvedTarget::RoomDefault(_) => TargetChipPresentation {
-            visible: true,
-            label: tr_fmt(
-                app_language,
-                "room_input_bar.target.default",
-                &[("display_name", &target_label)],
-            ),
-            subdued: true,
-            dismissible: false,
-        },
-        ResolvedTarget::ExplicitBot(_) => TargetChipPresentation {
-            visible: true,
-            label: tr_fmt(
-                app_language,
-                "room_input_bar.target.to_bot",
-                &[("display_name", &target_label)],
-            ),
-            subdued: false,
-            dismissible: true,
-        },
-        ResolvedTarget::ExplicitRoom => TargetChipPresentation {
-            visible: true,
-            label: tr_key(app_language, "room_input_bar.target.to_room").to_string(),
-            subdued: false,
-            dismissible: true,
-        },
-        ResolvedTarget::ReplyBot(_) => TargetChipPresentation {
-            visible: true,
-            label: tr_fmt(
-                app_language,
-                "room_input_bar.target.reply_bot",
-                &[("display_name", &target_label)],
-            ),
-            subdued: false,
-            dismissible: false,
-        },
-    }
-}
-
-fn apply_target_menu_selection(
-    selection: TargetMenuSelection,
-    bound_bot_user_id: Option<&UserId>,
-) -> ExplicitOverride {
-    match selection {
-        TargetMenuSelection::Room => ExplicitOverride::Room,
-        TargetMenuSelection::BoundBot => bound_bot_user_id
-            .map(|bot_user_id| ExplicitOverride::Bot(bot_user_id.to_owned()))
-            .unwrap_or_default(),
+    TargetChipPresentation {
+        visible: false,
+        label: String::new(),
+        subdued: false,
+        dismissible: false,
     }
 }
 
@@ -426,8 +386,10 @@ fn resolve_restored_target(
     )
 }
 
+#[cfg(test)]
 fn restored_explicit_override(saved_state: &RoomInputBarState) -> ExplicitOverride {
-    saved_state.explicit_override.clone()
+    let _ = saved_state;
+    ExplicitOverride::None
 }
 
 script_mod! {
@@ -520,14 +482,14 @@ script_mod! {
 
     mod.widgets.TargetChipButton = Button {
         width: Fit, height: Fit
-        padding: Inset{left: 12, right: 12, top: 6, bottom: 6}
+        padding: Inset{left: 10, right: 10, top: 5, bottom: 5}
         draw_bg +: {
-            color: #xF0F4FA
-            color_hover: #xE0E8F0
-            color_down: #xD0D8E8
-            border_radius: 13.0
+            color: #xF7F9FD
+            color_hover: #xEEF3F9
+            color_down: #xE5ECF5
+            border_radius: 9.0
             border_size: 1.0
-            border_color: (COLOR_SECONDARY)
+            border_color: #xD7DFEA
         }
         draw_text +: {
             color: (COLOR_TEXT)
@@ -588,14 +550,13 @@ script_mod! {
             visible: false
             width: Fill, height: Fit
             flow: Down
-            padding: Inset{left: 6, right: 6, top: 6, bottom: 2}
-            spacing: 4
+            padding: Inset{left: 6, right: 6, top: 6, bottom: 3}
 
             target_chip_row := View {
                 width: Fit, height: Fit
                 flow: Right
                 align: Align{y: 0.5}
-                spacing: 6
+                spacing: 4
 
                 target_chip_button := mod.widgets.TargetChipButton { text: "Target" }
 
@@ -604,32 +565,20 @@ script_mod! {
                     width: Fit, height: Fit
                     spacing: 0
                     text: ""
-                    padding: Inset{left: 6, right: 6, top: 6, bottom: 6}
+                    padding: Inset{left: 5, right: 5, top: 5, bottom: 5}
+                    draw_bg +: {
+                        color: #xF7F9FD
+                        color_hover: #xEEF3F9
+                        color_down: #xE5ECF5
+                        border_radius: 9.0
+                        border_size: 1.0
+                        border_color: #xD7DFEA
+                    }
                     draw_icon +: {
                         svg: (ICON_CLOSE)
+                        color: (COLOR_MESSAGE_NOTICE_TEXT)
                     }
-                    icon_walk: Walk{width: 10, height: 10}
-                }
-            }
-
-            target_menu_popup := RoundedView {
-                visible: false
-                width: Fit, height: Fit
-                flow: Down
-                padding: 4
-                spacing: 4
-                show_bg: true
-                draw_bg +: {
-                    color: #xF7F9FD
-                    border_radius: 8.0
-                    border_size: 1.0
-                    border_color: (COLOR_SECONDARY)
-                }
-
-                target_menu_room_button := mod.widgets.TargetMenuButton { text: "To room" }
-                target_menu_bound_bot_button := mod.widgets.TargetMenuButton {
-                    visible: false
-                    text: "Bot"
+                    icon_walk: Walk{width: 9, height: 9}
                 }
             }
         }
@@ -1060,8 +1009,6 @@ pub struct RoomInputBar {
     #[rust] translation_preview_text: Option<String>,
     /// Whether a translation HTTP request is currently in flight.
     #[rust] translation_request_pending: bool,
-    /// Whether the target selection menu is currently expanded.
-    #[rust] is_target_menu_visible: bool,
     /// Debounce timer for translation requests.
     #[rust] translation_debounce_timer: Timer,
     /// The last source text that was sent for translation.
@@ -1314,118 +1261,11 @@ impl RoomInputBar {
             .map(|(event_tl_item, _embedded_event)| event_tl_item.sender())
     }
 
-    fn target_display_name_for_user(
-        &self,
-        room_screen_props: &RoomScreenProps,
-        user_id: &UserId,
-    ) -> Option<String> {
-        room_screen_props
-            .room_members
-            .as_ref()
-            .and_then(|members| {
-                members
-                    .iter()
-                    .find(|member| member.user_id() == user_id)
-                    .and_then(|member| {
-                        member
-                            .display_name()
-                            .map(str::trim)
-                            .filter(|display_name| !display_name.is_empty())
-                            .map(ToOwned::to_owned)
-                    })
-            })
-    }
-
-    fn resolved_target_display_name(
-        &self,
-        room_screen_props: &RoomScreenProps,
-        resolved_target: &ResolvedTarget,
-    ) -> Option<String> {
-        match resolved_target {
-            ResolvedTarget::NoTarget | ResolvedTarget::ExplicitRoom => None,
-            ResolvedTarget::RoomDefault(user_id)
-            | ResolvedTarget::ExplicitBot(user_id)
-            | ResolvedTarget::ReplyBot(user_id) => {
-                self.target_display_name_for_user(room_screen_props, user_id.as_ref())
-            }
-        }
-    }
-
     fn sync_target_indicator(&mut self, cx: &mut Cx, room_screen_props: &RoomScreenProps) {
-        let resolved_target = self.current_resolved_target(room_screen_props);
-        let bot_display_name = self.resolved_target_display_name(room_screen_props, &resolved_target);
-        let presentation = format_target_chip_presentation(
-            self.app_language,
-            &resolved_target,
-            bot_display_name.as_deref(),
-        );
-
         self.view
             .view(cx, ids!(target_indicator))
-            .set_visible(cx, presentation.visible);
-        self.view
-            .view(cx, ids!(target_menu_popup))
-            .set_visible(cx, presentation.visible && self.is_target_menu_visible);
-
-        if !presentation.visible {
-            self.is_target_menu_visible = false;
-            return;
-        }
-
-        let mut target_chip_button = self.button(cx, ids!(target_chip_button));
-        target_chip_button.set_text(cx, &presentation.label);
-        let (text_color, border_color, bg_color, hover_color, down_color): (Vec4, Vec4, Vec4, Vec4, Vec4) = if presentation.subdued {
-            (
-                COLOR_MESSAGE_NOTICE_TEXT,
-                COLOR_BG_DISABLED,
-                vec4(0.89, 0.89, 0.89, 1.0),
-                vec4(0.84, 0.84, 0.84, 1.0),
-                vec4(0.78, 0.78, 0.78, 1.0),
-            )
-        } else {
-            (
-                COLOR_ACTIVE_PRIMARY_DARKER,
-                COLOR_BG_DISABLED,
-                COLOR_BG_PREVIEW,
-                COLOR_BG_PREVIEW_HOVER,
-                vec4(0.77, 0.86, 0.96, 1.0),
-            )
-        };
-        script_apply_eval!(cx, target_chip_button, {
-            draw_bg +: {
-                border_color: #(border_color),
-                color: #(bg_color),
-                color_hover: #(hover_color),
-                color_down: #(down_color),
-            }
-            draw_text +: {
-                color: #(text_color),
-                color_hover: #(text_color),
-                color_down: #(text_color),
-            }
-        });
-
-        self.button(cx, ids!(target_chip_dismiss_button))
-            .set_visible(cx, presentation.dismissible);
-        self.button(cx, ids!(target_menu_room_button))
-            .set_text(cx, tr_key(self.app_language, "room_input_bar.target.menu.room"));
-
-        let bound_bot_option = room_screen_props.bound_bot_user_id.as_deref().map(|bound_bot_user_id| {
-            self.target_display_name_for_user(room_screen_props, bound_bot_user_id)
-                .unwrap_or_else(|| bound_bot_user_id.localpart().to_string())
-        });
-        self.button(cx, ids!(target_menu_bound_bot_button))
-            .set_visible(cx, bound_bot_option.is_some());
-        if let Some(bound_bot_option) = bound_bot_option {
-            self.button(cx, ids!(target_menu_bound_bot_button)).set_text(
-                cx,
-                &tr_fmt(
-                    self.app_language,
-                    "room_input_bar.target.menu.bound_bot",
-                    &[("display_name", &bound_bot_option)],
-                ),
-            );
-        }
+            .set_visible(cx, false);
+        let _ = room_screen_props;
     }
 
     fn handle_actions(
@@ -1437,42 +1277,12 @@ impl RoomInputBar {
         let mentionable_text_input = self.mentionable_text_input(cx, ids!(mentionable_text_input));
         let text_input = mentionable_text_input.text_input_ref();
 
-        if self.button(cx, ids!(target_chip_button)).clicked(actions) {
-            self.is_target_menu_visible = !self.is_target_menu_visible;
-            self.redraw(cx);
-        }
-
-        if self.button(cx, ids!(target_chip_dismiss_button)).clicked(actions) {
-            self.explicit_override = self.explicit_override.cleared();
-            self.is_target_menu_visible = false;
-            self.redraw(cx);
-        }
-
-        if self.button(cx, ids!(target_menu_room_button)).clicked(actions) {
-            self.explicit_override = apply_target_menu_selection(
-                TargetMenuSelection::Room,
-                room_screen_props.bound_bot_user_id.as_deref(),
-            );
-            self.is_target_menu_visible = false;
-            self.redraw(cx);
-        }
-
-        if self.button(cx, ids!(target_menu_bound_bot_button)).clicked(actions) {
-            self.explicit_override = apply_target_menu_selection(
-                TargetMenuSelection::BoundBot,
-                room_screen_props.bound_bot_user_id.as_deref(),
-            );
-            self.is_target_menu_visible = false;
-            self.redraw(cx);
-        }
-
         // Clear the replying-to preview pane if the "cancel reply" button was clicked
         // or if the `Escape` key was pressed within the message input box.
         if self.button(cx, ids!(cancel_reply_button)).clicked(actions)
             || text_input.escaped(actions)
         {
             self.clear_replying_to(cx);
-            self.is_target_menu_visible = false;
             self.redraw(cx);
         }
 
@@ -1480,7 +1290,6 @@ impl RoomInputBar {
         if self.button(cx, ids!(more_actions_button)).clicked(actions) {
             self.is_location_card_expanded = !self.is_location_card_expanded;
             self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, self.is_location_card_expanded);
-            self.is_target_menu_visible = false;
             self.redraw(cx);
         }
 
@@ -1488,14 +1297,12 @@ impl RoomInputBar {
         if self.button(cx, ids!(emoji_picker_button)).clicked(actions) {
             self.is_emoji_picker_expanded = !self.is_emoji_picker_expanded;
             self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, self.is_emoji_picker_expanded);
-            self.is_target_menu_visible = false;
             self.redraw(cx);
         }
 
         // Handle the add attachment button being clicked.
         if self.button(cx, ids!(send_attachment_button)).clicked(actions) {
             log!("Add attachment button clicked; opening file picker...");
-            self.is_target_menu_visible = false;
             self.open_file_picker(cx);
         }
 
@@ -1531,7 +1338,6 @@ impl RoomInputBar {
             self.is_emoji_picker_expanded = false;
             self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
             self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input)).set_key_focus(cx);
-            self.is_target_menu_visible = false;
             self.redraw(cx);
         }
 
@@ -1546,12 +1352,10 @@ impl RoomInputBar {
                 self.view.view(cx, ids!(translation_preview)).set_visible(cx, false);
                 self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
                 self.is_lang_popup_visible = false;
-                self.is_target_menu_visible = false;
                 self.redraw(cx);
             } else {
                 self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
                 self.is_lang_popup_visible = false;
-                self.is_target_menu_visible = false;
                 let button_rect = self.button(cx, ids!(translate_button)).area().clipped_rect(cx);
                 if button_rect.size.x > 0.0 {
                     cx.widget_action(
@@ -1573,7 +1377,6 @@ impl RoomInputBar {
                 self.view.label(cx, ids!(translation_preview_text)).set_text(cx, &outcome.preserved_preview_text);
                 self.view.view(cx, ids!(translation_preview)).set_visible(cx, outcome.keep_preview_visible);
                 self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input)).set_key_focus(cx);
-                self.is_target_menu_visible = false;
                 self.redraw(cx);
             }
         }
@@ -1587,7 +1390,6 @@ impl RoomInputBar {
             self.view.view(cx, ids!(translation_preview)).set_visible(cx, false);
             self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
             self.is_lang_popup_visible = false;
-            self.is_target_menu_visible = false;
             self.redraw(cx);
         }
 
@@ -1596,7 +1398,6 @@ impl RoomInputBar {
             log!("Location card clicked; requesting current location...");
             self.is_location_card_expanded = false;
             self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
-            self.is_target_menu_visible = false;
             if let Err(_e) = init_location_subscriber(cx) {
                 error!("Failed to initialize location subscriber");
                 enqueue_popup_notification(
@@ -1614,7 +1415,6 @@ impl RoomInputBar {
                 room_screen_props.room_screen_widget_uid,
                 MessageAction::ShowThreadsPane,
             );
-            self.is_target_menu_visible = false;
             self.redraw(cx);
         }
 
@@ -1623,7 +1423,6 @@ impl RoomInputBar {
                 room_screen_props.room_screen_widget_uid,
                 MessageAction::ShowRoomInfoPane,
             );
-            self.is_target_menu_visible = false;
             self.redraw(cx);
         }
 
@@ -1639,7 +1438,7 @@ impl RoomInputBar {
                 );
                 let resolved_target = self.current_resolved_target(room_screen_props);
                 let target_user_id = resolved_target_user_id(&resolved_target);
-                let explicit_room = matches!(resolved_target, ResolvedTarget::ExplicitRoom);
+                let explicit_room = target_user_id.is_none();
                 let replied_to = self.replying_to.take().and_then(|(event_tl_item, _emb)|
                     event_tl_item.event_id().map(|event_id| {
                         let enforce_thread = if room_screen_props.timeline_kind.thread_root_event_id().is_some() {
@@ -1679,7 +1478,6 @@ impl RoomInputBar {
                 self.clear_replying_to(cx);
                 location_preview.clear();
                 location_preview.redraw(cx);
-                self.is_target_menu_visible = false;
             }
         }
 
@@ -1697,7 +1495,6 @@ impl RoomInputBar {
                         typing: false,
                     });
                     self.enable_send_message_button(cx, false);
-                    self.is_target_menu_visible = false;
                     self.redraw(cx);
                     return;
                 }
@@ -1751,7 +1548,6 @@ impl RoomInputBar {
                 self.clear_replying_to(cx);
                 mentionable_text_input.set_text(cx, "");
                 self.enable_send_message_button(cx, false);
-                self.is_target_menu_visible = false;
             }
         }
 
@@ -1843,8 +1639,6 @@ impl RoomInputBar {
 
         replying_preview.set_visible(cx, true);
         self.replying_to = Some(replying_to);
-        self.is_target_menu_visible = false;
-        self.view.view(cx, ids!(target_menu_popup)).set_visible(cx, false);
 
         // 2. Hide other views that are irrelevant to a reply, e.g.,
         //    the `EditingPane` would improperly cover up the ReplyPreview.
@@ -1865,8 +1659,6 @@ impl RoomInputBar {
     fn clear_replying_to(&mut self, cx: &mut Cx) {
         self.view(cx, ids!(replying_preview)).set_visible(cx, false);
         self.replying_to = None;
-        self.is_target_menu_visible = false;
-        self.view.view(cx, ids!(target_menu_popup)).set_visible(cx, false);
     }
 
     /// Shows the editing pane to allow the user to edit the given event.
@@ -1891,8 +1683,6 @@ impl RoomInputBar {
         self.view.location_preview(cx, ids!(location_preview)).clear();
 
         let editing_pane = self.view.editing_pane(cx, ids!(editing_pane));
-        self.is_target_menu_visible = false;
-        self.view.view(cx, ids!(target_menu_popup)).set_visible(cx, false);
         match behavior {
             ShowEditingPaneBehavior::ShowNew { event_tl_item } => {
                 editing_pane.show(cx, event_tl_item, timeline_kind);
@@ -2195,7 +1985,6 @@ impl RoomInputBarRef {
         RoomInputBarState {
             was_replying_preview_visible: inner.was_replying_preview_visible,
             replying_to: inner.replying_to.clone(),
-            explicit_override: inner.explicit_override.clone(),
             editing_pane_state: inner.child_by_path(ids!(editing_pane)).as_editing_pane().save_state(),
             text_input_state: inner.child_by_path(ids!(input_bar.input_row.mentionable_text_input.text_input)).as_text_input().save_state(),
         }
@@ -2211,12 +2000,10 @@ impl RoomInputBarRef {
         tombstone_info: Option<&SuccessorRoomDetails>,
     ) {
         let Some(mut inner) = self.borrow_mut() else { return };
-        let explicit_override = restored_explicit_override(&saved_state);
         let RoomInputBarState {
             was_replying_preview_visible,
             text_input_state,
             replying_to,
-            explicit_override: _,
             editing_pane_state,
         } = saved_state;
 
@@ -2238,8 +2025,6 @@ impl RoomInputBarRef {
         inner.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
         inner.is_emoji_picker_expanded = false;
         inner.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
-        inner.is_target_menu_visible = false;
-        inner.view.view(cx, ids!(target_menu_popup)).set_visible(cx, false);
         inner.is_lang_popup_visible = false;
         inner.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
 
@@ -2250,7 +2035,7 @@ impl RoomInputBarRef {
             inner.clear_replying_to(cx);
         }
         inner.was_replying_preview_visible = was_replying_preview_visible;
-        inner.explicit_override = explicit_override;
+        inner.explicit_override = ExplicitOverride::None;
 
         // 3. Restore the state of the editing pane.
         if let Some(editing_pane_state) = editing_pane_state {
@@ -2379,8 +2164,6 @@ pub struct RoomInputBarState {
     text_input_state: TextInputState,
     /// The event that the user is currently replying to, if any.
     replying_to: Option<(EventTimelineItem, EmbeddedEvent)>,
-    /// The user's explicit target override for this room.
-    explicit_override: ExplicitOverride,
     /// The state of the `EditingPane`, if any message was being edited.
     editing_pane_state: Option<EditingPaneState>,
 }
@@ -2488,7 +2271,27 @@ mod tests {
     }
 
     #[test]
-    fn test_reply_to_human_no_bot_targeting() {
+    fn test_bot_bound_room_defaults_to_explicit_room() {
+        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+
+        assert_eq!(
+            resolve_target(
+                &ExplicitOverride::None,
+                None,
+                Some(bound_bot_user_id.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                &[],
+            ),
+            ResolvedTarget::ExplicitRoom,
+        );
+        assert_eq!(
+            routing_directives_for_message(&ResolvedTarget::ExplicitRoom, false),
+            (None, true),
+        );
+    }
+
+    #[test]
+    fn test_reply_to_human_in_bot_bound_room_stays_explicit_room() {
         let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
         let reply_sender = test_user_id("@alice:127.0.0.1:8128");
 
@@ -2500,17 +2303,54 @@ mod tests {
                 Some(bound_bot_user_id.as_ref()),
                 &[],
             ),
-            ResolvedTarget::RoomDefault(bound_bot_user_id),
+            ResolvedTarget::ExplicitRoom,
+        );
+        assert_eq!(
+            routing_directives_for_message(&ResolvedTarget::ExplicitRoom, false),
+            (None, true),
         );
     }
 
     #[test]
-    fn test_reply_bot_overrides_explicit_room() {
+    fn test_reply_to_bot_still_targets_bot() {
         let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
 
         assert_eq!(
             resolve_target(
-                &ExplicitOverride::Room,
+                &ExplicitOverride::None,
+                Some(bound_bot_user_id.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                &[],
+            ),
+            ResolvedTarget::ReplyBot(bound_bot_user_id.clone()),
+        );
+        assert_eq!(
+            routing_directives_for_message(
+                &ResolvedTarget::ReplyBot(bound_bot_user_id.clone()),
+                false,
+            ),
+            (Some(bound_bot_user_id), false),
+        );
+    }
+
+    #[test]
+    fn test_reply_to_bot_overrides_room_first_default() {
+        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+
+        assert_eq!(
+            resolve_target(
+                &ExplicitOverride::None,
+                None,
+                Some(bound_bot_user_id.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                &[],
+            ),
+            ResolvedTarget::ExplicitRoom,
+        );
+        assert_eq!(
+            resolve_target(
+                &ExplicitOverride::None,
                 Some(bound_bot_user_id.as_ref()),
                 Some(bound_bot_user_id.as_ref()),
                 Some(bound_bot_user_id.as_ref()),
@@ -2521,93 +2361,26 @@ mod tests {
     }
 
     #[test]
-    fn test_chip_dismiss_returns_to_room_default() {
-        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
-
-        assert_eq!(
-            clear_explicit_override_result(Some(bound_bot_user_id.as_ref())),
-            ResolvedTarget::RoomDefault(bound_bot_user_id),
-        );
-    }
-
-    #[test]
-    fn test_chip_dismiss_explicit_room_to_room_default() {
-        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
-
-        let explicit_override = ExplicitOverride::Room;
-        let cleared_override = explicit_override.cleared();
-
-        assert_eq!(cleared_override, ExplicitOverride::None);
-        assert_eq!(
-            resolve_target(
-                &cleared_override,
-                None,
-                Some(bound_bot_user_id.as_ref()),
-                Some(bound_bot_user_id.as_ref()),
-                &[],
-            ),
-            ResolvedTarget::RoomDefault(bound_bot_user_id),
-        );
-    }
-
-    #[test]
-    fn test_chip_dismiss_no_bound_bot() {
-        assert_eq!(clear_explicit_override_result(None), ResolvedTarget::NoTarget);
-    }
-
-    #[test]
-    fn test_explicit_bot_with_reply_to_human() {
-        let bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
-        let reply_sender = test_user_id("@alice:127.0.0.1:8128");
-
-        assert_eq!(
-            resolved_target_user_id(&resolve_send_target(
-                &ExplicitOverride::Bot(bot_user_id.clone()),
-                Some(reply_sender.as_ref()),
-                Some(bot_user_id.as_ref()),
-                Some(bot_user_id.as_ref()),
-                &[],
-            )),
-            Some(bot_user_id),
-        );
-    }
-
-    #[test]
-    fn test_cancel_reply_clears_reply_bot() {
-        let bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
-
-        assert_eq!(
-            resolve_restored_target(
-                &ExplicitOverride::Bot(bot_user_id.clone()),
-                Some(bot_user_id.as_ref()),
-                Some(bot_user_id.as_ref()),
-                Some(bot_user_id.as_ref()),
-                &[],
-            ),
-            ResolvedTarget::ReplyBot(bot_user_id.clone()),
-        );
-        assert_eq!(
-            resolve_restored_target(
-                &ExplicitOverride::Bot(bot_user_id.clone()),
-                None,
-                Some(bot_user_id.as_ref()),
-                Some(bot_user_id.as_ref()),
-                &[],
-            ),
-            ResolvedTarget::ExplicitBot(bot_user_id),
-        );
-    }
-
-    #[test]
-    fn test_explicit_override_persists_navigation() {
-        let saved_state = RoomInputBarState {
-            explicit_override: ExplicitOverride::Room,
-            ..Default::default()
-        };
+    fn test_persisted_explicit_override_is_ignored_on_restore() {
+        let saved_state = RoomInputBarState::default();
 
         assert_eq!(
             restored_explicit_override(&saved_state),
-            ExplicitOverride::Room,
+            ExplicitOverride::None,
+        );
+    }
+
+    #[test]
+    fn test_stale_explicit_bot_selection_is_ignored_without_available_bots() {
+        let bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+
+        assert_eq!(
+            apply_multi_bot_target_menu_selection(
+                TargetMenuSelection::Bot(bot_user_id),
+                &[],
+                &ExplicitOverride::None,
+            ),
+            ExplicitOverride::None,
         );
     }
 
@@ -2628,31 +2401,12 @@ mod tests {
     }
 
     #[test]
-    fn test_target_chip_room_default() {
-        let bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
-
+    fn test_target_chip_hidden_in_bot_bound_room() {
         assert_eq!(
             format_target_chip_presentation(
                 AppLanguage::English,
-                &ResolvedTarget::RoomDefault(bot_user_id),
+                &ResolvedTarget::ExplicitRoom,
                 Some("BotFather"),
-            ),
-            TargetChipPresentation {
-                visible: true,
-                label: "Default: BotFather".to_string(),
-                subdued: true,
-                dismissible: false,
-            },
-        );
-    }
-
-    #[test]
-    fn test_target_chip_hidden_no_bot() {
-        assert_eq!(
-            format_target_chip_presentation(
-                AppLanguage::English,
-                &ResolvedTarget::NoTarget,
-                None,
             ),
             TargetChipPresentation {
                 visible: false,
@@ -2664,63 +2418,21 @@ mod tests {
     }
 
     #[test]
-    fn test_explicit_bot_via_chip_menu() {
-        let bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
-        let explicit_override = apply_target_menu_selection(
-            TargetMenuSelection::BoundBot,
-            Some(bot_user_id.as_ref()),
-        );
+    fn test_room_bot_mention_overrides_selected_explicit_bot() {
+        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+        let bob_bot_user_id = test_user_id("@octosbot_bob:127.0.0.1:8128");
+        let message = RoomMessageEventContent::text_plain("@octosbot_bob 你好");
+        let resolved_target = ResolvedTarget::ExplicitBot(bound_bot_user_id.clone());
 
-        assert_eq!(explicit_override, ExplicitOverride::Bot(bot_user_id.clone()));
-        assert_eq!(
-            format_target_chip_presentation(
-                AppLanguage::English,
-                &resolve_target(
-                    &explicit_override,
-                    None,
-                    Some(bot_user_id.as_ref()),
-                    Some(bot_user_id.as_ref()),
-                    &[],
-                ),
-                Some("BotFather"),
-            ),
-            TargetChipPresentation {
-                visible: true,
-                label: "To BotFather".to_string(),
-                subdued: false,
-                dismissible: true,
-            },
-        );
-    }
-
-    #[test]
-    fn test_explicit_room_via_chip_menu() {
-        let bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
-        let explicit_override = apply_target_menu_selection(
-            TargetMenuSelection::Room,
-            Some(bot_user_id.as_ref()),
-        );
-
-        assert_eq!(explicit_override, ExplicitOverride::Room);
-        assert_eq!(
-            format_target_chip_presentation(
-                AppLanguage::English,
-                &resolve_target(
-                    &explicit_override,
-                    None,
-                    Some(bot_user_id.as_ref()),
-                    Some(bot_user_id.as_ref()),
-                    &[],
-                ),
-                Some("BotFather"),
-            ),
-            TargetChipPresentation {
-                visible: true,
-                label: "To room".to_string(),
-                subdued: false,
-                dismissible: true,
-            },
-        );
+        assert!(message_mentions_known_bot(
+            &message,
+            Some(bound_bot_user_id.as_ref()),
+            Some(bound_bot_user_id.as_ref()),
+            std::slice::from_ref(&bob_bot_user_id),
+            &[],
+        ));
+        assert_eq!(routing_directives_for_message(&resolved_target, true), (None, false));
+        assert!(message.body().contains("@octosbot_bob"));
     }
 
     #[test]

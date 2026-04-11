@@ -2042,7 +2042,6 @@ script_mod! {
         }
     }
 
-
     mod.widgets.RoomScreen = #(RoomScreen::register_widget(vm)) {
         width: Fill, height: Fill,
         cursor: MouseCursor.Default,
@@ -8665,8 +8664,6 @@ pub enum ReportRoomResultAction {
     },
 }
 
-
-/// Actions related to a specific message within a room timeline.
 #[derive(Clone, Default, Debug)]
 pub enum MessageAction {
     /// The user clicked the "react" button on a message
