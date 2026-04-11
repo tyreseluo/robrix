@@ -447,6 +447,61 @@ fn is_likely_bot_user_id(
         || (localpart.ends_with("bot") && localpart.len() > 3)
 }
 
+pub(crate) fn is_known_or_likely_bot(
+    user_id: &UserId,
+    resolved_parent_bot_user_id: Option<&UserId>,
+    known_bot_user_ids: &[OwnedUserId],
+) -> bool {
+    known_bot_user_ids
+        .iter()
+        .any(|known_bot_user_id| known_bot_user_id.as_str() == user_id.as_str())
+        || resolved_parent_bot_user_id.is_some_and(|parent| parent == user_id)
+        || is_likely_bot_user_id(user_id, resolved_parent_bot_user_id)
+}
+
+fn collect_room_bot_user_ids(
+    room_members: &[RoomMember],
+    resolved_parent_bot_user_id: Option<&UserId>,
+    known_bot_user_ids: &[OwnedUserId],
+    persisted_room_bot_user_ids: &[OwnedUserId],
+) -> Vec<OwnedUserId> {
+    let own_user_id = current_user_id();
+    let mut room_bot_user_ids = Vec::<OwnedUserId>::new();
+
+    for persisted_room_bot_user_id in persisted_room_bot_user_ids {
+        if room_bot_user_ids
+            .iter()
+            .all(|existing_user_id| existing_user_id.as_str() != persisted_room_bot_user_id.as_str())
+        {
+            room_bot_user_ids.push(persisted_room_bot_user_id.clone());
+        }
+    }
+
+    for room_member in room_members.iter().filter(|room_member|
+        own_user_id
+            .as_deref()
+            .is_none_or(|own_user_id| room_member.user_id() != own_user_id)
+    ) {
+        if is_known_or_likely_bot(
+            room_member.user_id(),
+            resolved_parent_bot_user_id,
+            known_bot_user_ids,
+        ) || is_likely_bot_member(room_member, resolved_parent_bot_user_id)
+        {
+            let user_id = room_member.user_id().to_owned();
+            if room_bot_user_ids
+                .iter()
+                .all(|existing_user_id| existing_user_id.as_str() != user_id.as_str())
+            {
+                room_bot_user_ids.push(user_id);
+            }
+        }
+    }
+
+    room_bot_user_ids.sort_by(|lhs, rhs| lhs.as_str().cmp(rhs.as_str()));
+    room_bot_user_ids
+}
+
 fn is_likely_bot_member(
     room_member: &RoomMember,
     resolved_parent_bot_user_id: Option<&UserId>,
@@ -3522,13 +3577,49 @@ impl Widget for RoomScreen {
             let room_props = if let Some(tl) = self.tl_state.as_ref() {
                 let room_id = tl.kind.room_id().clone();
                 let room_members = tl.room_members.clone();
-                let (app_service_enabled, app_service_room_bound, bound_bot_user_id) = scope
+                let (
+                    app_service_enabled,
+                    app_service_room_bound,
+                    bound_bot_user_id,
+                    resolved_parent_bot_user_id,
+                    room_bot_user_ids,
+                    known_bot_user_ids,
+                ) = scope
                     .data
                     .get::<AppState>()
                     .map(|app_state| {
                         let app_service_enabled = app_state.bot_settings.enabled;
                         let persisted_bound_bot_user_id =
                             app_state.bot_settings.bound_bot_user_id(&room_id).map(ToOwned::to_owned);
+                        let persisted_room_bot_user_ids = if app_service_enabled {
+                            app_state.bot_settings.bound_bot_user_ids(&room_id)
+                        } else {
+                            Vec::new()
+                        };
+                        let resolved_parent_bot_user_id = if app_service_enabled {
+                            app_state
+                                .bot_settings
+                                .resolved_bot_user_id(current_user_id().as_deref())
+                                .ok()
+                        } else {
+                            None
+                        };
+                        let known_bot_user_ids = if app_service_enabled {
+                            app_state.bot_settings.known_bot_user_ids()
+                        } else {
+                            Vec::new()
+                        };
+                        let room_bot_user_ids = room_members
+                            .as_ref()
+                            .map(|members|
+                                collect_room_bot_user_ids(
+                                    members.as_ref(),
+                                    resolved_parent_bot_user_id.as_deref(),
+                                    &known_bot_user_ids,
+                                    &persisted_room_bot_user_ids,
+                                )
+                            )
+                            .unwrap_or(persisted_room_bot_user_ids);
                         let detected_bound_bot_user_id = room_members
                             .as_ref()
                             .and_then(|members|
@@ -3557,21 +3648,27 @@ impl Widget for RoomScreen {
                             app_service_enabled,
                             app_service_room_bound,
                             bound_bot_user_id,
+                            resolved_parent_bot_user_id,
+                            room_bot_user_ids,
+                            known_bot_user_ids,
                         )
                     })
-                    .unwrap_or((false, false, None));
+                    .unwrap_or((false, false, None, None, Vec::new(), Vec::new()));
 
                 RoomScreenProps {
                     room_screen_widget_uid,
                     room_name_id: self.room_name_id.clone().unwrap_or_else(|| RoomNameId::empty(room_id)),
                     timeline_kind: tl.kind.clone(),
                     room_members,
+                    room_bot_user_ids,
                     room_members_sync_pending: tl.room_members_sync_pending,
                     room_members_sort: tl.room_members_sort.clone(),
                     room_avatar_url: self.room_avatar_url.clone(),
                     app_service_enabled,
                     app_service_room_bound,
                     bound_bot_user_id,
+                    resolved_parent_bot_user_id,
+                    known_bot_user_ids,
                 }
             } else if let Some(room_name) = &self.room_name_id {
                 // Fallback case: we have a room_name but no tl_state yet
@@ -3581,12 +3678,15 @@ impl Widget for RoomScreen {
                     timeline_kind: self.timeline_kind.clone()
                         .expect("BUG: room_name_id was set but timeline_kind was missing"),
                     room_members: None,
+                    room_bot_user_ids: Vec::new(),
                     room_members_sort: None,
                     room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
                     bound_bot_user_id: None,
+                    resolved_parent_bot_user_id: None,
+                    known_bot_user_ids: Vec::new(),
                 }
             } else {
                 // No room selected yet, skip event handling that requires room context
@@ -3601,12 +3701,15 @@ impl Widget for RoomScreen {
                     room_name_id: RoomNameId::empty(room_id.clone()),
                     timeline_kind: TimelineKind::MainRoom { room_id },
                     room_members: None,
+                    room_bot_user_ids: Vec::new(),
                     room_members_sort: None,
                     room_members_sync_pending: false,
                     room_avatar_url: None,
                     app_service_enabled: false,
                     app_service_room_bound: false,
                     bound_bot_user_id: None,
+                    resolved_parent_bot_user_id: None,
+                    known_bot_user_ids: Vec::new(),
                 }
             };
             let mut room_scope = Scope::with_props(&room_props);
@@ -4406,6 +4509,7 @@ impl RoomScreen {
             message: RoomMessageEventContent::notice_plain(message),
             replied_to: None,
             target_user_id: None,
+            explicit_room: false,
             #[cfg(feature = "tsp")]
             sign_with_tsp: false,
         });
@@ -4452,6 +4556,7 @@ impl RoomScreen {
                 .bot_settings
                 .bound_bot_user_id(room_id.as_ref())
                 .map(ToOwned::to_owned),
+            explicit_room: false,
             #[cfg(feature = "tsp")]
             sign_with_tsp: false,
         });
@@ -6473,6 +6578,7 @@ pub struct RoomScreenProps {
     pub room_name_id: RoomNameId,
     pub timeline_kind: TimelineKind,
     pub room_members: Option<Arc<Vec<RoomMember>>>,
+    pub room_bot_user_ids: Vec<OwnedUserId>,
     pub room_members_sync_pending: bool,
     /// Pre-computed sort order for room members (for mention search optimization).
     pub room_members_sort: Option<Arc<crate::room::member_search::PrecomputedMemberSort>>,
@@ -6480,6 +6586,8 @@ pub struct RoomScreenProps {
     pub app_service_enabled: bool,
     pub app_service_room_bound: bool,
     pub bound_bot_user_id: Option<OwnedUserId>,
+    pub resolved_parent_bot_user_id: Option<OwnedUserId>,
+    pub known_bot_user_ids: Vec<OwnedUserId>,
 }
 
 
@@ -9209,5 +9317,54 @@ mod tests {
     #[test]
     fn bot_badge_text_is_centered_within_badge() {
         assert!(bot_badge_label_center_y() < (BOT_BADGE_HEIGHT * 0.5));
+    }
+
+    #[test]
+    fn test_bot_detection_configured_parent() {
+        let user_id: OwnedUserId = "@octosbot:127.0.0.1:8128".try_into().unwrap();
+        let resolved_parent_bot_user_id = Some(user_id.clone());
+        let known_bot_user_ids = Vec::new();
+
+        assert!(is_known_or_likely_bot(
+            user_id.as_ref(),
+            resolved_parent_bot_user_id.as_deref(),
+            &known_bot_user_ids,
+        ));
+    }
+
+    #[test]
+    fn test_bot_detection_heuristic_fallback() {
+        let user_id: OwnedUserId = "@myservice_bot:other.server".try_into().unwrap();
+        let known_bot_user_ids = Vec::new();
+
+        assert!(is_known_or_likely_bot(
+            user_id.as_ref(),
+            None,
+            &known_bot_user_ids,
+        ));
+    }
+
+    #[test]
+    fn test_bot_detection_child_bot() {
+        let user_id: OwnedUserId = "@octosbot_weather:127.0.0.1:8128".try_into().unwrap();
+        let known_bot_user_ids = vec![user_id.clone()];
+
+        assert!(is_known_or_likely_bot(
+            user_id.as_ref(),
+            None,
+            &known_bot_user_ids,
+        ));
+    }
+
+    #[test]
+    fn test_bot_detection_rejects_normal_user() {
+        let user_id: OwnedUserId = "@alice:127.0.0.1:8128".try_into().unwrap();
+        let known_bot_user_ids = Vec::new();
+
+        assert!(!is_known_or_likely_bot(
+            user_id.as_ref(),
+            None,
+            &known_bot_user_ids,
+        ));
     }
 }

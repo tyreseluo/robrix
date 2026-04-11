@@ -299,6 +299,12 @@
   "room_input_bar.translation.preview.idle": "开始输入即可翻译...",
   "room_input_bar.translation.preview.loading": "翻译中...",
   "room_input_bar.translation.preview.error": "错误：{error}",
+  "room_input_bar.target.default": "默认：{display_name}",
+  "room_input_bar.target.to_bot": "发给 {display_name}",
+  "room_input_bar.target.to_room": "发到房间",
+  "room_input_bar.target.reply_bot": "回复 → {display_name}",
+  "room_input_bar.target.menu.bound_bot": "{display_name}",
+  "room_input_bar.target.menu.room": "发到房间",
 
   "invite_screen.message.invited_by": "邀请你加入：",
   "invite_screen.message.invited_generic": "你被邀请加入：",

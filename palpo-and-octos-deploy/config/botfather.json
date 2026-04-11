@@ -6,6 +6,7 @@
     "provider": "moonshot",
     "model": "kimi-k2.5",
     "api_key_env": "MOONSHOT_API_KEY",
+    "admin_mode": true,
     "channels": [
       {
         "type": "matrix",

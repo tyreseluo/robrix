@@ -299,6 +299,12 @@
   "room_input_bar.translation.preview.idle": "Start typing to translate...",
   "room_input_bar.translation.preview.loading": "Translating...",
   "room_input_bar.translation.preview.error": "Error: {error}",
+  "room_input_bar.target.default": "Default: {display_name}",
+  "room_input_bar.target.to_bot": "To {display_name}",
+  "room_input_bar.target.to_room": "To room",
+  "room_input_bar.target.reply_bot": "Reply → {display_name}",
+  "room_input_bar.target.menu.bound_bot": "{display_name}",
+  "room_input_bar.target.menu.room": "To room",
 
   "invite_screen.message.invited_by": "has invited you to join:",
   "invite_screen.message.invited_generic": "You have been invited to join:",

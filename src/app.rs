@@ -1094,6 +1094,7 @@ impl MatchEvent for App {
                         message: RoomMessageEventContent::notice_plain(format!("[App Service] {message}")),
                         replied_to: None,
                         target_user_id: None,
+                        explicit_room: false,
                         #[cfg(feature = "tsp")]
                         sign_with_tsp: false,
                     });

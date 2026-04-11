@@ -927,6 +927,7 @@ pub enum MatrixRequest {
         message: RoomMessageEventContent,
         replied_to: Option<Reply>,
         target_user_id: Option<OwnedUserId>,
+        explicit_room: bool,
         #[cfg(feature = "tsp")]
         sign_with_tsp: bool,
     },
@@ -1049,6 +1050,34 @@ fn add_octos_target_user_id(
     content
 }
 
+fn add_octos_explicit_room_marker(
+    mut content: serde_json::Value,
+    explicit_room: bool,
+) -> serde_json::Value {
+    if explicit_room
+        && let Some(content_obj) = content.as_object_mut()
+    {
+        content_obj.insert(
+            "org.octos.explicit_room".to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    content
+}
+
+fn add_octos_routing_metadata(
+    content: serde_json::Value,
+    target_user_id: Option<&UserId>,
+    explicit_room: bool,
+) -> serde_json::Value {
+    let content = add_octos_explicit_room_marker(content, explicit_room);
+    if let Some(target_user_id) = target_user_id {
+        add_octos_target_user_id(content, target_user_id)
+    } else {
+        content
+    }
+}
+
 async fn ensure_target_user_joined_room(
     room: &Room,
     target_user_id: &UserId,
@@ -1101,6 +1130,68 @@ mod matrix_request_tests {
                 .get("org.octos.target_user_id")
                 .and_then(|value| value.as_str()),
             Some("@bot_weather:example.com")
+        );
+    }
+
+    #[test]
+    fn test_send_message_explicit_room_sets_octos_explicit_room_marker() {
+        let content = serde_json::json!({
+            "msgtype": "m.text",
+            "body": "hello room",
+        });
+
+        let content = add_octos_explicit_room_marker(content, true);
+
+        assert_eq!(
+            content
+                .get("org.octos.explicit_room")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert!(
+            content.get("org.octos.target_user_id").is_none(),
+            "ExplicitRoom should not also set a targeted bot MXID",
+        );
+    }
+
+    #[test]
+    fn test_send_reply_explicit_room_sets_octos_explicit_room_marker() {
+        let content = serde_json::json!({
+            "msgtype": "m.text",
+            "body": "reply body",
+            "m.relates_to": {
+                "m.in_reply_to": {
+                    "event_id": "$reply"
+                }
+            }
+        });
+
+        let content = add_octos_explicit_room_marker(content, true);
+
+        assert_eq!(
+            content
+                .get("org.octos.explicit_room")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert!(
+            content.get("org.octos.target_user_id").is_none(),
+            "ExplicitRoom replies should suppress room fallback without setting target_user_id",
+        );
+    }
+
+    #[test]
+    fn test_send_message_room_default_does_not_set_octos_explicit_room_marker() {
+        let content = serde_json::json!({
+            "msgtype": "m.text",
+            "body": "hello bot",
+        });
+
+        let content = add_octos_explicit_room_marker(content, false);
+
+        assert!(
+            content.get("org.octos.explicit_room").is_none(),
+            "RoomDefault should not suppress Octos room fallback",
         );
     }
 }
@@ -2605,6 +2696,7 @@ async fn matrix_worker_task(
                 message,
                 replied_to,
                 target_user_id,
+                explicit_room,
                 #[cfg(feature = "tsp")]
                 sign_with_tsp,
             } => {
@@ -2679,12 +2771,14 @@ async fn matrix_worker_task(
                             }
                         };
 
-                        if let Some(target_user_id) = target_user_id.as_ref() {
-                            if let Err(_e) = ensure_target_user_joined_room(
-                                timeline.room(),
-                                target_user_id.as_ref(),
-                            )
-                            .await
+                        if target_user_id.is_some() || explicit_room {
+                            let target_user_id = target_user_id.as_ref();
+                            if let Some(target_user_id) = target_user_id
+                                && let Err(_e) = ensure_target_user_joined_room(
+                                    timeline.room(),
+                                    target_user_id.as_ref(),
+                                )
+                                .await
                             {
                                 error!("Failed to ensure targeted bot {target_user_id} joined {timeline_kind}: {_e:?}");
                                 enqueue_popup_notification(
@@ -2696,7 +2790,11 @@ async fn matrix_worker_task(
                             }
 
                             let raw_content = match serde_json::to_value(&reply_content) {
-                                Ok(content) => add_octos_target_user_id(content, target_user_id.as_ref()),
+                                Ok(content) => add_octos_routing_metadata(
+                                    content,
+                                    target_user_id.map(|user_id| user_id.as_ref()),
+                                    explicit_room,
+                                ),
                                 Err(_e) => {
                                     error!("Failed to serialize reply content for {timeline_kind}: {_e:?}");
                                     enqueue_popup_notification(
@@ -2708,9 +2806,15 @@ async fn matrix_worker_task(
                                 }
                             };
                             match timeline.room().send_raw("m.room.message", raw_content).await {
-                                Ok(_response) => log!("Sent targeted reply message to {timeline_kind}."),
+                                Ok(_response) => {
+                                    if target_user_id.is_some() {
+                                        log!("Sent targeted reply message to {timeline_kind}.");
+                                    } else {
+                                        log!("Sent explicit-room reply message to {timeline_kind}.");
+                                    }
+                                }
                                 Err(_e) => {
-                                    error!("Failed to send targeted reply message to {timeline_kind}: {_e:?}");
+                                    error!("Failed to send reply message to {timeline_kind}: {_e:?}");
                                     enqueue_popup_notification(format!("Failed to send reply: {_e}"), PopupKind::Error, None);
                                 }
                             }
@@ -2723,12 +2827,14 @@ async fn matrix_worker_task(
                                 }
                             }
                         }
-                    } else if let Some(target_user_id) = target_user_id.as_ref() {
-                        if let Err(_e) = ensure_target_user_joined_room(
-                            timeline.room(),
-                            target_user_id.as_ref(),
-                        )
-                        .await
+                    } else if target_user_id.is_some() || explicit_room {
+                        let target_user_id = target_user_id.as_ref();
+                        if let Some(target_user_id) = target_user_id
+                            && let Err(_e) = ensure_target_user_joined_room(
+                                timeline.room(),
+                                target_user_id.as_ref(),
+                            )
+                            .await
                         {
                             error!("Failed to ensure targeted bot {target_user_id} joined {timeline_kind}: {_e:?}");
                             enqueue_popup_notification(
@@ -2740,7 +2846,11 @@ async fn matrix_worker_task(
                         }
 
                         let raw_content = match serde_json::to_value(&message) {
-                            Ok(content) => add_octos_target_user_id(content, target_user_id.as_ref()),
+                            Ok(content) => add_octos_routing_metadata(
+                                content,
+                                target_user_id.map(|user_id| user_id.as_ref()),
+                                explicit_room,
+                            ),
                             Err(_e) => {
                                 error!("Failed to serialize message content for {timeline_kind}: {_e:?}");
                                 enqueue_popup_notification(
@@ -2752,9 +2862,15 @@ async fn matrix_worker_task(
                             }
                         };
                         match timeline.room().send_raw("m.room.message", raw_content).await {
-                            Ok(_response) => log!("Sent targeted message to {timeline_kind}."),
+                            Ok(_response) => {
+                                if target_user_id.is_some() {
+                                    log!("Sent targeted message to {timeline_kind}.");
+                                } else {
+                                    log!("Sent explicit-room message to {timeline_kind}.");
+                                }
+                            }
                             Err(_e) => {
-                                error!("Failed to send targeted message to {timeline_kind}: {_e:?}");
+                                error!("Failed to send message to {timeline_kind}: {_e:?}");
                                 enqueue_popup_notification(format!("Failed to send message: {_e}"), PopupKind::Error, None);
                             }
                         }
