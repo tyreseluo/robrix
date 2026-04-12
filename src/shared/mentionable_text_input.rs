@@ -715,6 +715,22 @@ impl Widget for MentionableTextInput {
             }
         }
 
+        // Intercept Cmd/Ctrl+Return to emit Returned action (send message)
+        // before the multiline TextInput turns it into a newline.
+        if let Event::KeyDown(KeyEvent {
+            key_code: KeyCode::ReturnKey,
+            modifiers,
+            ..
+        }) = event {
+            if modifiers.logo || modifiers.control {
+                let text_input = self.cmd_text_input.text_input(cx, ids!(text_input));
+                let uid = text_input.widget_uid();
+                let text = text_input.text();
+                cx.widget_action(uid, makepad_widgets::text_input::TextInputAction::Returned(text, modifiers.clone()));
+                return;
+            }
+        }
+
         self.cmd_text_input.handle_event(cx, event, scope);
 
         // Best practice: Always check Scope first to get current context
