@@ -921,6 +921,12 @@ pub enum MatrixRequest {
         destination: MediaCacheEntryRef,
         update_sender: Option<crossbeam_channel::Sender<TimelineUpdate>>,
     },
+    /// Request to download a file from an mxc:// URI and save it to disk.
+    /// This bypasses MediaCache to avoid header parsing issues with non-ASCII filenames.
+    DownloadAndSaveFile {
+        mxc_uri: OwnedMxcUri,
+        app_language: crate::i18n::AppLanguage,
+    },
     /// Request to send a message to the given room.
     SendMessage {
         timeline_kind: TimelineKind,
@@ -2678,6 +2684,108 @@ async fn matrix_worker_task(
                     let res = client.media().get_media_content(&media_request, true).await;
                     // log!("Fetched avatar for {mxc_uri:?}, succeeded? {}", res.is_ok());
                     on_fetched(AvatarUpdate { mxc_uri, avatar_data: res.map(|v| v.into()) });
+                });
+            }
+
+            MatrixRequest::DownloadAndSaveFile { mxc_uri, app_language } => {
+                let Some(client) = get_client() else { continue };
+
+                let _download_task = Handle::current().spawn(async move {
+                    use crate::shared::popup_list::{PopupKind, enqueue_popup_notification};
+                    use crate::i18n::{tr_key, tr_fmt};
+
+                    log!("DownloadAndSaveFile: downloading {mxc_uri}");
+
+                    // Use the client's homeserver URL to construct a direct download URL,
+                    // bypassing matrix-sdk's header parsing which fails on non-ASCII Content-Disposition.
+                    let server_name = mxc_uri.server_name().map(|s| s.to_string()).unwrap_or_default();
+                    let media_id = mxc_uri.media_id().map(|s| s.to_string()).unwrap_or_default();
+
+                    let homeserver = client.homeserver().to_string();
+                    let homeserver = homeserver.trim_end_matches('/');
+                    let download_url = format!(
+                        "{homeserver}/_matrix/media/v3/download/{server_name}/{media_id}",
+                    );
+
+                    let http_client = matrix_sdk::reqwest::Client::new();
+                    match http_client.get(&download_url).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            // Extract filename from Content-Disposition header or use media_id
+                            let filename = resp.headers()
+                                .get("content-disposition")
+                                .and_then(|v: &matrix_sdk::reqwest::header::HeaderValue| {
+                                    let val = String::from_utf8_lossy(v.as_bytes());
+                                    // Parse filename="..." or filename*=UTF-8''...
+                                    val.split("filename=").nth(1)
+                                        .or_else(|| val.split("filename*=").nth(1))
+                                        .map(|s| s.trim_matches(|c: char| c == '"' || c == '\'' || c == ';' || c == ' ').to_string())
+                                })
+                                .unwrap_or_else(|| format!("robrix_{media_id}"));
+
+                            match resp.bytes().await {
+                                Ok(data) => {
+                                    let downloads_dir = crate::app_data_dir().join("downloads");
+                                    if let Err(e) = std::fs::create_dir_all(&downloads_dir) {
+                                        error!("Failed to create downloads dir: {e:?}");
+                                        return;
+                                    }
+                                    let dest = downloads_dir.join(&filename);
+                                    match std::fs::write(&dest, &data) {
+                                        Ok(()) => {
+                                            log!("DownloadAndSaveFile: saved to {}", dest.display());
+                                            let dest_str = dest.display().to_string();
+                                            enqueue_popup_notification(
+                                                tr_fmt(app_language, "room_screen.file.saved_at", &[("path", &dest_str)]),
+                                                PopupKind::Success,
+                                                Some(8.0),
+                                            );
+                                            // Try to open with system handler
+                                            if let Err(e) = robius_open::Uri::new(&format!("file://{dest_str}")).open() {
+                                                log!("Could not open file: {e:?}");
+                                            }
+                                            SignalToUI::set_ui_signal();
+                                        }
+                                        Err(e) => {
+                                            error!("DownloadAndSaveFile: write failed: {e:?}");
+                                            enqueue_popup_notification(
+                                                tr_key(app_language, "room_screen.file.save_failed").to_string(),
+                                                PopupKind::Error,
+                                                Some(6.0),
+                                            );
+                                            SignalToUI::set_ui_signal();
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("DownloadAndSaveFile: failed to read response body: {e:?}");
+                                    enqueue_popup_notification(
+                                        tr_key(app_language, "room_screen.file.download_failed").to_string(),
+                                        PopupKind::Error,
+                                        Some(6.0),
+                                    );
+                                    SignalToUI::set_ui_signal();
+                                }
+                            }
+                        }
+                        Ok(resp) => {
+                            error!("DownloadAndSaveFile: server returned {}", resp.status());
+                            enqueue_popup_notification(
+                                tr_key(app_language, "room_screen.file.download_failed").to_string(),
+                                PopupKind::Error,
+                                Some(6.0),
+                            );
+                            SignalToUI::set_ui_signal();
+                        }
+                        Err(e) => {
+                            error!("DownloadAndSaveFile: request failed: {e:?}");
+                            enqueue_popup_notification(
+                                tr_key(app_language, "room_screen.file.download_failed").to_string(),
+                                PopupKind::Error,
+                                Some(6.0),
+                            );
+                            SignalToUI::set_ui_signal();
+                        }
+                    }
                 });
             }
 

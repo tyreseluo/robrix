@@ -218,24 +218,21 @@ fn parse_bot_timeline_layers(raw_body: &str, is_bot_sender: bool) -> BotTimeline
         return BotTimelineLayers::plain(raw_body);
     }
 
-    let (status, provider_idx) =
+    let (status, provider, mut content_start) =
         if lines.len() >= 2 && looks_like_status_line(lines[0]) && is_bot_provider_line(lines[1]) {
-            (Some(lines[0].trim().to_string()), 1usize)
+            (
+                Some(lines[0].trim().to_string()),
+                Some(lines[1].trim().to_string()),
+                2usize,
+            )
         } else if is_bot_provider_line(lines[0]) {
-            (None, 0usize)
+            (None, Some(lines[0].trim().to_string()), 1usize)
         } else {
-            return BotTimelineLayers::plain(raw_body);
+            (None, None, 0usize)
         };
 
-    let provider = Some(lines[provider_idx].trim().to_string());
-
-    let mut content_start = provider_idx + 1;
     while content_start < lines.len() && lines[content_start].trim().is_empty() {
         content_start += 1;
-    }
-
-    if content_start >= lines.len() {
-        return BotTimelineLayers::plain(raw_body);
     }
 
     let mut footer = None;
@@ -253,7 +250,16 @@ fn parse_bot_timeline_layers(raw_body: &str, is_bot_sender: bool) -> BotTimeline
     }
 
     if content_start >= content_end {
-        return BotTimelineLayers::plain(raw_body);
+        return if status.is_some() || provider.is_some() || footer.is_some() {
+            BotTimelineLayers {
+                status,
+                provider,
+                body: String::new(),
+                footer,
+            }
+        } else {
+            BotTimelineLayers::plain(raw_body)
+        };
     }
 
     let content_lines = &lines[content_start..content_end];
@@ -777,6 +783,22 @@ pub(crate) fn is_known_or_likely_bot(
         || is_likely_bot_user_id(user_id, resolved_parent_bot_user_id)
 }
 
+fn is_timeline_sender_bot(
+    user_id: &UserId,
+    resolved_parent_bot_user_id: Option<&UserId>,
+    room_bot_user_ids: &[OwnedUserId],
+    known_bot_user_ids: &[OwnedUserId],
+) -> bool {
+    room_bot_user_ids
+        .iter()
+        .any(|room_bot_user_id| room_bot_user_id.as_str() == user_id.as_str())
+        || is_known_or_likely_bot(
+            user_id,
+            resolved_parent_bot_user_id,
+            known_bot_user_ids,
+        )
+}
+
 fn collect_room_bot_user_ids(
     room_members: &[RoomMember],
     resolved_parent_bot_user_id: Option<&UserId>,
@@ -818,6 +840,51 @@ fn collect_room_bot_user_ids(
 
     room_bot_user_ids.sort_by(|lhs, rhs| lhs.as_str().cmp(rhs.as_str()));
     room_bot_user_ids
+}
+
+fn compute_timeline_bot_context(
+    app_state: Option<&AppState>,
+    room_id: &OwnedRoomId,
+    room_members: Option<&Arc<Vec<RoomMember>>>,
+) -> (Option<OwnedUserId>, Vec<OwnedUserId>, Vec<OwnedUserId>) {
+    app_state
+        .map(|app_state| {
+            let app_service_enabled = app_state.bot_settings.enabled;
+            let persisted_room_bot_user_ids = if app_service_enabled {
+                app_state.bot_settings.bound_bot_user_ids(room_id)
+            } else {
+                Vec::new()
+            };
+            let resolved_parent_bot_user_id = if app_service_enabled {
+                app_state
+                    .bot_settings
+                    .resolved_bot_user_id(current_user_id().as_deref())
+                    .ok()
+            } else {
+                None
+            };
+            let known_bot_user_ids = if app_service_enabled {
+                app_state.bot_settings.known_bot_user_ids()
+            } else {
+                Vec::new()
+            };
+            let room_bot_user_ids = room_members
+                .map(|members|
+                    collect_room_bot_user_ids(
+                        members.as_ref(),
+                        resolved_parent_bot_user_id.as_deref(),
+                        &known_bot_user_ids,
+                        &persisted_room_bot_user_ids,
+                    )
+                )
+                .unwrap_or(persisted_room_bot_user_ids);
+            (
+                resolved_parent_bot_user_id,
+                room_bot_user_ids,
+                known_bot_user_ids,
+            )
+        })
+        .unwrap_or((None, Vec::new(), Vec::new()))
 }
 
 fn is_likely_bot_member(
@@ -4685,6 +4752,16 @@ impl Widget for RoomScreen {
             let list = list_ref.deref_mut();
             list.set_item_range(cx, 0, last_item_id);
 
+            let (
+                resolved_parent_bot_user_id,
+                room_bot_user_ids,
+                known_bot_user_ids,
+            ) = compute_timeline_bot_context(
+                scope.data.get::<AppState>(),
+                tl_state.kind.room_id(),
+                tl_state.room_members.as_ref(),
+            );
+
             while let Some(item_id) = list.next_visible_item(cx) {
                 let item = {
                     let tl_idx = item_id;
@@ -4736,6 +4813,9 @@ impl Widget for RoomScreen {
                                                 &self.pinned_events,
                                                 item_drawn_status,
                                                 room_screen_widget_uid,
+                                                resolved_parent_bot_user_id.as_deref(),
+                                                &room_bot_user_ids,
+                                                &known_bot_user_ids,
                                                 &mut tl_state.streaming_messages,
                                             )
                                         },
@@ -5260,6 +5340,15 @@ impl RoomScreen {
         let curr_first_id = portal_list.first_id();
         let ui = self.widget_uid();
         let Some(tl) = self.tl_state.as_mut() else { return };
+        let (
+            resolved_parent_bot_user_id,
+            room_bot_user_ids,
+            known_bot_user_ids,
+        ) = compute_timeline_bot_context(
+            app_state,
+            tl.kind.room_id(),
+            tl.room_members.as_ref(),
+        );
 
         let mut done_loading = false;
         let mut should_continue_backwards_pagination = false;
@@ -5505,7 +5594,12 @@ impl RoomScreen {
                                         MessageType::Notice(NoticeMessageEventContent { formatted, .. }) => formatted.as_ref(),
                                         _ => None,
                                     }),
-                                is_likely_bot_user_id(new_evt.sender(), None),
+                                is_timeline_sender_bot(
+                                    new_evt.sender(),
+                                    resolved_parent_bot_user_id.as_deref(),
+                                    &room_bot_user_ids,
+                                    &known_bot_user_ids,
+                                ),
                             );
 
                             if let Some(state) = tl.streaming_messages.get_mut(&event_id) {
@@ -5941,6 +6035,13 @@ impl RoomScreen {
         };
 
         if let HtmlLinkAction::Clicked { url, .. } = action.as_widget_action().cast() {
+            // Handle mxc:// links (file downloads from Matrix media server)
+            if url.starts_with("mxc://") {
+                let mxc_uri = OwnedMxcUri::from(url.clone());
+                self.handle_mxc_file_download(cx, mxc_uri);
+                return true;
+            }
+
             let mut link_was_handled = false;
             if let Ok(matrix_to_uri) = MatrixToUri::parse(&url) {
                 link_was_handled |= handle_matrix_link(matrix_to_uri.id(), matrix_to_uri.via());
@@ -5980,6 +6081,27 @@ impl RoomScreen {
         else {
             false
         }
+    }
+
+    /// Handles an mxc:// file download link click.
+    /// Fetches the file from the Matrix media server, saves it with a unique name,
+    /// and opens it with the system default application.
+    fn handle_mxc_file_download(&mut self, _cx: &mut Cx, mxc_uri: OwnedMxcUri) {
+        log!("handle_mxc_file_download: mxc_uri={mxc_uri}");
+
+        enqueue_popup_notification(
+            tr_key(self.app_language, "room_screen.file.downloading").to_string(),
+            PopupKind::Info,
+            Some(3.0),
+        );
+
+        // Download directly using the Matrix client (bypasses MediaCache to avoid
+        // header parsing issues with non-ASCII Content-Disposition headers).
+        let app_language = self.app_language;
+        submit_async_request(MatrixRequest::DownloadAndSaveFile {
+            mxc_uri,
+            app_language,
+        });
     }
 
     /// Handles image clicks in message content by opening the image viewer.
@@ -7633,11 +7755,19 @@ fn populate_message_view(
     pinned_events: &[OwnedEventId],
     item_drawn_status: ItemDrawnStatus,
     room_screen_widget_uid: WidgetUid,
+    resolved_parent_bot_user_id: Option<&UserId>,
+    room_bot_user_ids: &[OwnedUserId],
+    known_bot_user_ids: &[OwnedUserId],
     streaming_messages: &mut HashMap<OwnedEventId, super::streaming_animation::StreamingAnimState>,
 ) -> (WidgetRef, ItemDrawnStatus) {
     let mut new_drawn_status = item_drawn_status;
     let ts_millis = event_tl_item.timestamp();
-    let sender_is_bot = is_likely_bot_user_id(event_tl_item.sender(), None);
+    let sender_is_bot = is_timeline_sender_bot(
+        event_tl_item.sender(),
+        resolved_parent_bot_user_id,
+        room_bot_user_ids,
+        known_bot_user_ids,
+    );
 
     let mut is_notice = false; // whether this message is a Notice (automated bot message)
     let mut is_server_notice = false; // whether this message is a Server Notice
@@ -7943,6 +8073,7 @@ fn populate_message_view(
                             &html_or_plaintext_ref,
                             app_language,
                             file_content,
+                            media_cache,
                         );
                         (item, false)
                     }
@@ -8623,13 +8754,17 @@ fn populate_image_message_content(
 /// Draws a file message's content into the given `message_content_widget`.
 ///
 /// Returns whether the file message content was fully drawn.
+///
+/// File download is NOT triggered automatically during rendering.
+/// The user must click the `mxc://` link in the rendered HTML to initiate
+/// the download via the existing `RobrixHtmlLinkAction` handler.
 fn populate_file_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
     app_language: AppLanguage,
     file_content: &FileMessageEventContent,
+    _media_cache: &mut MediaCache,
 ) -> bool {
-    // Display the file name, human-readable size, caption, and a button to download it.
     let filename = htmlize::escape_text(file_content.filename());
     let size = file_content
         .info
@@ -8637,20 +8772,30 @@ fn populate_file_message_content(
         .and_then(|info| info.size)
         .map(|bytes| format!("  ({})", ByteSize::b(bytes.into())))
         .unwrap_or_default();
+    // Escape caption to prevent HTML injection from untrusted message content
     let caption = file_content.formatted_caption()
-        .map(|fb| format!("<br><i>{}</i>", fb.body))
-        .or_else(|| file_content.caption().map(|c| format!("<br><i>{c}</i>")))
+        .map(|fb| format!("<br><i>{}</i>", htmlize::escape_text(&fb.body)))
+        .or_else(|| file_content.caption().map(|c| format!("<br><i>{}</i>", htmlize::escape_text(c))))
         .unwrap_or_default();
 
-    // TODO: add a button to download the file
+    // Build a clickable mxc:// link so the user can explicitly trigger download.
+    // The link is handled by `RobrixHtmlLinkAction` / `robius_open` in the room screen.
+    let download_link = match &file_content.source {
+        MediaSource::Plain(mxc_uri) => {
+            format!(
+                "<br>→ <a href=\"{}\">{}</a>",
+                htmlize::escape_text(mxc_uri.as_str()),
+                tr_key(app_language, "room_screen.file.download"),
+            )
+        }
+        MediaSource::Encrypted(_) => {
+            format!("<br>→ <i>{}</i>", tr_key(app_language, "room_screen.file.encrypted_not_supported"))
+        }
+    };
 
     message_content_widget.show_html(
         cx,
-        tr_fmt(app_language, "room_screen.file.preview_html", &[
-            ("filename", &filename),
-            ("size", size.as_str()),
-            ("caption", caption.as_str()),
-        ]),
+        format!("<b>{filename}</b>{size}{caption}{download_link}"),
     );
     true
 }
@@ -10143,6 +10288,20 @@ mod tests {
     }
 
     #[test]
+    fn test_timeline_bot_detection_uses_room_bot_user_ids() {
+        let user_id: OwnedUserId = "@octosbot_bob:127.0.0.1:8128".try_into().unwrap();
+        let room_bot_user_ids = vec![user_id.clone()];
+        let known_bot_user_ids = Vec::new();
+
+        assert!(is_timeline_sender_bot(
+            user_id.as_ref(),
+            None,
+            &room_bot_user_ids,
+            &known_bot_user_ids,
+        ));
+    }
+
+    #[test]
     fn test_parse_bot_timeline_layers_extracts_status_provider_body_and_footer() {
         let body = "施法中\nvia moonshot@api (kimi-k2.5)\n\n你好！我是 **Alex**\n\n_moonshot@api/kimi-k2.5 · 5.3K in · 330 out · 6s_";
 
@@ -10154,6 +10313,21 @@ mod tests {
         assert_eq!(
             layers.footer.as_deref(),
             Some("_moonshot@api/kimi-k2.5 · 5.3K in · 330 out · 6s_"),
+        );
+    }
+
+    #[test]
+    fn test_parse_bot_timeline_layers_extracts_footer_without_provider_prefix() {
+        let body = "PPT 已经生成并发送了！\n\n你应该已经收到了文件。\n\n_moonshot@api/kimi-k2.5 · 11.0K in · 279 out · 9s_";
+
+        let layers = parse_bot_timeline_layers(body, true);
+
+        assert_eq!(layers.status, None);
+        assert_eq!(layers.provider, None);
+        assert_eq!(layers.body, "PPT 已经生成并发送了！\n\n你应该已经收到了文件。");
+        assert_eq!(
+            layers.footer.as_deref(),
+            Some("_moonshot@api/kimi-k2.5 · 11.0K in · 279 out · 9s_"),
         );
     }
 
