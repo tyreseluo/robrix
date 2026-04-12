@@ -307,6 +307,7 @@ fn resolve_target(
     bound_bot_user_id: Option<&UserId>,
     resolved_parent_bot_user_id: Option<&UserId>,
     known_bot_user_ids: &[OwnedUserId],
+    is_dm_room: bool,
 ) -> ResolvedTarget {
     if let Some(replying_to_sender) = replying_to_sender
         && is_known_or_likely_bot(
@@ -322,10 +323,15 @@ fn resolve_target(
         ExplicitOverride::Bot(bot_user_id) => ResolvedTarget::ExplicitBot(bot_user_id.clone()),
         ExplicitOverride::Room => ResolvedTarget::ExplicitRoom,
         ExplicitOverride::None => {
-            if bound_bot_user_id.is_some() {
-                ResolvedTarget::ExplicitRoom
-            } else {
-                ResolvedTarget::NoTarget
+            // DM rooms (user + bot, ≤2 members) default to routing to the bot,
+            // so users can chat without @mention. Multi-member rooms default to
+            // "explicit room" so the user doesn't accidentally send bot-directed
+            // messages while chatting with other humans. Users can override via
+            // the target chip either way.
+            match (is_dm_room, bound_bot_user_id) {
+                (true, Some(bot_user_id)) => ResolvedTarget::ExplicitBot(bot_user_id.to_owned()),
+                (false, Some(_)) => ResolvedTarget::ExplicitRoom,
+                (_, None) => ResolvedTarget::NoTarget,
             }
         }
     }
@@ -353,12 +359,19 @@ fn format_target_chip_presentation(
     }
 }
 
+/// Determines if a room should use DM-style default bot routing.
+/// Only true Matrix direct rooms should get this behavior.
+fn is_dm_room(room_screen_props: &RoomScreenProps) -> bool {
+    room_screen_props.is_direct_room
+}
+
 fn resolve_send_target(
     explicit_override: &ExplicitOverride,
     replying_to_sender: Option<&UserId>,
     bound_bot_user_id: Option<&UserId>,
     resolved_parent_bot_user_id: Option<&UserId>,
     known_bot_user_ids: &[OwnedUserId],
+    is_dm_room: bool,
 ) -> ResolvedTarget {
     resolve_target(
         explicit_override,
@@ -366,6 +379,7 @@ fn resolve_send_target(
         bound_bot_user_id,
         resolved_parent_bot_user_id,
         known_bot_user_ids,
+        is_dm_room,
     )
 }
 
@@ -376,6 +390,7 @@ fn resolve_restored_target(
     bound_bot_user_id: Option<&UserId>,
     resolved_parent_bot_user_id: Option<&UserId>,
     known_bot_user_ids: &[OwnedUserId],
+    is_dm_room: bool,
 ) -> ResolvedTarget {
     resolve_target(
         explicit_override,
@@ -383,6 +398,7 @@ fn resolve_restored_target(
         bound_bot_user_id,
         resolved_parent_bot_user_id,
         known_bot_user_ids,
+        is_dm_room,
     )
 }
 
@@ -1208,6 +1224,7 @@ impl RoomInputBar {
             room_screen_props.bound_bot_user_id.as_deref(),
             room_screen_props.resolved_parent_bot_user_id.as_deref(),
             &room_screen_props.known_bot_user_ids,
+            is_dm_room(room_screen_props),
         )
     }
 
@@ -2281,12 +2298,54 @@ mod tests {
                 Some(bound_bot_user_id.as_ref()),
                 Some(bound_bot_user_id.as_ref()),
                 &[],
+                false, // non-DM room
             ),
             ResolvedTarget::ExplicitRoom,
         );
         assert_eq!(
             routing_directives_for_message(&ResolvedTarget::ExplicitRoom, false),
             (None, true),
+        );
+    }
+
+    #[test]
+    fn test_direct_message_room_defaults_to_explicit_bot() {
+        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+
+        assert_eq!(
+            resolve_target(
+                &ExplicitOverride::None,
+                None,
+                Some(bound_bot_user_id.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                &[],
+                true, // direct room
+            ),
+            ResolvedTarget::ExplicitBot(bound_bot_user_id.clone()),
+        );
+        assert_eq!(
+            routing_directives_for_message(
+                &ResolvedTarget::ExplicitBot(bound_bot_user_id.clone()),
+                false,
+            ),
+            (Some(bound_bot_user_id), false),
+        );
+    }
+
+    #[test]
+    fn test_two_member_non_direct_room_stays_explicit_room() {
+        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+
+        assert_eq!(
+            resolve_target(
+                &ExplicitOverride::None,
+                None,
+                Some(bound_bot_user_id.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                &[],
+                false, // not a direct room, even if member count might be 2
+            ),
+            ResolvedTarget::ExplicitRoom,
         );
     }
 
@@ -2302,6 +2361,7 @@ mod tests {
                 Some(bound_bot_user_id.as_ref()),
                 Some(bound_bot_user_id.as_ref()),
                 &[],
+                false, // non-DM room
             ),
             ResolvedTarget::ExplicitRoom,
         );
@@ -2322,6 +2382,7 @@ mod tests {
                 Some(bound_bot_user_id.as_ref()),
                 Some(bound_bot_user_id.as_ref()),
                 &[],
+                false, // non-DM room
             ),
             ResolvedTarget::ReplyBot(bound_bot_user_id.clone()),
         );
@@ -2345,6 +2406,7 @@ mod tests {
                 Some(bound_bot_user_id.as_ref()),
                 Some(bound_bot_user_id.as_ref()),
                 &[],
+                false, // non-DM room
             ),
             ResolvedTarget::ExplicitRoom,
         );
@@ -2355,8 +2417,34 @@ mod tests {
                 Some(bound_bot_user_id.as_ref()),
                 Some(bound_bot_user_id.as_ref()),
                 &[],
+                false, // non-DM room
             ),
             ResolvedTarget::ReplyBot(bound_bot_user_id),
+        );
+    }
+
+    #[test]
+    fn test_reply_to_human_in_direct_message_room_still_targets_bound_bot() {
+        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+        let reply_sender = test_user_id("@alice:127.0.0.1:8128");
+
+        assert_eq!(
+            resolve_target(
+                &ExplicitOverride::None,
+                Some(reply_sender.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                Some(bound_bot_user_id.as_ref()),
+                &[],
+                true, // direct room
+            ),
+            ResolvedTarget::ExplicitBot(bound_bot_user_id.clone()),
+        );
+        assert_eq!(
+            routing_directives_for_message(
+                &ResolvedTarget::ExplicitBot(bound_bot_user_id.clone()),
+                false,
+            ),
+            (Some(bound_bot_user_id), false),
         );
     }
 
@@ -2395,6 +2483,7 @@ mod tests {
                 Some(bot_user_id.as_ref()),
                 Some(bot_user_id.as_ref()),
                 &[],
+                false, // non-DM room
             ),
             ResolvedTarget::ReplyBot(bot_user_id),
         );

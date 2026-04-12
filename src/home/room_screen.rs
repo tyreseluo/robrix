@@ -623,34 +623,20 @@ fn escape_slash_command_arg(value: &str) -> String {
     value.trim().replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-const BOT_PPT_GENERATION_GUARDRAIL: &str = concat!(
-    "For PPT/PowerPoint/PPTX generation in this Octos sandbox:\n",
-    "- Never run pip install, uv pip install, python -m pip, apt, brew, or any runtime package installer.\n",
-    "- Never attempt to download python-pptx or other external dependencies.\n",
-    "- Prefer the native Octos PPT tooling that already exists in this environment.\n",
-    "- If the mofa_slides tool is available, use it instead of shelling out.\n",
-    "- Do not use shell to inspect package managers, probe Python libraries, or attempt environment setup for PPT generation.\n",
-    "- If no native PPT tool is available in the current tool list, say so immediately instead of exploring with shell commands.\n",
-    "- If neither native Octos PPT tooling nor mofa_slides is available, explain the limitation clearly instead of trying to install packages."
-);
-
-fn compose_create_bot_system_prompt(system_prompt: Option<&str>) -> String {
-    match system_prompt.map(str::trim).filter(|value| !value.is_empty()) {
-        Some(system_prompt) => format!("{system_prompt}\n\n{BOT_PPT_GENERATION_GUARDRAIL}"),
-        None => BOT_PPT_GENERATION_GUARDRAIL.to_string(),
-    }
-}
-
 fn format_create_bot_command(
     username: &str,
     display_name: &str,
     system_prompt: Option<&str>,
 ) -> String {
     let mut command = format!("/createbot {} {}", username.trim(), display_name.trim());
-    let composed_prompt = compose_create_bot_system_prompt(system_prompt);
-    command.push_str(" --prompt \"");
-    command.push_str(&escape_slash_command_arg(&composed_prompt));
-    command.push('"');
+    if let Some(system_prompt) = system_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        command.push_str(" --prompt \"");
+        command.push_str(&escape_slash_command_arg(system_prompt));
+        command.push('"');
+    }
     command
 }
 
@@ -4268,6 +4254,9 @@ impl Widget for RoomScreen {
             let room_props = if let Some(tl) = self.tl_state.as_ref() {
                 let room_id = tl.kind.room_id().clone();
                 let room_members = tl.room_members.clone();
+                let is_direct_room = cx.get_global::<RoomsListRef>()
+                    .is_direct_room(&room_id)
+                    .unwrap_or(false);
                 let (
                     app_service_enabled,
                     app_service_room_bound,
@@ -4351,6 +4340,7 @@ impl Widget for RoomScreen {
                     room_name_id: self.room_name_id.clone().unwrap_or_else(|| RoomNameId::empty(room_id)),
                     timeline_kind: tl.kind.clone(),
                     room_members,
+                    is_direct_room,
                     room_bot_user_ids,
                     room_members_sync_pending: tl.room_members_sync_pending,
                     room_members_sort: tl.room_members_sort.clone(),
@@ -4369,6 +4359,7 @@ impl Widget for RoomScreen {
                     timeline_kind: self.timeline_kind.clone()
                         .expect("BUG: room_name_id was set but timeline_kind was missing"),
                     room_members: None,
+                    is_direct_room: false,
                     room_bot_user_ids: Vec::new(),
                     room_members_sort: None,
                     room_members_sync_pending: false,
@@ -4392,6 +4383,7 @@ impl Widget for RoomScreen {
                     room_name_id: RoomNameId::empty(room_id.clone()),
                     timeline_kind: TimelineKind::MainRoom { room_id },
                     room_members: None,
+                    is_direct_room: false,
                     room_bot_user_ids: Vec::new(),
                     room_members_sort: None,
                     room_members_sync_pending: false,
@@ -7346,6 +7338,7 @@ pub struct RoomScreenProps {
     pub room_name_id: RoomNameId,
     pub timeline_kind: TimelineKind,
     pub room_members: Option<Arc<Vec<RoomMember>>>,
+    pub is_direct_room: bool,
     pub room_bot_user_ids: Vec<OwnedUserId>,
     pub room_members_sync_pending: bool,
     /// Pre-computed sort order for room members (for mention search optimization).
@@ -10617,30 +10610,5 @@ mod tests {
         assert!(condensed_state.show_card);
         assert!(reply_state.show_metadata_footer);
         assert!(condensed_state.show_metadata_footer);
-    }
-
-    #[test]
-    fn test_compose_create_bot_system_prompt_uses_guardrail_when_empty() {
-        let prompt = compose_create_bot_system_prompt(None);
-
-        assert!(prompt.contains("Never run pip install"));
-        assert!(prompt.contains("mofa_slides"));
-        assert!(prompt.contains("Do not use shell"));
-    }
-
-    #[test]
-    fn test_compose_create_bot_system_prompt_appends_guardrail_to_user_prompt() {
-        let prompt = compose_create_bot_system_prompt(Some("你是一名天气助手"));
-
-        assert!(prompt.starts_with("你是一名天气助手"));
-        assert!(prompt.contains("Never attempt to download python-pptx"));
-    }
-
-    #[test]
-    fn test_format_create_bot_command_always_includes_guardrail_prompt() {
-        let command = format_create_bot_command("bob", "bobbot", None);
-
-        assert!(command.starts_with("/createbot bob bobbot --prompt \""));
-        assert!(command.contains("Never run pip install"));
     }
 }
