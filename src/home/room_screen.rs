@@ -1343,7 +1343,7 @@ script_mod! {
                             width: Fit
                             height: Fit
                             draw_text +: {
-                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 9.5 }
                                 color: (mod.widgets.COLOR_BOT_STATUS_TEXT)
                             }
                             text: ""
@@ -1388,7 +1388,7 @@ script_mod! {
                             width: Fill
                             height: Fit
                             draw_text +: {
-                                text_style: REGULAR_TEXT { font_size: 10.0 }
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 10.0 }
                                 color: (mod.widgets.COLOR_BOT_PROVIDER_TEXT)
                             }
                             text: ""
@@ -1398,7 +1398,7 @@ script_mod! {
                             width: Fill
                             height: Fit
                             draw_text +: {
-                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 9.5 }
                                 color: (mod.widgets.COLOR_BOT_FOOTER_TEXT)
                             }
                             text: ""
@@ -1476,7 +1476,7 @@ script_mod! {
                             width: Fit
                             height: Fit
                             draw_text +: {
-                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 9.5 }
                                 color: (mod.widgets.COLOR_BOT_STATUS_TEXT)
                             }
                             text: ""
@@ -1521,7 +1521,7 @@ script_mod! {
                             width: Fill
                             height: Fit
                             draw_text +: {
-                                text_style: REGULAR_TEXT { font_size: 10.0 }
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 10.0 }
                                 color: (mod.widgets.COLOR_BOT_PROVIDER_TEXT)
                             }
                             text: ""
@@ -1531,7 +1531,7 @@ script_mod! {
                             width: Fill
                             height: Fit
                             draw_text +: {
-                                text_style: REGULAR_TEXT { font_size: 9.5 }
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 9.5 }
                                 color: (mod.widgets.COLOR_BOT_FOOTER_TEXT)
                             }
                             text: ""

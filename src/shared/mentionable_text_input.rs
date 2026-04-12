@@ -110,7 +110,6 @@ use matrix_sdk::ruma::{
     OwnedRoomId, OwnedUserId,
 };
 use matrix_sdk::RoomMemberships;
-use std::collections::{BTreeMap, BTreeSet};
 use unicode_segmentation::UnicodeSegmentation;
 use crate::home::room_screen::RoomScreenProps;
 use crate::shared::command_text_input::CommandTextInput;
@@ -191,6 +190,14 @@ struct SlashCommand {
     description_key: &'static str,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TrackedVisibleMention {
+    user_id: OwnedUserId,
+    visible_text: String,
+    start: usize,
+    end: usize,
+}
+
 const MENTION_POPUP_HEADER_TEXT: &str = "Users in this Room";
 const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
@@ -266,6 +273,260 @@ fn member_data_change_requires_popup_refresh(
             search_state,
             MentionSearchState::WaitingForMembers { .. } | MentionSearchState::Searching { .. }
         )
+}
+
+fn build_user_mention_insertion(
+    display_name: Option<&str>,
+    user_id: &OwnedUserId,
+) -> String {
+    let visible_text = display_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| format!("@{name}"))
+        .unwrap_or_else(|| format!("@{}", user_id.localpart()));
+    format!("{visible_text} ")
+}
+
+fn apply_text_replacement_preserving_mentions(
+    current_text: &str,
+    start_idx: usize,
+    head: usize,
+    replacement_text: &str,
+    tracked_visible_mentions: &mut Vec<TrackedVisibleMention>,
+) -> (String, usize) {
+    let new_text =
+        utils::safe_replace_by_byte_indices(current_text, start_idx, head, replacement_text);
+    *tracked_visible_mentions = reconcile_visible_mentions_after_text_change(
+        current_text,
+        &new_text,
+        tracked_visible_mentions,
+    );
+    tracked_visible_mentions.sort_by_key(|mention| mention.start);
+
+    let cursor = start_idx + replacement_text.len();
+    (new_text, cursor)
+}
+
+fn apply_user_mention_selection(
+    current_text: &str,
+    start_idx: usize,
+    head: usize,
+    display_name: Option<&str>,
+    user_id: &OwnedUserId,
+    tracked_visible_mentions: &mut Vec<TrackedVisibleMention>,
+) -> (String, usize) {
+    let mention_to_insert = build_user_mention_insertion(display_name, user_id);
+    let (new_text, cursor) = apply_text_replacement_preserving_mentions(
+        current_text,
+        start_idx,
+        head,
+        &mention_to_insert,
+        tracked_visible_mentions,
+    );
+
+    let visible_text = mention_to_insert.trim_end().to_owned();
+    tracked_visible_mentions.push(TrackedVisibleMention {
+        user_id: user_id.clone(),
+        visible_text: visible_text.clone(),
+        start: start_idx,
+        end: start_idx + visible_text.len(),
+    });
+    tracked_visible_mentions.sort_by_key(|mention| mention.start);
+
+    (new_text, cursor)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TextChangeWindow {
+    changed_start: usize,
+    old_changed_end: usize,
+    new_changed_end: usize,
+    delta: isize,
+}
+
+fn compute_text_change_window(old_text: &str, new_text: &str) -> TextChangeWindow {
+    let mut changed_start = 0;
+    let mut old_iter = old_text.chars();
+    let mut new_iter = new_text.chars();
+
+    while let (Some(old_ch), Some(new_ch)) = (old_iter.next(), new_iter.next()) {
+        if old_ch != new_ch {
+            break;
+        }
+        changed_start += old_ch.len_utf8();
+    }
+
+    let mut old_suffix_len = 0;
+    let mut new_suffix_len = 0;
+    let mut old_suffix_iter = old_text[changed_start..].chars().rev();
+    let mut new_suffix_iter = new_text[changed_start..].chars().rev();
+
+    while old_text.len() - old_suffix_len > changed_start
+        && new_text.len() - new_suffix_len > changed_start
+    {
+        match (old_suffix_iter.next(), new_suffix_iter.next()) {
+            (Some(old_ch), Some(new_ch)) if old_ch == new_ch => {
+                old_suffix_len += old_ch.len_utf8();
+                new_suffix_len += new_ch.len_utf8();
+            }
+            _ => break,
+        }
+    }
+
+    let old_changed_end = old_text.len() - old_suffix_len;
+    let new_changed_end = new_text.len() - new_suffix_len;
+
+    TextChangeWindow {
+        changed_start,
+        old_changed_end,
+        new_changed_end,
+        delta: new_changed_end as isize - old_changed_end as isize,
+    }
+}
+
+fn reconcile_visible_mentions_after_text_change(
+    old_text: &str,
+    new_text: &str,
+    tracked_visible_mentions: &[TrackedVisibleMention],
+) -> Vec<TrackedVisibleMention> {
+    let change = compute_text_change_window(old_text, new_text);
+
+    tracked_visible_mentions
+        .iter()
+        .filter_map(|mention| {
+            if mention.end <= change.changed_start {
+                Some(mention.clone())
+            } else if mention.start >= change.old_changed_end {
+                let start = mention.start.saturating_add_signed(change.delta);
+                let end = mention.end.saturating_add_signed(change.delta);
+                Some(TrackedVisibleMention {
+                    user_id: mention.user_id.clone(),
+                    visible_text: mention.visible_text.clone(),
+                    start,
+                    end,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn reset_visible_mention_tracking_for_programmatic_text_set(
+    tracked_visible_mentions: &mut Vec<TrackedVisibleMention>,
+    possible_room_mention: &mut bool,
+) {
+    tracked_visible_mentions.clear();
+    *possible_room_mention = false;
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedOutgoingMentionContent {
+    markdown_text: String,
+    html_text: String,
+    mentions: Mentions,
+}
+
+fn markdown_escape_visible_mention_label(label: &str) -> String {
+    let mut escaped = String::with_capacity(label.len());
+    for ch in label.chars() {
+        match ch {
+            '\\' | '[' | ']' | '(' | ')' | '*' | '_' | '`' | '~' | '!' | '#' | '+' | '-' | '.' | '>' => {
+                escaped.push('\\');
+            }
+            _ => {}
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn contains_standalone_room_mention(text: &str) -> bool {
+    let Some(mut search_start) = text.find("@room") else {
+        return false;
+    };
+
+    loop {
+        let before = text[..search_start].chars().next_back();
+        let after = text[search_start + "@room".len()..].chars().next();
+
+        let starts_token = before.is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation());
+        let ends_token = after.is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation());
+
+        if starts_token && ends_token {
+            return true;
+        }
+
+        let next_search_from = search_start + "@room".len();
+        let Some(relative_next) = text[next_search_from..].find("@room") else {
+            return false;
+        };
+        search_start = next_search_from + relative_next;
+    }
+}
+
+fn resolve_visible_mentions_for_send(
+    text: &str,
+    tracked_visible_mentions: &[TrackedVisibleMention],
+    possible_room_mention: bool,
+) -> ResolvedOutgoingMentionContent {
+    let mut mentions = Mentions::new();
+    mentions.room = possible_room_mention && contains_standalone_room_mention(text);
+
+    let mut markdown_text = String::with_capacity(text.len());
+    let mut html_text = String::with_capacity(text.len());
+    let mut cursor = 0;
+
+    let mut tracked_mentions = tracked_visible_mentions.iter().collect::<Vec<_>>();
+    tracked_mentions.sort_by_key(|mention| mention.start);
+
+    for mention in tracked_mentions {
+        if mention.start < cursor || mention.start >= mention.end || mention.end > text.len() {
+            continue;
+        }
+
+        let Some(visible_slice) = text.get(mention.start..mention.end) else {
+            continue;
+        };
+
+        if visible_slice != mention.visible_text {
+            continue;
+        }
+
+        let Some(prefix) = text.get(cursor..mention.start) else {
+            continue;
+        };
+
+        markdown_text.push_str(prefix);
+        html_text.push_str(prefix);
+
+        let matrix_uri = mention.user_id.matrix_to_uri().to_string();
+        let escaped_label = markdown_escape_visible_mention_label(&mention.visible_text);
+        markdown_text.push_str(&format!("[{escaped_label}]({matrix_uri})"));
+        html_text.push_str(&format!(
+            "<a href=\"{}\">{}</a>",
+            htmlize::escape_attribute(&matrix_uri),
+            htmlize::escape_text(&mention.visible_text),
+        ));
+
+        mentions.user_ids.insert(mention.user_id.clone());
+        cursor = mention.end;
+    }
+
+    if let Some(suffix) = text.get(cursor..) {
+        markdown_text.push_str(suffix);
+        html_text.push_str(suffix);
+    }
+
+    ResolvedOutgoingMentionContent { markdown_text, html_text, mentions }
+}
+
+fn finalize_popup_selection(cx: &mut Cx, input: &mut MentionableTextInput) {
+    input.cancel_active_search();
+    input.close_mention_popup(cx);
+    input.search_state = MentionSearchState::JustCancelled;
+    input.pending_popup_cleanup = false;
+    input.pending_draw_focus_restore = true;
 }
 
 script_mod! {
@@ -630,14 +891,11 @@ pub struct MentionableTextInput {
     /// Template for no matches indicator
     #[live]
     no_matches_indicator: Option<LivePtr>,
-    /// The set of users that were mentioned (at one point) in this text input.
-    /// Due to characters being deleted/removed, this list is a *superset*
-    /// of possible users who may have been mentioned.
-    /// All of these mentions may not exist in the final text input content;
-    /// this is just a list of users to search the final sent message for
-    /// when adding in new mentions.
     #[rust]
-    possible_mentions: BTreeMap<OwnedUserId, String>,
+    tracked_visible_mentions: Vec<TrackedVisibleMention>,
+    /// Last text value seen by the widget, used to reconcile tracked mention spans.
+    #[rust]
+    last_text: String,
     /// Indicates if the `@room` option was explicitly selected.
     #[rust]
     possible_room_mention: bool,
@@ -1476,26 +1734,36 @@ impl MentionableTextInput {
                     // Invalid user ID format - skip selection
                     return;
                 };
-                self.possible_mentions
-                    .insert(user_id.clone(), username.clone());
-
-                // Currently, we directly insert the markdown link for user mentions
-                // instead of the user's display name, because we don't yet have a way
-                // to track mentioned display names and replace them later.
-                format!("[{username}]({}) ", user_id.matrix_to_uri(),)
+                let (new_text, new_pos) = apply_user_mention_selection(
+                    &current_text,
+                    start_idx,
+                    head,
+                    Some(&username),
+                    &user_id,
+                    &mut self.tracked_visible_mentions,
+                );
+                self.set_input_text_preserving_mentions(cx, &new_text);
+                text_input_ref.set_cursor(
+                    cx,
+                    Cursor {
+                        index: new_pos,
+                        prefer_next_row: false,
+                    },
+                    false,
+                );
+                finalize_popup_selection(cx, self);
+                return;
             };
 
-            // Use utility function to safely replace text
-            let new_text = utils::safe_replace_by_byte_indices(
+            let (new_text, new_pos) = apply_text_replacement_preserving_mentions(
                 &current_text,
                 start_idx,
                 head,
                 &mention_to_insert,
+                &mut self.tracked_visible_mentions,
             );
 
-            self.cmd_text_input.set_text(cx, &new_text);
-            // Calculate new cursor position
-            let new_pos = start_idx + mention_to_insert.len();
+            self.set_input_text_preserving_mentions(cx, &new_text);
             text_input_ref.set_cursor(
                 cx,
                 Cursor {
@@ -1505,16 +1773,7 @@ impl MentionableTextInput {
                 false,
             );
         }
-
-        self.cancel_active_search();
-        self.search_state = MentionSearchState::JustCancelled;
-        // Clear cleanup flag to prevent next-frame cleanup from interfering with focus
-        self.pending_popup_cleanup = false;
-        self.close_mention_popup(cx);
-        // Schedule focus restoration for the draw cycle.
-        // This will retry until focus is successfully restored, handling cases where
-        // finger_up events might steal focus after our initial restoration attempt.
-        self.pending_draw_focus_restore = true;
+        finalize_popup_selection(cx, self);
     }
 
     fn on_slash_command_selected(&mut self, cx: &mut Cx, selected: WidgetRef) {
@@ -1529,15 +1788,15 @@ impl MentionableTextInput {
 
         if let Some(start_idx) = find_slash_command_trigger_position(&current_text, head) {
             let command_to_insert = format!("{command} ");
-            let new_text = utils::safe_replace_by_byte_indices(
+            let (new_text, new_pos) = apply_text_replacement_preserving_mentions(
                 &current_text,
                 start_idx,
                 head,
                 &command_to_insert,
+                &mut self.tracked_visible_mentions,
             );
 
-            self.cmd_text_input.set_text(cx, &new_text);
-            let new_pos = start_idx + command_to_insert.len();
+            self.set_input_text_preserving_mentions(cx, &new_text);
             text_input_ref.set_cursor(
                 cx,
                 Cursor {
@@ -1562,20 +1821,33 @@ impl MentionableTextInput {
 
     /// Core text change handler that manages mention context
     fn handle_text_change(&mut self, cx: &mut Cx, scope: &mut Scope, text: String) {
+        let previous_text = std::mem::replace(&mut self.last_text, text.clone());
+        let tracked_visible_mentions = std::mem::take(&mut self.tracked_visible_mentions);
+        self.tracked_visible_mentions = reconcile_visible_mentions_after_text_change(
+            &previous_text,
+            &text,
+            &tracked_visible_mentions,
+        );
+
         // If search was just cancelled, clear the flag and don't re-trigger search
         if self.is_just_cancelled() {
             self.search_state = MentionSearchState::Idle;
-            return;
         }
 
         // Check if text is empty or contains only whitespace
         let trimmed_text = text.trim();
         if trimmed_text.is_empty() {
-            self.possible_mentions.clear();
-            self.possible_room_mention = false;
+            reset_visible_mention_tracking_for_programmatic_text_set(
+                &mut self.tracked_visible_mentions,
+                &mut self.possible_room_mention,
+            );
             if self.is_searching() || self.is_slash_command_popup_active() {
                 self.close_mention_popup(cx);
             }
+            return;
+        }
+
+        if self.is_just_cancelled() {
             return;
         }
 
@@ -2267,8 +2539,11 @@ impl MentionableTextInput {
 
     /// Sets the text content
     pub fn set_text(&mut self, cx: &mut Cx, text: &str) {
-        self.cmd_text_input.text_input_ref().set_text(cx, text);
-        self.cmd_text_input.redraw(cx);
+        reset_visible_mention_tracking_for_programmatic_text_set(
+            &mut self.tracked_visible_mentions,
+            &mut self.possible_room_mention,
+        );
+        self.set_input_text_preserving_mentions(cx, text);
     }
 
     /// Sets whether the current user can notify the entire room (@room mention)
@@ -2279,6 +2554,12 @@ impl MentionableTextInput {
     /// Gets whether the current user can notify the entire room (@room mention)
     pub fn can_notify_room(&self) -> bool {
         self.can_notify_room
+    }
+
+    fn set_input_text_preserving_mentions(&mut self, cx: &mut Cx, text: &str) {
+        self.cmd_text_input.text_input_ref().set_text(cx, text);
+        self.last_text = text.to_owned();
+        self.cmd_text_input.redraw(cx);
     }
 }
 
@@ -2323,76 +2604,52 @@ impl MentionableTextInputRef {
         self.borrow().is_some_and(|inner| inner.can_notify_room())
     }
 
-    /// Returns the mentions actually present in the given html message content.
-    fn get_real_mentions_in_html_text(&self, html: &str) -> Mentions {
-        let mut mentions = Mentions::new();
-
-        let Some(inner) = self.borrow() else {
-            return mentions;
-        };
-
-        let mut user_ids = BTreeSet::new();
-
-        for (user_id, username) in &inner.possible_mentions {
-            if html.contains(&format!(
-                "<a href=\"{}\">{}</a>",
-                user_id.matrix_to_uri(),
-                username,
-            )) {
-                user_ids.insert(user_id.clone());
-            }
-        }
-
-        mentions.user_ids = user_ids;
-        // Check for @room mention in HTML content
-        mentions.room = inner.possible_room_mention && html.contains("@room");
-        mentions
-    }
-
-    /// Returns the mentions actually present in the given markdown message content.
-    fn get_real_mentions_in_markdown_text(&self, markdown: &str) -> Mentions {
-        let mut mentions = Mentions::new();
-
-        let Some(inner) = self.borrow() else {
-            return mentions;
-        };
-
-        let mut user_ids = BTreeSet::new();
-        for (user_id, username) in &inner.possible_mentions {
-            // Check both username format and user_id format for flexibility
-            let username_pattern = format!("[{}]({})", username, user_id.matrix_to_uri());
-            let userid_pattern = format!("[{}]({})", user_id, user_id.matrix_to_uri());
-
-            if markdown.contains(&username_pattern) || markdown.contains(&userid_pattern) {
-                user_ids.insert(user_id.clone());
-            }
-        }
-
-        mentions.user_ids = user_ids;
-        // Check for @room mention in markdown content
-        mentions.room = inner.possible_room_mention && markdown.contains("@room");
-        mentions
-    }
-
     /// Processes entered text and creates a message with mentions based on detected message type.
     /// This method handles /html, /plain prefixes and defaults to markdown.
     pub fn create_message_with_mentions(&self, entered_text: &str) -> RoomMessageEventContent {
-        if let Some(html_text) = entered_text.strip_prefix("/html") {
-            let message = RoomMessageEventContent::text_html(html_text, html_text);
-            message.add_mentions(self.get_real_mentions_in_html_text(html_text))
-        } else if let Some(plain_text) = entered_text.strip_prefix("/plain") {
-            // Plain text messages don't support mentions
-            RoomMessageEventContent::text_plain(plain_text)
-        } else {
-            let message = RoomMessageEventContent::text_markdown(entered_text);
-            message.add_mentions(self.get_real_mentions_in_markdown_text(entered_text))
-        }
+        let Some(inner) = self.borrow() else {
+            return create_message_with_tracked_mentions(entered_text, &[], false);
+        };
+
+        create_message_with_tracked_mentions(
+            entered_text,
+            &inner.tracked_visible_mentions,
+            inner.possible_room_mention,
+        )
+    }
+}
+
+fn create_message_with_tracked_mentions(
+    entered_text: &str,
+    tracked_visible_mentions: &[TrackedVisibleMention],
+    possible_room_mention: bool,
+) -> RoomMessageEventContent {
+    if let Some(html_text) = entered_text.strip_prefix("/html") {
+        let resolved = resolve_visible_mentions_for_send(
+            html_text,
+            tracked_visible_mentions,
+            possible_room_mention,
+        );
+        let message = RoomMessageEventContent::text_html(html_text, resolved.html_text);
+        message.add_mentions(resolved.mentions)
+    } else if let Some(plain_text) = entered_text.strip_prefix("/plain") {
+        // Plain text messages don't support mentions
+        RoomMessageEventContent::text_plain(plain_text)
+    } else {
+        let resolved = resolve_visible_mentions_for_send(
+            entered_text,
+            tracked_visible_mentions,
+            possible_room_mention,
+        );
+        let message = RoomMessageEventContent::text_markdown(resolved.markdown_text);
+        message.add_mentions(resolved.mentions)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use matrix_sdk::ruma::events::room::message::MessageType;
 
     #[test]
     fn popup_status_items_are_never_selectable() {
@@ -2510,5 +2767,372 @@ mod tests {
     #[test]
     fn slash_commands_return_empty_for_unknown_prefix() {
         assert!(matching_slash_commands("zzzznotacommand").is_empty());
+    }
+
+    #[test]
+    fn test_editing_inside_visible_mention_clears_tracking_for_that_mention() {
+        let alice: OwnedUserId = "@alice:example.com".try_into().expect("valid user id");
+        let bob: OwnedUserId = "@bob:example.com".try_into().expect("valid user id");
+        let old_text = "hello @Alice and @Bob";
+        let new_text = "hello @Alicia and @Bob";
+        let tracked_mentions = vec![
+            TrackedVisibleMention {
+                user_id: alice.clone(),
+                visible_text: "@Alice".to_owned(),
+                start: "hello ".len(),
+                end: "hello @Alice".len(),
+            },
+            TrackedVisibleMention {
+                user_id: bob.clone(),
+                visible_text: "@Bob".to_owned(),
+                start: "hello @Alice and ".len(),
+                end: "hello @Alice and @Bob".len(),
+            },
+        ];
+
+        let reconciled = reconcile_visible_mentions_after_text_change(
+            old_text,
+            new_text,
+            &tracked_mentions,
+        );
+
+        assert_eq!(reconciled.len(), 1);
+        let tracked = &reconciled[0];
+        assert_eq!(tracked.user_id, bob);
+        assert_eq!(tracked.visible_text, "@Bob");
+        assert_eq!(tracked.start, "hello @Alicia and ".len());
+        assert_eq!(tracked.end, "hello @Alicia and @Bob".len());
+    }
+
+    #[test]
+    fn test_duplicate_display_name_mentions_preserve_distinct_user_ids() {
+        let first: OwnedUserId = "@sam:example.com".try_into().expect("valid user id");
+        let second: OwnedUserId = "@sam:other.example".try_into().expect("valid user id");
+        let old_text = "@Sam and @Sam";
+        let new_text = "yo @Sam and @Sam";
+        let tracked_mentions = vec![
+            TrackedVisibleMention {
+                user_id: first.clone(),
+                visible_text: "@Sam".to_owned(),
+                start: 0,
+                end: "@Sam".len(),
+            },
+            TrackedVisibleMention {
+                user_id: second.clone(),
+                visible_text: "@Sam".to_owned(),
+                start: "@Sam and ".len(),
+                end: "@Sam and @Sam".len(),
+            },
+        ];
+
+        let reconciled = reconcile_visible_mentions_after_text_change(
+            old_text,
+            new_text,
+            &tracked_mentions,
+        );
+
+        assert_eq!(reconciled.len(), 2);
+        assert_eq!(reconciled[0].user_id, first);
+        assert_eq!(reconciled[0].visible_text, "@Sam");
+        assert_eq!(reconciled[0].start, "yo ".len());
+        assert_eq!(reconciled[0].end, "yo @Sam".len());
+        assert_eq!(reconciled[1].user_id, second);
+        assert_eq!(reconciled[1].visible_text, "@Sam");
+        assert_eq!(reconciled[1].start, "yo @Sam and ".len());
+        assert_eq!(reconciled[1].end, "yo @Sam and @Sam".len());
+    }
+
+    #[test]
+    fn test_visible_mention_spans_shift_when_edit_happens_before_them() {
+        let bob: OwnedUserId = "@bob:example.com".try_into().expect("valid user id");
+        let old_text = "hello @Bob";
+        let new_text = "hello brave @Bob";
+        let tracked_mentions = vec![TrackedVisibleMention {
+            user_id: bob.clone(),
+            visible_text: "@Bob".to_owned(),
+            start: "hello ".len(),
+            end: "hello @Bob".len(),
+        }];
+
+        let reconciled = reconcile_visible_mentions_after_text_change(
+            old_text,
+            new_text,
+            &tracked_mentions,
+        );
+
+        assert_eq!(reconciled.len(), 1);
+        let tracked = &reconciled[0];
+        assert_eq!(tracked.user_id, bob);
+        assert_eq!(tracked.visible_text, "@Bob");
+        assert_eq!(tracked.start, "hello brave ".len());
+        assert_eq!(tracked.end, "hello brave @Bob".len());
+    }
+
+    #[test]
+    fn test_programmatic_set_text_clears_stale_tracked_mention_state() {
+        let alice: OwnedUserId = "@alice:example.com".try_into().expect("valid user id");
+        let mut tracked_mentions = vec![TrackedVisibleMention {
+            user_id: alice,
+            visible_text: "@Alice".to_owned(),
+            start: 0,
+            end: "@Alice".len(),
+        }];
+        let mut possible_room_mention = true;
+
+        reset_visible_mention_tracking_for_programmatic_text_set(
+            &mut tracked_mentions,
+            &mut possible_room_mention,
+        );
+
+        assert!(tracked_mentions.is_empty());
+        assert!(!possible_room_mention);
+    }
+
+    #[test]
+    fn test_inserting_mention_before_existing_mention_shifts_older_span_correctly() {
+        let alice: OwnedUserId = "@alice:example.com".try_into().expect("valid user id");
+        let bob: OwnedUserId = "@bob:example.com".try_into().expect("valid user id");
+        let current_text = "@al @Bob";
+        let start_idx = 0;
+        let head = "@al".len();
+        let mut tracked_mentions = vec![TrackedVisibleMention {
+            user_id: bob.clone(),
+            visible_text: "@Bob".to_owned(),
+            start: "@al ".len(),
+            end: "@al @Bob".len(),
+        }];
+
+        let (new_text, cursor) = apply_user_mention_selection(
+            current_text,
+            start_idx,
+            head,
+            Some("Alice"),
+            &alice,
+            &mut tracked_mentions,
+        );
+
+        assert_eq!(new_text, "@Alice  @Bob");
+        assert_eq!(cursor, "@Alice ".len());
+        assert_eq!(tracked_mentions.len(), 2);
+        assert_eq!(tracked_mentions[0].user_id, alice);
+        assert_eq!(tracked_mentions[0].start, 0);
+        assert_eq!(tracked_mentions[0].end, "@Alice".len());
+        assert_eq!(tracked_mentions[1].user_id, bob);
+        assert_eq!(tracked_mentions[1].start, "@Alice  ".len());
+        assert_eq!(tracked_mentions[1].end, "@Alice  @Bob".len());
+    }
+
+    #[test]
+    fn test_inserting_room_mention_before_existing_mention_shifts_older_span_correctly() {
+        let bob: OwnedUserId = "@bob:example.com".try_into().expect("valid user id");
+        let current_text = "@ro @Bob";
+        let start_idx = 0;
+        let head = "@ro".len();
+        let mut tracked_mentions = vec![TrackedVisibleMention {
+            user_id: bob.clone(),
+            visible_text: "@Bob".to_owned(),
+            start: "@ro ".len(),
+            end: "@ro @Bob".len(),
+        }];
+
+        let (new_text, cursor) = apply_text_replacement_preserving_mentions(
+            current_text,
+            start_idx,
+            head,
+            "@room ",
+            &mut tracked_mentions,
+        );
+
+        assert_eq!(new_text, "@room  @Bob");
+        assert_eq!(cursor, "@room ".len());
+        assert_eq!(tracked_mentions.len(), 1);
+        assert_eq!(tracked_mentions[0].user_id, bob);
+        assert_eq!(tracked_mentions[0].start, "@room  ".len());
+        assert_eq!(tracked_mentions[0].end, "@room  @Bob".len());
+    }
+
+    #[test]
+    fn test_selecting_user_mention_inserts_visible_display_name() {
+        let user_id: OwnedUserId = "@alice:example.com".try_into().expect("valid user id");
+        let current_text = "hello @al";
+        let start_idx = "hello ".len();
+        let head = current_text.len();
+        let mut tracked_mentions = Vec::new();
+        let (new_text, cursor) = apply_user_mention_selection(
+            current_text,
+            start_idx,
+            head,
+            Some("Alice"),
+            &user_id,
+            &mut tracked_mentions,
+        );
+
+        assert_eq!(new_text, "hello @Alice ");
+        assert!(!new_text.contains("matrix.to"));
+        assert_eq!(cursor, "hello @Alice ".len());
+        assert_eq!(tracked_mentions.len(), 1);
+        let tracked = &tracked_mentions[0];
+        assert_eq!(tracked.user_id, user_id);
+        assert_eq!(tracked.visible_text, "@Alice");
+        assert_eq!(tracked.start, start_idx);
+        assert_eq!(tracked.end, start_idx + tracked.visible_text.len());
+    }
+
+    #[test]
+    fn test_selecting_user_mention_without_display_name_falls_back_to_localpart() {
+        let user_id: OwnedUserId = "@octosbot:127.0.0.1:8128".try_into().expect("valid user id");
+        let current_text = "ping @oc";
+        let start_idx = "ping ".len();
+        let head = current_text.len();
+        let mut tracked_mentions = Vec::new();
+        let (new_text, cursor) = apply_user_mention_selection(
+            current_text,
+            start_idx,
+            head,
+            None,
+            &user_id,
+            &mut tracked_mentions,
+        );
+
+        assert_eq!(new_text, "ping @octosbot ");
+        assert!(!new_text.contains("matrix.to"));
+        assert_eq!(cursor, "ping @octosbot ".len());
+        assert_eq!(tracked_mentions.len(), 1);
+        let tracked = &tracked_mentions[0];
+        assert_eq!(tracked.user_id, user_id);
+        assert_eq!(tracked.visible_text, "@octosbot");
+        assert_eq!(tracked.start, start_idx);
+        assert_eq!(tracked.end, start_idx + tracked.visible_text.len());
+    }
+
+    #[test]
+    fn test_create_message_with_visible_mentions_emits_matrix_links_and_mentions() {
+        let alice: OwnedUserId = "@alice:example.com".try_into().expect("valid user id");
+        let sam_one: OwnedUserId = "@sam:example.com".try_into().expect("valid user id");
+        let sam_two: OwnedUserId = "@sam:other.example".try_into().expect("valid user id");
+        let entered_text = "Hello @Alice and @Sam and @Sam";
+        let tracked_mentions = vec![
+            TrackedVisibleMention {
+                user_id: alice.clone(),
+                visible_text: "@Alice".to_owned(),
+                start: "Hello ".len(),
+                end: "Hello @Alice".len(),
+            },
+            TrackedVisibleMention {
+                user_id: sam_one.clone(),
+                visible_text: "@Sam".to_owned(),
+                start: "Hello @Alice and ".len(),
+                end: "Hello @Alice and @Sam".len(),
+            },
+            TrackedVisibleMention {
+                user_id: sam_two.clone(),
+                visible_text: "@Sam".to_owned(),
+                start: "Hello @Alice and @Sam and ".len(),
+                end: "Hello @Alice and @Sam and @Sam".len(),
+            },
+        ];
+
+        let message =
+            create_message_with_tracked_mentions(entered_text, &tracked_mentions, false);
+
+        assert_eq!(
+            message.msgtype.body(),
+            format!(
+                "Hello [@Alice]({}) and [@Sam]({}) and [@Sam]({})",
+                alice.matrix_to_uri(),
+                sam_one.matrix_to_uri(),
+                sam_two.matrix_to_uri(),
+            )
+        );
+        let mentions = message.mentions.expect("markdown send should include mentions");
+        assert_eq!(mentions.user_ids, [alice, sam_one, sam_two].into());
+        assert!(!mentions.room);
+    }
+
+    #[test]
+    fn test_html_message_with_visible_mentions_emits_anchor_and_mentions() {
+        let alice: OwnedUserId = "@alice:example.com".try_into().expect("valid user id");
+        let entered_text = "/html<p>Hello @Alice</p>";
+        let tracked_mentions = vec![TrackedVisibleMention {
+            user_id: alice.clone(),
+            visible_text: "@Alice".to_owned(),
+            start: "<p>Hello ".len(),
+            end: "<p>Hello @Alice".len(),
+        }];
+
+        let message =
+            create_message_with_tracked_mentions(entered_text, &tracked_mentions, false);
+
+        assert_eq!(message.msgtype.body(), "<p>Hello @Alice</p>");
+        let MessageType::Text(text_content) = &message.msgtype else {
+            panic!("expected text message");
+        };
+        let formatted = text_content
+            .formatted
+            .as_ref()
+            .expect("/html send should include formatted html");
+        assert_eq!(
+            formatted.body,
+            format!(
+                "<p>Hello <a href=\"{}\">@Alice</a></p>",
+                alice.matrix_to_uri(),
+            )
+        );
+        let mentions = message.mentions.expect("html send should include mentions");
+        assert_eq!(mentions.user_ids, [alice].into());
+        assert!(!mentions.room);
+    }
+
+    #[test]
+    fn test_plain_mode_visible_mentions_remain_plain_text_without_mentions() {
+        let alice: OwnedUserId = "@alice:example.com".try_into().expect("valid user id");
+        let entered_text = "/plainHello @Alice";
+        let tracked_mentions = vec![TrackedVisibleMention {
+            user_id: alice,
+            visible_text: "@Alice".to_owned(),
+            start: "Hello ".len(),
+            end: "Hello @Alice".len(),
+        }];
+
+        let message =
+            create_message_with_tracked_mentions(entered_text, &tracked_mentions, false);
+
+        assert_eq!(message.msgtype.body(), "Hello @Alice");
+        let MessageType::Text(text_content) = &message.msgtype else {
+            panic!("expected text message");
+        };
+        assert!(text_content.formatted.is_none());
+        assert!(message.mentions.is_none());
+    }
+
+    #[test]
+    fn test_markdown_visible_mentions_escape_markdown_metacharacters_in_label() {
+        let weird: OwnedUserId = "@weird:example.com".try_into().expect("valid user id");
+        let entered_text = r"Hello @A[ice]\*";
+        let tracked_mentions = vec![TrackedVisibleMention {
+            user_id: weird.clone(),
+            visible_text: r"@A[ice]\*".to_owned(),
+            start: "Hello ".len(),
+            end: entered_text.len(),
+        }];
+
+        let message =
+            create_message_with_tracked_mentions(entered_text, &tracked_mentions, false);
+
+        assert_eq!(
+            message.msgtype.body(),
+            format!(
+                r"Hello [@A\[ice\]\\\*]({})",
+                weird.matrix_to_uri(),
+            )
+        );
+        let mentions = message.mentions.expect("markdown send should include mentions");
+        assert_eq!(mentions.user_ids, [weird].into());
+    }
+
+    #[test]
+    fn test_roommate_does_not_count_as_room_mention() {
+        let resolved = resolve_visible_mentions_for_send("@roommate hi", &[], true);
+        assert!(!resolved.mentions.room);
     }
 }
