@@ -726,7 +726,7 @@ impl Widget for MentionableTextInput {
                 let text_input = self.cmd_text_input.text_input(cx, ids!(text_input));
                 let uid = text_input.widget_uid();
                 let text = text_input.text();
-                cx.widget_action(uid, makepad_widgets::text_input::TextInputAction::Returned(text, modifiers.clone()));
+                cx.widget_action(uid, makepad_widgets::text_input::TextInputAction::Returned(text, *modifiers));
                 return;
             }
         }
