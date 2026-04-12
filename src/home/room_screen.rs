@@ -623,20 +623,34 @@ fn escape_slash_command_arg(value: &str) -> String {
     value.trim().replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+const BOT_PPT_GENERATION_GUARDRAIL: &str = concat!(
+    "For PPT/PowerPoint/PPTX generation in this Octos sandbox:\n",
+    "- Never run pip install, uv pip install, python -m pip, apt, brew, or any runtime package installer.\n",
+    "- Never attempt to download python-pptx or other external dependencies.\n",
+    "- Prefer the native Octos PPT tooling that already exists in this environment.\n",
+    "- If the mofa_slides tool is available, use it instead of shelling out.\n",
+    "- Do not use shell to inspect package managers, probe Python libraries, or attempt environment setup for PPT generation.\n",
+    "- If no native PPT tool is available in the current tool list, say so immediately instead of exploring with shell commands.\n",
+    "- If neither native Octos PPT tooling nor mofa_slides is available, explain the limitation clearly instead of trying to install packages."
+);
+
+fn compose_create_bot_system_prompt(system_prompt: Option<&str>) -> String {
+    match system_prompt.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(system_prompt) => format!("{system_prompt}\n\n{BOT_PPT_GENERATION_GUARDRAIL}"),
+        None => BOT_PPT_GENERATION_GUARDRAIL.to_string(),
+    }
+}
+
 fn format_create_bot_command(
     username: &str,
     display_name: &str,
     system_prompt: Option<&str>,
 ) -> String {
     let mut command = format!("/createbot {} {}", username.trim(), display_name.trim());
-    if let Some(system_prompt) = system_prompt
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        command.push_str(" --prompt \"");
-        command.push_str(&escape_slash_command_arg(system_prompt));
-        command.push('"');
-    }
+    let composed_prompt = compose_create_bot_system_prompt(system_prompt);
+    command.push_str(" --prompt \"");
+    command.push_str(&escape_slash_command_arg(&composed_prompt));
+    command.push('"');
     command
 }
 
@@ -1407,6 +1421,7 @@ script_mod! {
                 }
 
                 message := HtmlOrPlaintext { }
+                splash_card := Splash { visible: false }
                 link_preview_view := mod.widgets.LinkPreview {}
                 View {
                     width: Fill,
@@ -7843,20 +7858,35 @@ fn populate_message_view(
                             );
                             new_drawn_status.content_drawn = false; // force re-render
                         } else {
-                            // NORMAL MODE: existing logic
-                            let mut link_preview_ref =
-                                item.link_preview(cx, ids!(content.link_preview_view));
-                            new_drawn_status.content_drawn = populate_bot_text_message_content(
-                                cx,
-                                &item,
-                                app_language,
-                                body,
-                                formatted.as_ref(),
-                                Some(&mut link_preview_ref),
-                                Some(media_cache),
-                                Some(link_preview_cache),
-                                sender_is_bot,
-                            );
+                            // Check for Splash card in custom event field
+                            let splash_code = event_tl_item.original_json()
+                                .and_then(|raw| raw.get_field::<serde_json::Value>("content").ok())
+                                .flatten()
+                                .and_then(|content| content.get("org.octos.splash_card").and_then(|v| v.as_str().map(|s| s.to_string())));
+
+                            if let Some(ref splash) = splash_code {
+                                // SPLASH CARD MODE: render native Makepad card
+                                item.view(cx, ids!(content.message)).set_visible(cx, false);
+                                let splash_widget = item.splash(cx, ids!(content.splash_card));
+                                splash_widget.set_visible(cx, true);
+                                splash_widget.set_text(cx, splash);
+                                new_drawn_status.content_drawn = true;
+                            } else {
+                                // NORMAL MODE: existing logic
+                                let mut link_preview_ref =
+                                    item.link_preview(cx, ids!(content.link_preview_view));
+                                new_drawn_status.content_drawn = populate_bot_text_message_content(
+                                    cx,
+                                    &item,
+                                    app_language,
+                                    body,
+                                    formatted.as_ref(),
+                                    Some(&mut link_preview_ref),
+                                    Some(media_cache),
+                                    Some(link_preview_cache),
+                                    sender_is_bot,
+                                );
+                            }
                         }
                         (item, false)
                     }
@@ -10587,5 +10617,30 @@ mod tests {
         assert!(condensed_state.show_card);
         assert!(reply_state.show_metadata_footer);
         assert!(condensed_state.show_metadata_footer);
+    }
+
+    #[test]
+    fn test_compose_create_bot_system_prompt_uses_guardrail_when_empty() {
+        let prompt = compose_create_bot_system_prompt(None);
+
+        assert!(prompt.contains("Never run pip install"));
+        assert!(prompt.contains("mofa_slides"));
+        assert!(prompt.contains("Do not use shell"));
+    }
+
+    #[test]
+    fn test_compose_create_bot_system_prompt_appends_guardrail_to_user_prompt() {
+        let prompt = compose_create_bot_system_prompt(Some("你是一名天气助手"));
+
+        assert!(prompt.starts_with("你是一名天气助手"));
+        assert!(prompt.contains("Never attempt to download python-pptx"));
+    }
+
+    #[test]
+    fn test_format_create_bot_command_always_includes_guardrail_prompt() {
+        let command = format_create_bot_command("bob", "bobbot", None);
+
+        assert!(command.starts_with("/createbot bob bobbot --prompt \""));
+        assert!(command.contains("Never run pip install"));
     }
 }
