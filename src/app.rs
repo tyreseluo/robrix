@@ -765,6 +765,8 @@ impl MatchEvent for App {
                     clear_all_app_state(cx);
                     // Reset all app state to its default.
                     self.app_state = Default::default();
+                    // Keep the navigation tab bar's visual state in sync with app state.
+                    cx.action(NavigationBarAction::TabSelected(SelectedTab::Home));
                     on_clear_appstate.notify_one();
                     continue;
                 }
