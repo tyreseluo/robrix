@@ -21,7 +21,7 @@ use matrix_sdk::room::reply::{EnforceThread, Reply};
 use ruma::events::room::message::AddMentions;
 use matrix_sdk_ui::timeline::{EmbeddedEvent, EventTimelineItem, TimelineEventItemId};
 use ruma::{events::room::message::{LocationMessageEventContent, MessageType, ReplyWithinThread, RoomMessageEventContent}, OwnedRoomId, OwnedUserId, UserId};
-use crate::{app::AppState, home::{editing_pane::{EditingPaneState, EditingPaneWidgetExt, EditingPaneWidgetRefExt}, location_preview::{LocationPreviewWidgetExt, LocationPreviewWidgetRefExt}, room_screen::{MessageAction, RoomScreenProps, is_known_or_likely_bot, populate_preview_of_timeline_item}, tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt}, upload_progress::UploadProgressViewWidgetRefExt}, i18n::{AppLanguage, tr_fmt, tr_key}, location::init_location_subscriber, room::translation::{self, TRANSLATION_REQUEST_ID}, shared::{avatar::AvatarWidgetRefExt, file_upload_modal::{FileData, FileLoadedData, FilePreviewerAction}, html_or_plaintext::HtmlOrPlaintextWidgetRefExt, mentionable_text_input::MentionableTextInputWidgetExt, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{MatrixRequest, TimelineKind, UserPowerLevels, submit_async_request}, utils};
+use crate::{app::AppState, home::{editing_pane::{EditingPaneState, EditingPaneWidgetExt, EditingPaneWidgetRefExt}, location_preview::{LocationPreviewWidgetExt, LocationPreviewWidgetRefExt}, room_screen::{MessageAction, RoomScreenProps, is_known_or_likely_bot, populate_preview_of_timeline_item}, tombstone_footer::{SuccessorRoomDetails, TombstoneFooterWidgetExt}, upload_progress::UploadProgressViewWidgetRefExt}, i18n::{AppLanguage, tr_fmt, tr_key}, location::init_location_subscriber, room::translation::{self, TRANSLATION_REQUEST_ID}, shared::{avatar::AvatarWidgetRefExt, file_upload_modal::{FileData, FileLoadedData, FilePreviewerAction}, html_or_plaintext::HtmlOrPlaintextWidgetRefExt, mentionable_text_input::{MentionableTextInputWidgetExt, classify_known_slash_command_for_submission}, popup_list::{PopupKind, enqueue_popup_notification}, styles::*}, sliding_sync::{MatrixRequest, TimelineKind, UserPowerLevels, submit_async_request}, utils};
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::shared::file_upload_modal::{FilePreviewerMetaData, ThumbnailData};
 
@@ -105,43 +105,6 @@ enum ResolvedTarget {
     ExplicitBot(OwnedUserId),
     ExplicitRoom,
     ReplyBot(OwnedUserId),
-}
-
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct TargetChipPresentation {
-    visible: bool,
-    label: String,
-    subdued: bool,
-    dismissible: bool,
-}
-
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TargetMenuSelection {
-    Room,
-    Bot(OwnedUserId),
-}
-
-#[cfg(test)]
-fn apply_multi_bot_target_menu_selection(
-    selection: TargetMenuSelection,
-    available_bot_user_ids: &[OwnedUserId],
-    explicit_override: &ExplicitOverride,
-) -> ExplicitOverride {
-    match selection {
-        TargetMenuSelection::Room => ExplicitOverride::Room,
-        TargetMenuSelection::Bot(bot_user_id) => {
-            if available_bot_user_ids
-                .iter()
-                .any(|available_bot_user_id| available_bot_user_id == &bot_user_id)
-            {
-                ExplicitOverride::Bot(bot_user_id)
-            } else {
-                explicit_override.clone()
-            }
-        }
-    }
 }
 
 fn known_bot_candidates<'a>(
@@ -345,18 +308,92 @@ fn resolved_target_user_id(target: &ResolvedTarget) -> Option<OwnedUserId> {
     }
 }
 
-#[cfg(test)]
-fn format_target_chip_presentation(
-    _app_language: AppLanguage,
-    _resolved_target: &ResolvedTarget,
-    _bot_display_name: Option<&str>,
-) -> TargetChipPresentation {
-    TargetChipPresentation {
-        visible: false,
-        label: String::new(),
-        subdued: false,
-        dismissible: false,
+fn management_bot_target_user_id(
+    bound_bot_user_id: Option<&UserId>,
+    resolved_parent_bot_user_id: Option<&UserId>,
+) -> Option<OwnedUserId> {
+    bound_bot_user_id
+        .map(ToOwned::to_owned)
+        .or_else(|| resolved_parent_bot_user_id.map(ToOwned::to_owned))
+}
+
+fn is_management_bot_room_for_context(
+    app_service_enabled: bool,
+    is_direct_room: bool,
+    has_persisted_management_binding: bool,
+    bound_bot_user_id: Option<&UserId>,
+    resolved_parent_bot_user_id: Option<&UserId>,
+    _known_bot_user_ids: &[OwnedUserId],
+) -> bool {
+    if !app_service_enabled {
+        return false;
     }
+
+    let Some(bound_bot_user_id) = bound_bot_user_id else {
+        return false;
+    };
+
+    if !is_direct_room && !has_persisted_management_binding {
+        return false;
+    }
+
+    resolved_parent_bot_user_id.is_some_and(|resolved_parent_bot_user_id|
+        bound_bot_user_id == resolved_parent_bot_user_id
+    )
+}
+
+fn is_management_bot_room(room_screen_props: &RoomScreenProps) -> bool {
+    is_management_bot_room_for_context(
+        room_screen_props.app_service_enabled,
+        room_screen_props.is_direct_room,
+        room_screen_props.has_persisted_management_binding,
+        room_screen_props.bound_bot_user_id.as_deref(),
+        room_screen_props.resolved_parent_bot_user_id.as_deref(),
+        &room_screen_props.known_bot_user_ids,
+    )
+}
+
+fn classified_management_command_target_for_context(
+    entered_text: &str,
+    app_service_enabled: bool,
+    is_direct_room: bool,
+    has_persisted_management_binding: bool,
+    bound_bot_user_id: Option<&UserId>,
+    resolved_parent_bot_user_id: Option<&UserId>,
+    known_bot_user_ids: &[OwnedUserId],
+) -> Option<OwnedUserId> {
+    if !is_management_bot_room_for_context(
+        app_service_enabled,
+        is_direct_room,
+        has_persisted_management_binding,
+        bound_bot_user_id,
+        resolved_parent_bot_user_id,
+        known_bot_user_ids,
+    ) {
+        return None;
+    }
+
+    classify_known_slash_command_for_submission(entered_text).and_then(|_| {
+        management_bot_target_user_id(
+            bound_bot_user_id,
+            resolved_parent_bot_user_id,
+        )
+    })
+}
+
+fn classified_management_command_target(
+    entered_text: &str,
+    room_screen_props: &RoomScreenProps,
+) -> Option<OwnedUserId> {
+    classified_management_command_target_for_context(
+        entered_text,
+        room_screen_props.app_service_enabled,
+        room_screen_props.is_direct_room,
+        room_screen_props.has_persisted_management_binding,
+        room_screen_props.bound_bot_user_id.as_deref(),
+        room_screen_props.resolved_parent_bot_user_id.as_deref(),
+        &room_screen_props.known_bot_user_ids,
+    )
 }
 
 /// Determines if a room should use DM-style default bot routing.
@@ -560,43 +597,6 @@ script_mod! {
             // shadow_color: #0006
             // shadow_radius: 0.0
             // shadow_offset: vec2(0.0,0.0)
-        }
-
-        target_indicator := View {
-            visible: false
-            width: Fill, height: Fit
-            flow: Down
-            padding: Inset{left: 6, right: 6, top: 6, bottom: 3}
-
-            target_chip_row := View {
-                width: Fit, height: Fit
-                flow: Right
-                align: Align{y: 0.5}
-                spacing: 4
-
-                target_chip_button := mod.widgets.TargetChipButton { text: "Target" }
-
-                target_chip_dismiss_button := RobrixNeutralIconButton {
-                    visible: false
-                    width: Fit, height: Fit
-                    spacing: 0
-                    text: ""
-                    padding: Inset{left: 5, right: 5, top: 5, bottom: 5}
-                    draw_bg +: {
-                        color: #xF7F9FD
-                        color_hover: #xEEF3F9
-                        color_down: #xE5ECF5
-                        border_radius: 9.0
-                        border_size: 1.0
-                        border_color: #xD7DFEA
-                    }
-                    draw_icon +: {
-                        svg: (ICON_CLOSE)
-                        color: (COLOR_MESSAGE_NOTICE_TEXT)
-                    }
-                    icon_walk: Walk{width: 9, height: 9}
-                }
-            }
         }
 
         // The top-most element is a preview of the message that the user is replying to, if any.
@@ -875,6 +875,23 @@ script_mod! {
                         text: "",
                     }
 
+                    bot_menu_button := RobrixIconButton {
+                        visible: false,
+                        margin: Inset{left: 1, right: 1, top: 4, bottom: 4}
+                        spacing: 0,
+                        draw_icon +: {
+                            svg: (ICON_LINK)
+                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
+                        },
+                        draw_bg +: {
+                            color: (COLOR_BG_PREVIEW)
+                            color_hover: #xE0E8F0
+                            color_down: #xD0D8E8
+                        }
+                        icon_walk: Walk{width: 18, height: 18}
+                        text: "",
+                    }
+
                     mentionable_text_input := MentionableTextInput {
                         width: Fill,
                         height: Fit{max: FitBound.Rel{base: Base.Full, factor: 0.75}}
@@ -1044,10 +1061,10 @@ impl Widget for RoomInputBar {
             self.set_app_language(cx, app_language);
         }
 
-        let room_screen_props = scope
-            .props
-            .get::<RoomScreenProps>()
-            .expect("BUG: RoomScreenProps should be available in Scope::props for RoomInputBar");
+        let room_screen_props = scope.props.get::<RoomScreenProps>();
+        let room_screen_widget_uid = room_screen_props.map(|props| props.room_screen_widget_uid);
+        let show_bot_menu_tooltip =
+            room_screen_props.is_some_and(is_management_bot_room);
 
         match event.hits(cx, self.view.view(cx, ids!(replying_preview.reply_preview_content)).area()) {
             // If the hit occurred on the replying message preview, jump to it.
@@ -1055,10 +1072,12 @@ impl Widget for RoomInputBar {
                 if let Some(event_id) = self.replying_to.as_ref()
                     .and_then(|(event_tl_item, _)| event_tl_item.event_id().map(ToOwned::to_owned))
                 {
-                    cx.widget_action(
-                        room_screen_props.room_screen_widget_uid, 
-                        MessageAction::JumpToEvent(event_id),
-                    );
+                    if let Some(room_screen_widget_uid) = room_screen_widget_uid {
+                        cx.widget_action(
+                            room_screen_widget_uid,
+                            MessageAction::JumpToEvent(event_id),
+                        );
+                    }
                 } else {
                     enqueue_popup_notification(
                         "BUG: couldn't find the message you're replying to.",
@@ -1070,12 +1089,39 @@ impl Widget for RoomInputBar {
             _ => {}
         }
 
+        if show_bot_menu_tooltip {
+            let bot_menu_button_area = self.button(cx, ids!(bot_menu_button)).area();
+            match event.hits(cx, bot_menu_button_area) {
+                Hit::FingerHoverIn(_) | Hit::FingerLongPress(_) => {
+                    cx.widget_action(
+                        self.widget_uid(),
+                        TooltipAction::HoverIn {
+                            text: tr_key(
+                                self.app_language,
+                                "room_input_bar.bot_menu_button.tooltip",
+                            )
+                            .to_string(),
+                            widget_rect: bot_menu_button_area.rect(cx),
+                            options: CalloutTooltipOptions {
+                                position: TooltipPosition::Top,
+                                ..Default::default()
+                            },
+                        },
+                    );
+                }
+                Hit::FingerHoverOut(_) => {
+                    cx.widget_action(self.widget_uid(), TooltipAction::HoverOut);
+                }
+                _ => {}
+            }
+        }
+
         // Always read the latest translation config from global state.
         // Settings may update it at any time via set_global_config().
         self.translation_config = translation::get_global_config();
 
         if let Event::Actions(actions) = event {
-            self.handle_actions(cx, actions, room_screen_props);
+            self.handle_actions(cx, scope, actions);
         }
 
         // Handle signal events for pending file loads from background threads.
@@ -1168,7 +1214,6 @@ impl Widget for RoomInputBar {
             }
         }
 
-        self.sync_target_indicator(cx, room_screen_props);
         self.view.handle_event(cx, event, scope);
     }
 
@@ -1179,6 +1224,7 @@ impl Widget for RoomInputBar {
         if !self.app_language_initialized || self.app_language != app_language {
             self.set_app_language(cx, app_language);
         }
+        let room_screen_props = scope.props.get::<RoomScreenProps>();
 
         // Shrink the input_bar's height as the editing pane slides in,
         // and grow it back as the editing pane slides out.
@@ -1211,6 +1257,8 @@ impl Widget for RoomInputBar {
         let width = self.view.area().rect(cx).size.x as f32;
         let show_room_info_card = !(width > 1.0 && width < ROOM_INFO_CARD_MOBILE_BREAKPOINT);
         self.button(cx, ids!(room_info_card_button)).set_visible(cx, show_room_info_card);
+        self.button(cx, ids!(bot_menu_button))
+            .set_visible(cx, room_screen_props.is_some_and(is_management_bot_room));
 
         self.view.draw_walk(cx, scope, walk)
     }
@@ -1278,18 +1326,11 @@ impl RoomInputBar {
             .map(|(event_tl_item, _embedded_event)| event_tl_item.sender())
     }
 
-    fn sync_target_indicator(&mut self, cx: &mut Cx, room_screen_props: &RoomScreenProps) {
-        self.view
-            .view(cx, ids!(target_indicator))
-            .set_visible(cx, false);
-        let _ = room_screen_props;
-    }
-
     fn handle_actions(
         &mut self,
         cx: &mut Cx,
+        scope: &mut Scope,
         actions: &Actions,
-        room_screen_props: &RoomScreenProps,
     ) {
         let mentionable_text_input = self.mentionable_text_input(cx, ids!(mentionable_text_input));
         let text_input = mentionable_text_input.text_input_ref();
@@ -1322,6 +1363,27 @@ impl RoomInputBar {
             log!("Add attachment button clicked; opening file picker...");
             self.open_file_picker(cx);
         }
+
+        if self.button(cx, ids!(bot_menu_button)).clicked(actions) {
+            let in_thread = scope
+                .props
+                .get::<RoomScreenProps>()
+                .is_some_and(|props| props.timeline_kind.thread_root_event_id().is_some());
+            if in_thread {
+                enqueue_popup_notification(
+                    "Bot commands are only supported in the main room timeline.",
+                    PopupKind::Warning,
+                    Some(4.0),
+                );
+            } else {
+                mentionable_text_input.open_slash_command_popup(cx, scope);
+            }
+            self.redraw(cx);
+        }
+
+        let Some(room_screen_props) = scope.props.get::<RoomScreenProps>() else {
+            return;
+        };
 
         let picked_emoji = if self.button(cx, ids!(emoji_smile_button)).clicked(actions) {
             Some("😀")
@@ -1498,11 +1560,21 @@ impl RoomInputBar {
             }
         }
 
+        let submitted_text = text_input
+            .returned(actions)
+            .and_then(|(text, modifiers)| {
+                modifiers
+                    .is_primary()
+                    .then_some(text.trim().to_string())
+            });
+
         // Handle the send message button being clicked or Cmd/Ctrl + Return being pressed.
         if self.button(cx, ids!(send_message_button)).clicked(actions)
-            || text_input.returned(actions).is_some_and(|(_, m)| m.is_primary())
+            || submitted_text.is_some()
         {
-            let entered_text = mentionable_text_input.text().trim().to_string();
+            let entered_text = submitted_text
+                .clone()
+                .unwrap_or_else(|| mentionable_text_input.text().trim().to_string());
             if !entered_text.is_empty() {
                 if self.try_handle_bot_shortcut(cx, &entered_text, room_screen_props) {
                     self.clear_replying_to(cx);
@@ -1525,7 +1597,13 @@ impl RoomInputBar {
                     &room_screen_props.known_bot_user_ids,
                 );
                 let (target_user_id, explicit_room) =
-                    routing_directives_for_message(&resolved_target, message_mentions_bot);
+                    if let Some(target_user_id) =
+                        classified_management_command_target(&entered_text, room_screen_props)
+                    {
+                        (Some(target_user_id), false)
+                    } else {
+                        routing_directives_for_message(&resolved_target, message_mentions_bot)
+                    };
                 let replied_to = self.replying_to.take().and_then(|(event_tl_item, _emb)|
                     event_tl_item.event_id().map(|event_id| {
                         let enforce_thread = if room_screen_props.timeline_kind.thread_root_event_id().is_some() {
@@ -2459,17 +2537,59 @@ mod tests {
     }
 
     #[test]
-    fn test_stale_explicit_bot_selection_is_ignored_without_available_bots() {
-        let bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+    fn test_management_bot_room_requires_resolved_parent_match() {
+        let parent_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+        let child_bot_user_id = test_user_id("@octosbot_child:127.0.0.1:8128");
+        let mismatched_parent_bot_user_id = test_user_id("@bot:127.0.0.1:8128");
 
-        assert_eq!(
-            apply_multi_bot_target_menu_selection(
-                TargetMenuSelection::Bot(bot_user_id),
-                &[],
-                &ExplicitOverride::None,
-            ),
-            ExplicitOverride::None,
-        );
+        assert!(is_management_bot_room_for_context(
+            true,
+            true,
+            false,
+            Some(parent_bot_user_id.as_ref()),
+            Some(parent_bot_user_id.as_ref()),
+            &[],
+        ));
+        assert!(!is_management_bot_room_for_context(
+            true,
+            false,
+            false,
+            Some(parent_bot_user_id.as_ref()),
+            Some(parent_bot_user_id.as_ref()),
+            &[],
+        ));
+        assert!(!is_management_bot_room_for_context(
+            true,
+            false,
+            true,
+            Some(child_bot_user_id.as_ref()),
+            Some(parent_bot_user_id.as_ref()),
+            std::slice::from_ref(&child_bot_user_id),
+        ));
+        assert!(!is_management_bot_room_for_context(
+            true,
+            false,
+            true,
+            Some(parent_bot_user_id.as_ref()),
+            Some(mismatched_parent_bot_user_id.as_ref()),
+            &[],
+        ));
+        assert!(!is_management_bot_room_for_context(
+            true,
+            false,
+            false,
+            Some(parent_bot_user_id.as_ref()),
+            Some(mismatched_parent_bot_user_id.as_ref()),
+            &[],
+        ));
+        assert!(!is_management_bot_room_for_context(
+            false,
+            false,
+            true,
+            Some(parent_bot_user_id.as_ref()),
+            Some(parent_bot_user_id.as_ref()),
+            &[],
+        ));
     }
 
     #[test]
@@ -2490,19 +2610,77 @@ mod tests {
     }
 
     #[test]
-    fn test_target_chip_hidden_in_bot_bound_room() {
+    fn test_classified_management_command_targets_parent_bot() {
+        let parent_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+        let child_bot_user_id = test_user_id("@octosbot_weather:127.0.0.1:8128");
+
         assert_eq!(
-            format_target_chip_presentation(
-                AppLanguage::English,
-                &ResolvedTarget::ExplicitRoom,
-                Some("BotFather"),
+            classified_management_command_target_for_context(
+                "/listbots",
+                true,
+                true,
+                false,
+                Some(parent_bot_user_id.as_ref()),
+                Some(parent_bot_user_id.as_ref()),
+                &[],
             ),
-            TargetChipPresentation {
-                visible: false,
-                label: String::new(),
-                subdued: false,
-                dismissible: false,
-            },
+            Some(parent_bot_user_id.clone()),
+        );
+        assert_eq!(
+            classified_management_command_target_for_context(
+                "/createbot weather Weather Bot",
+                true,
+                true,
+                false,
+                Some(parent_bot_user_id.as_ref()),
+                Some(parent_bot_user_id.as_ref()),
+                &[],
+            ),
+            Some(parent_bot_user_id.clone()),
+        );
+        assert_eq!(
+            classified_management_command_target_for_context(
+                "/listbots",
+                true,
+                false,
+                true,
+                Some(child_bot_user_id.as_ref()),
+                Some(parent_bot_user_id.as_ref()),
+                std::slice::from_ref(&child_bot_user_id),
+            ),
+            None,
+        );
+        assert_eq!(
+            classified_management_command_target_for_context(
+                "/unknowncmd",
+                true,
+                true,
+                false,
+                Some(parent_bot_user_id.as_ref()),
+                Some(parent_bot_user_id.as_ref()),
+                &[],
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_classified_management_command_prefers_bound_bot_when_parent_config_mismatches() {
+        let bound_bot_user_id = test_user_id("@octosbot:127.0.0.1:8128");
+        let mismatched_parent_bot_user_id = test_user_id("@bot:127.0.0.1:8128");
+        let known_child_bot_user_id = test_user_id("@octosbot_alexbot:127.0.0.1:8128");
+
+        assert_eq!(
+            classified_management_command_target_for_context(
+                "/listbots",
+                true,
+                false,
+                true,
+                Some(bound_bot_user_id.as_ref()),
+                Some(mismatched_parent_bot_user_id.as_ref()),
+                std::slice::from_ref(&known_child_bot_user_id),
+            ),
+            Some(bound_bot_user_id),
         );
     }
 

@@ -16,7 +16,7 @@ use crate::{
         event_source_modal::{EventSourceModalAction, EventSourceModalWidgetRefExt}, invite_modal::{InviteModalAction, InviteModalWidgetRefExt, mark_invite_modal_closed}, invite_screen::{InviteScreenWidgetRefExt, LeaveRoomResultAction}, main_desktop_ui::MainDesktopUiAction, navigation_tab_bar::{NavigationBarAction, SelectedTab}, new_message_context_menu::NewMessageContextMenuWidgetRefExt, room_context_menu::RoomContextMenuWidgetRefExt, room_screen::{InviteAction, MessageAction, RoomScreenWidgetRefExt, TimelineUpdate, clear_timeline_states}, rooms_list::{RoomsListAction, RoomsListRef, RoomsListUpdate, clear_all_invited_rooms, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, space_lobby::SpaceLobbyScreenWidgetRefExt, spaces_bar::SpacesBarRef
     }, i18n::{AppLanguage, tr_fmt, tr_key}, join_leave_room_modal::{
         JoinLeaveModalKind, JoinLeaveRoomModalAction, JoinLeaveRoomModalWidgetRefExt
-    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, file_upload_modal::{FilePreviewerAction, FileUploadModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::FilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, submit_async_request, get_timeline_update_sender}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
+    }, login::login_screen::LoginAction, logout::logout_confirm_modal::{LogoutAction, LogoutConfirmModalAction, LogoutConfirmModalWidgetRefExt}, persistence, profile::{user_profile::UserProfile, user_profile_cache::clear_user_profile_cache}, room::{BasicRoomDetails, FetchedRoomAvatar}, shared::{avatar::{AvatarState, AvatarWidgetRefExt}, confirmation_modal::{ConfirmationModalContent, ConfirmationModalWidgetRefExt}, file_upload_modal::{FilePreviewerAction, FileUploadModalWidgetRefExt}, image_viewer::{ImageViewerAction, LoadState}, popup_list::{PopupKind, enqueue_popup_notification}, room_filter_input_bar::FilterAction}, sliding_sync::{DirectMessageRoomAction, MatrixRequest, RemoteDirectorySearchKind, RemoteDirectorySearchResult, TimelineKind, AccountSwitchAction, current_user_id, get_client, submit_async_request, get_timeline_update_sender}, utils::RoomNameId, verification::VerificationAction, verification_modal::{
         VerificationModalAction,
         VerificationModalWidgetRefExt,
     }
@@ -1020,6 +1020,9 @@ impl MatchEvent for App {
             // Handle actions that instruct us to update the top-level app state.
             if let Some(LeaveRoomResultAction::Left { room_id }) = action.downcast_ref() {
                 enqueue_rooms_list_update(RoomsListUpdate::HideRoom { room_id: room_id.clone() });
+                self.app_state
+                    .bot_settings
+                    .set_room_bound(room_id.clone(), None, false);
 
                 let removed_from_home = self.app_state.saved_dock_state_home.remove_room_id(room_id);
                 let removed_from_spaces: usize = self.app_state.saved_dock_state_per_space
@@ -1069,9 +1072,25 @@ impl MatchEvent for App {
                     // Ignore the `logged_in` state that was stored persistently.
                     let logged_in_actual = self.app_state.logged_in;
                     self.app_state = *app_state.clone();
+                    let removed_room_bindings = get_client()
+                        .map(|client| {
+                            self.app_state.bot_settings.remove_room_bindings_where(|room_id, _|
+                                client.get_room(room_id).is_none()
+                            )
+                        })
+                        .unwrap_or(0);
                     self.app_state.logged_in = logged_in_actual;
                     // Initialize the global translation config so RoomInputBar can access it.
                     crate::room::translation::set_global_config(&self.app_state.translation);
+                    if removed_room_bindings > 0 {
+                        if let Some(user_id) = current_user_id() {
+                            if let Err(e) = persistence::save_app_state(self.app_state.clone(), user_id) {
+                                error!(
+                                    "Failed to persist app state after pruning stale room bindings. Error: {e}"
+                                );
+                            }
+                        }
+                    }
                     cx.action(MainDesktopUiAction::LoadDockFromAppState);
                     continue;
                 }
@@ -1126,31 +1145,6 @@ impl MatchEvent for App {
                         #[cfg(feature = "tsp")]
                         sign_with_tsp: false,
                     });
-                    self.ui.redraw(cx);
-                    continue;
-                }
-                Some(AppStateAction::BotRoomBindingDetected {
-                    room_id,
-                    bot_user_id,
-                }) => {
-                    if self
-                        .app_state
-                        .bot_settings
-                        .bound_bot_user_id(room_id.as_ref())
-                        .is_some_and(|existing_bot_user_id| existing_bot_user_id.as_str() == bot_user_id.as_str())
-                    {
-                        continue;
-                    }
-                    self.app_state.bot_settings.set_room_bound(
-                        room_id.clone(),
-                        Some(bot_user_id.clone()),
-                        true,
-                    );
-                    if let Some(user_id) = current_user_id() {
-                        if let Err(e) = persistence::save_app_state(self.app_state.clone(), user_id) {
-                            error!("Failed to persist detected BotFather room binding. Error: {e}");
-                        }
-                    }
                     self.ui.redraw(cx);
                     continue;
                 }
@@ -2135,6 +2129,23 @@ impl BotSettingsState {
         Ok(())
     }
 
+    pub fn validate_botfather_user_id(
+        botfather_user_id: &str,
+        current_user_id: Option<&UserId>,
+    ) -> Result<(), String> {
+        let botfather_user_id = botfather_user_id.trim();
+        if botfather_user_id.is_empty() {
+            return Err("BotFather user ID cannot be empty.".into());
+        }
+
+        Self {
+            botfather_user_id: botfather_user_id.to_string(),
+            ..Self::default()
+        }
+        .resolved_bot_user_id(current_user_id)
+        .map(|_| ())
+    }
+
     fn room_binding_index(
         &self,
         room_id: &RoomId,
@@ -2278,6 +2289,16 @@ impl BotSettingsState {
         } else {
             false
         }
+    }
+
+    pub fn remove_room_bindings_where(
+        &mut self,
+        mut predicate: impl FnMut(&RoomId, &UserId) -> bool,
+    ) -> usize {
+        let original_len = self.room_bindings.len();
+        self.room_bindings
+            .retain(|binding| !predicate(binding.room_id.as_ref(), binding.bot_user_id.as_ref()));
+        original_len.saturating_sub(self.room_bindings.len())
     }
 
     /// Returns the configured botfather user ID, resolving a localpart against
@@ -2546,9 +2567,9 @@ impl Eq for SelectedRoom {}
 
 #[cfg(test)]
 mod tests {
-    use super::{SavedDockState, SelectedRoom};
+    use super::{BotSettingsState, RoomBotBindingState, SavedDockState, SelectedRoom};
     use crate::utils::RoomNameId;
-    use matrix_sdk::{RoomDisplayName, ruma::{OwnedEventId, OwnedRoomId}};
+    use matrix_sdk::{RoomDisplayName, ruma::{OwnedEventId, OwnedRoomId, OwnedUserId, UserId}};
 
     fn joined_room(room_id_str: &str, name: &str) -> SelectedRoom {
         SelectedRoom::JoinedRoom {
@@ -2668,6 +2689,55 @@ mod tests {
         assert_eq!(saved.room_order, vec![fresh.clone()]);
         assert_eq!(saved.selected_room, Some(fresh));
     }
+
+    #[test]
+    fn validate_botfather_user_id_accepts_localpart_and_full_mxid() {
+        let current_user_id = UserId::parse("@alex:example.org").unwrap();
+
+        assert!(BotSettingsState::validate_botfather_user_id(
+            "octosbot",
+            Some(current_user_id.as_ref()),
+        ).is_ok());
+        assert!(BotSettingsState::validate_botfather_user_id(
+            "@octosbot:example.org",
+            Some(current_user_id.as_ref()),
+        ).is_ok());
+        assert!(BotSettingsState::validate_botfather_user_id(
+            "",
+            Some(current_user_id.as_ref()),
+        ).is_err());
+    }
+
+    #[test]
+    fn remove_room_bindings_where_prunes_stale_bindings() {
+        let mut settings = BotSettingsState {
+            room_bindings: vec![
+                RoomBotBindingState {
+                    room_id: "!stale:example.org".parse::<OwnedRoomId>().unwrap(),
+                    bot_user_id: "@octosbot:example.org".parse::<OwnedUserId>().unwrap(),
+                    remark: String::new(),
+                },
+                RoomBotBindingState {
+                    room_id: "!fresh:example.org".parse::<OwnedRoomId>().unwrap(),
+                    bot_user_id: "@octosbot:example.org".parse::<OwnedUserId>().unwrap(),
+                    remark: String::new(),
+                },
+            ],
+            ..BotSettingsState::default()
+        };
+
+        let removed = settings.remove_room_bindings_where(|room_id, _| room_id.as_str() == "!stale:example.org");
+
+        assert_eq!(removed, 1);
+        assert_eq!(
+            settings.room_bindings,
+            vec![RoomBotBindingState {
+                room_id: "!fresh:example.org".parse::<OwnedRoomId>().unwrap(),
+                bot_user_id: "@octosbot:example.org".parse::<OwnedUserId>().unwrap(),
+                remark: String::new(),
+            }]
+        );
+    }
 }
 
 /// Actions sent to the top-level App in order to update / restore its [`AppState`].
@@ -2691,11 +2761,6 @@ pub enum AppStateAction {
         bound: bool,
         bot_user_id: Option<OwnedUserId>,
         warning: Option<String>,
-    },
-    /// A room's member list indicates that the configured BotFather is already present.
-    BotRoomBindingDetected {
-        room_id: OwnedRoomId,
-        bot_user_id: OwnedUserId,
     },
     /// Bot IDs discovered from BotFather replies (for example, `/listbots`).
     KnownBotUserIdsDiscovered {

@@ -185,9 +185,10 @@ enum PopupMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SlashCommand {
+pub(crate) struct SlashCommand {
     command: &'static str,
     description_key: &'static str,
+    needs_args: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -203,23 +204,66 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         command: "/createbot",
         description_key: "slash_command.createbot.description",
+        needs_args: true,
     },
     SlashCommand {
         command: "/deletebot",
         description_key: "slash_command.deletebot.description",
+        needs_args: true,
     },
     SlashCommand {
         command: "/listbots",
         description_key: "slash_command.listbots.description",
+        needs_args: false,
     },
     SlashCommand {
         command: "/bothelp",
         description_key: "slash_command.bothelp.description",
+        needs_args: false,
     },
 ];
 
-fn bot_command_popup_enabled(app_service_enabled: bool, _app_service_room_bound: bool) -> bool {
-    app_service_enabled
+pub(crate) fn is_management_bot_room(
+    app_service_enabled: bool,
+    is_direct_room: bool,
+    has_persisted_management_binding: bool,
+    bound_bot_user_id: Option<&OwnedUserId>,
+    resolved_parent_bot_user_id: Option<&OwnedUserId>,
+    _known_bot_user_ids: &[OwnedUserId],
+) -> bool {
+    if !app_service_enabled {
+        return false;
+    }
+
+    let Some(bound_bot_user_id) = bound_bot_user_id else {
+        return false;
+    };
+
+    if !is_direct_room && !has_persisted_management_binding {
+        return false;
+    }
+
+    resolved_parent_bot_user_id.is_some_and(|resolved_parent_bot_user_id|
+        bound_bot_user_id == resolved_parent_bot_user_id
+    )
+}
+
+fn bot_command_popup_enabled(
+    app_service_enabled: bool,
+    is_direct_room: bool,
+    has_persisted_management_binding: bool,
+    bound_bot_user_id: Option<&OwnedUserId>,
+    resolved_parent_bot_user_id: Option<&OwnedUserId>,
+    known_bot_user_ids: &[OwnedUserId],
+) -> bool {
+    is_management_bot_room(
+        app_service_enabled,
+        is_direct_room,
+        has_persisted_management_binding,
+        bound_bot_user_id,
+        resolved_parent_bot_user_id,
+        known_bot_user_ids,
+    )
 }
 
 fn find_slash_command_trigger_position(text: &str, cursor_pos: usize) -> Option<usize> {
@@ -251,6 +295,31 @@ fn matching_slash_commands(search_text: &str) -> Vec<SlashCommand> {
                 .starts_with(&query)
         })
         .collect()
+}
+
+pub(crate) fn classify_known_slash_command_for_submission(text: &str) -> Option<SlashCommand> {
+    let first_token = text.trim().split_whitespace().next()?;
+    SLASH_COMMANDS
+        .iter()
+        .copied()
+        .find(|command| command.command == first_token)
+}
+
+fn primary_submit_modifiers() -> KeyModifiers {
+    #[cfg(any(target_os = "ios", target_os = "macos", target_os = "tvos"))]
+    {
+        KeyModifiers {
+            logo: true,
+            ..Default::default()
+        }
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "macos", target_os = "tvos")))]
+    {
+        KeyModifiers {
+            control: true,
+            ..Default::default()
+        }
+    }
 }
 
 fn member_list_ready_for_mentions(member_count: usize, sync_pending: bool) -> bool {
@@ -842,6 +911,7 @@ script_mod! {
         // Template for user list items in the mention popup
         user_list_item: mod.widgets.UserListItem {}
         room_mention_list_item: mod.widgets.RoomMentionListItem {}
+        slash_command_list_item: mod.widgets.SlashCommandListItem {}
         loading_indicator: mod.widgets.LoadingIndicator {}
         no_matches_indicator: mod.widgets.NoMatchesIndicator {}
     }
@@ -1215,7 +1285,13 @@ impl Widget for MentionableTextInput {
                 // Guarantee cleanup executes even if search completes and stops requesting frames
                 cx.new_next_frame();
             } else if !has_focus && self.is_slash_command_popup_active() {
-                self.close_mention_popup(cx);
+                // Defer the close by one frame: when open_slash_command_popup
+                // is invoked from a button click, set_key_focus is still
+                // pending here, so closing immediately kills the popup we
+                // just opened. The NextFrame handler re-checks has_focus, and
+                // by then focus has committed — so the popup survives.
+                self.pending_popup_cleanup = true;
+                cx.new_next_frame();
             }
         }
 
@@ -1401,7 +1477,7 @@ impl MentionableTextInput {
         _is_desktop: bool,
     ) -> bool {
         // Don't show @room option in direct messages
-        if false /* TODO: add is_direct_room to RoomScreenProps */ {
+        if room_props.is_direct_room {
             return false;
         }
         if !self.can_notify_room || !("@room".contains(search_text) || search_text.is_empty()) {
@@ -1581,10 +1657,15 @@ impl MentionableTextInput {
             .get::<RoomScreenProps>()
             .expect("RoomScreenProps should be available in scope for MentionableTextInput");
 
-        if !bot_command_popup_enabled(
+        let enabled = bot_command_popup_enabled(
             room_props.app_service_enabled,
-            room_props.app_service_room_bound,
-        ) {
+            room_props.is_direct_room,
+            room_props.has_persisted_management_binding,
+            room_props.bound_bot_user_id.as_ref(),
+            room_props.resolved_parent_bot_user_id.as_ref(),
+            &room_props.known_bot_user_ids,
+        );
+        if !enabled {
             if self.is_slash_command_popup_active() {
                 self.close_mention_popup(cx);
             }
@@ -1622,13 +1703,45 @@ impl MentionableTextInput {
 
         let popup = self.cmd_text_input.view(cx, ids!(popup));
         popup.set_visible(cx, items_added > 0);
-
         let text_input_area = self.cmd_text_input.text_input_ref().area();
         if cx.has_key_focus(text_input_area) {
             self.cmd_text_input.text_input_ref().set_key_focus(cx);
         }
 
         self.redraw(cx);
+    }
+
+    fn emit_primary_submit_action(&self, cx: &mut Cx, text: String) {
+        let text_input = self.cmd_text_input.text_input(cx, ids!(text_input));
+        cx.widget_action(
+            text_input.widget_uid(),
+            makepad_widgets::text_input::TextInputAction::Returned(
+                text,
+                primary_submit_modifiers(),
+            ),
+        );
+    }
+
+    fn open_slash_command_popup(&mut self, cx: &mut Cx, scope: &mut Scope) {
+        let text_input_ref = self.cmd_text_input.text_input_ref();
+        self.set_input_text_preserving_mentions(cx, "/");
+        text_input_ref.set_cursor(
+            cx,
+            Cursor {
+                index: 1,
+                prefer_next_row: false,
+            },
+            false,
+        );
+        self.update_slash_command_list(cx, scope, "/");
+        text_input_ref.set_key_focus(cx);
+        // The button-click event flow races with focus commit: when the user
+        // clicks bot_menu_button, focus lives on the button (not the text
+        // input), so the Event::Actions block below sees `has_focus == false`
+        // for the text input even though we just requested focus. Belt-and-
+        // suspenders: draw_walk will keep retrying focus restore until it
+        // sticks.
+        self.pending_draw_focus_restore = true;
     }
 
     /// Update popup visibility and layout based on current state
@@ -1779,6 +1892,15 @@ impl MentionableTextInput {
     fn on_slash_command_selected(&mut self, cx: &mut Cx, selected: WidgetRef) {
         let command = selected.label(cx, ids!(command_name)).text();
         if command.is_empty() {
+            return;
+        }
+
+        if classify_known_slash_command_for_submission(&command)
+            .is_some_and(|slash_command| !slash_command.needs_args)
+        {
+            self.close_mention_popup(cx);
+            self.emit_primary_submit_action(cx, command);
+            self.pending_draw_focus_restore = true;
             return;
         }
 
@@ -2592,6 +2714,12 @@ impl MentionableTextInputRef {
         }
     }
 
+    pub fn open_slash_command_popup(&self, cx: &mut Cx, scope: &mut Scope) {
+        if let Some(mut inner) = self.borrow_mut() {
+            inner.open_slash_command_popup(cx, scope);
+        }
+    }
+
     /// Sets whether the current user can notify the entire room (@room mention)
     pub fn set_can_notify_room(&self, can_notify: bool) {
         if let Some(mut inner) = self.borrow_mut() {
@@ -2729,10 +2857,67 @@ mod tests {
     }
 
     #[test]
-    fn slash_command_popup_requires_enabled_bot_features_even_when_unbound() {
-        assert!(bot_command_popup_enabled(true, true));
-        assert!(bot_command_popup_enabled(true, false));
-        assert!(!bot_command_popup_enabled(false, true));
+    fn slash_command_popup_requires_management_bot_room() {
+        let parent_bot = OwnedUserId::try_from("@octosbot:example.com").unwrap();
+        let child_bot = OwnedUserId::try_from("@octosbot_child:example.com").unwrap();
+        let mismatched_parent = OwnedUserId::try_from("@bot:example.com").unwrap();
+
+        assert!(bot_command_popup_enabled(
+            true,
+            true,
+            false,
+            Some(&parent_bot),
+            Some(&parent_bot),
+            &[],
+        ));
+        assert!(!bot_command_popup_enabled(
+            true,
+            false,
+            false,
+            Some(&parent_bot),
+            Some(&parent_bot),
+            &[],
+        ));
+        assert!(!bot_command_popup_enabled(
+            true,
+            false,
+            true,
+            Some(&child_bot),
+            Some(&parent_bot),
+            std::slice::from_ref(&child_bot),
+        ));
+        assert!(!bot_command_popup_enabled(
+            true,
+            false,
+            false,
+            None,
+            Some(&parent_bot),
+            &[],
+        ));
+        assert!(!bot_command_popup_enabled(
+            true,
+            false,
+            true,
+            Some(&parent_bot),
+            Some(&mismatched_parent),
+            &[],
+        ));
+        assert!(!bot_command_popup_enabled(
+            true,
+            false,
+            false,
+            Some(&parent_bot),
+            Some(&mismatched_parent),
+            &[],
+        ));
+        assert!(!bot_command_popup_enabled(
+            false,
+            false,
+            true,
+            Some(&parent_bot),
+            Some(&parent_bot),
+            &[],
+        ));
     }
 
     #[test]
@@ -2761,12 +2946,34 @@ mod tests {
         assert_eq!(commands, vec![SlashCommand {
             command: "/listbots",
             description_key: "slash_command.listbots.description",
+            needs_args: false,
         }]);
     }
 
     #[test]
     fn slash_commands_return_empty_for_unknown_prefix() {
         assert!(matching_slash_commands("zzzznotacommand").is_empty());
+    }
+
+    #[test]
+    fn classify_known_slash_command_for_submission_matches_first_token() {
+        assert_eq!(
+            classify_known_slash_command_for_submission("/listbots"),
+            Some(SlashCommand {
+                command: "/listbots",
+                description_key: "slash_command.listbots.description",
+                needs_args: false,
+            })
+        );
+        assert_eq!(
+            classify_known_slash_command_for_submission("/createbot weather Weather Bot"),
+            Some(SlashCommand {
+                command: "/createbot",
+                description_key: "slash_command.createbot.description",
+                needs_args: true,
+            })
+        );
+        assert_eq!(classify_known_slash_command_for_submission("/unknown arg"), None);
     }
 
     #[test]

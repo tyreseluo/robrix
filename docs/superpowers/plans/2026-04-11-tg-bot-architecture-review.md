@@ -1,5 +1,14 @@
 # Codex TG Bot 架构方案审查
 
+> **⚠️ SUPERSEDED (2026-04-13).** This architecture review shaped the Phase 2
+> explicit-target-chip design. The product direction has since moved to
+> **mention/reply-first** (Phase 3) — see
+> [`docs/superpowers/plans/2026-04-12-tg-bot-mention-reply-first-plan.md`](./2026-04-12-tg-bot-mention-reply-first-plan.md)
+> and [`specs/task-tg-bot-mention-reply-first.spec.md`](../../../specs/task-tg-bot-mention-reply-first.spec.md).
+> The type model (`ExplicitOverride`/`ResolvedTarget`), `is_known_or_likely_bot()`,
+> and the reply-to-human fix survived the pivot; the persistent target chip
+> UI and its switching menu did not. Kept for historical context.
+
 ## Context
 
 Codex 提出将 Robrix2 的 bot 交互模型从"implicit room-bound bot routing"转向"explicit bot targeting"，对标 Telegram。本文档审查该方案的技术可行性、架构合理性，以及 Codex 未覆盖的设计问题。

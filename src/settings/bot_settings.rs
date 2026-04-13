@@ -160,6 +160,42 @@ script_mod! {
             }
         }
 
+        manage_hint := mod.widgets.BotSettingsInfoLabel {
+            width: Fill
+            padding: Inset{left: 6}
+            margin: Inset{top: -2, bottom: 4}
+            draw_text +: {
+                color: (COLOR_DESCRIPTION_TEXT)
+                text_style: REGULAR_TEXT { font_size: 9.5 }
+            }
+            text: "Manage BotFather and child bots in DM and room bind dialogs. Settings here only control whether App Service features are enabled."
+        }
+
+        botfather_section := View {
+            width: Fill
+            height: Fit
+            flow: Down
+            spacing: 4
+            padding: Inset{left: 6}
+
+            botfather_user_id_label := Label {
+                width: Fit
+                height: Fit
+                draw_text +: {
+                    color: (COLOR_FIELD_LABEL)
+                    text_style: REGULAR_TEXT { font_size: 10 }
+                }
+                text: "BotFather User ID:"
+            }
+
+            botfather_user_id_input := RobrixTextInput {
+                width: Fill
+                height: Fit
+                padding: 8
+                empty_text: "bot or @bot:server"
+            }
+        }
+
         octos_health_section := View {
             width: Fill
             height: Fit
@@ -283,6 +319,7 @@ impl Widget for BotSettings {
 impl WidgetMatchEvent for BotSettings {
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions, _scope: &mut Scope) {
         let app_service_switch = self.view.check_box(cx, ids!(app_service_switch));
+        let botfather_user_id_input = self.view.text_input(cx, ids!(botfather_user_id_input));
         let octos_service_input = self.view.text_input(cx, ids!(octos_service_input));
 
         let Some(app_state) = _scope.data.get_mut::<AppState>() else {
@@ -297,12 +334,13 @@ impl WidgetMatchEvent for BotSettings {
         }
 
         if self.view.button(cx, ids!(save_octos_service_button)).clicked(actions)
+            || botfather_user_id_input.returned(actions).is_some()
             || octos_service_input.returned(actions).is_some()
         {
-            match self.save_octos_service_url(cx, app_state) {
+            match self.save_app_service_settings(cx, app_state) {
                 Ok(_) => {
                     enqueue_popup_notification(
-                        tr_key(self.app_language, "settings.labs.app_service.health.popup.saved").to_string(),
+                        tr_key(self.app_language, "settings.labs.app_service.popup.saved").to_string(),
                         PopupKind::Success,
                         Some(3.0),
                     );
@@ -322,15 +360,11 @@ impl WidgetMatchEvent for BotSettings {
         }
 
         if self.view.button(cx, ids!(check_now_button)).clicked(actions) {
-            let service_url = match self.save_octos_service_url(cx, app_state) {
+            let service_url = match self.save_app_service_settings(cx, app_state) {
                 Ok(service_url) => service_url,
                 Err(error) => {
                     enqueue_popup_notification(
-                        tr_fmt(
-                            self.app_language,
-                            "settings.labs.app_service.health.validation.invalid_url",
-                            &[("error", &error)],
-                        ),
+                        error,
                         PopupKind::Error,
                         Some(4.0),
                     );
@@ -359,15 +393,41 @@ impl BotSettings {
         }
     }
 
-    fn save_octos_service_url(&mut self, cx: &mut Cx, app_state: &mut AppState) -> Result<String, String> {
+    fn save_app_service_settings(&mut self, cx: &mut Cx, app_state: &mut AppState) -> Result<String, String> {
+        let botfather_user_id = self.view
+            .text_input(cx, ids!(botfather_user_id_input))
+            .text()
+            .trim()
+            .to_string();
+        BotSettingsState::validate_botfather_user_id(
+            &botfather_user_id,
+            current_user_id().as_deref(),
+        ).map_err(|error|
+            tr_fmt(
+                self.app_language,
+                "settings.labs.app_service.validation.invalid_botfather_user_id",
+                &[("error", &error)],
+            )
+        )?;
+
         let service_url = self.view
             .text_input(cx, ids!(octos_service_input))
             .text()
             .trim()
             .to_string();
-        BotSettingsState::validate_octos_service_url(&service_url)?;
+        BotSettingsState::validate_octos_service_url(&service_url).map_err(|error|
+            tr_fmt(
+                self.app_language,
+                "settings.labs.app_service.health.validation.invalid_url",
+                &[("error", &error)],
+            )
+        )?;
+        app_state.bot_settings.botfather_user_id = botfather_user_id.clone();
         app_state.bot_settings.octos_service_url = service_url.clone();
         persist_bot_settings(app_state);
+        self.view
+            .text_input(cx, ids!(botfather_user_id_input))
+            .set_text(cx, &botfather_user_id);
         self.view
             .text_input(cx, ids!(octos_service_input))
             .set_text(cx, &service_url);
@@ -448,6 +508,15 @@ impl BotSettings {
             .label(cx, ids!(description))
             .set_text(cx, tr_key(self.app_language, "settings.labs.app_service.description"));
         self.view
+            .label(cx, ids!(manage_hint))
+            .set_text(cx, tr_key(self.app_language, "settings.labs.app_service.manage_hint"));
+        self.view
+            .label(cx, ids!(botfather_user_id_label))
+            .set_text(cx, tr_key(self.app_language, "settings.labs.app_service.botfather_user_id"));
+        self.view
+            .text_input(cx, ids!(botfather_user_id_input))
+            .set_empty_text(cx, tr_key(self.app_language, "settings.labs.app_service.botfather_placeholder").to_string());
+        self.view
             .label(cx, ids!(octos_service_label))
             .set_text(cx, tr_key(self.app_language, "settings.labs.app_service.health.service_label"));
         self.view
@@ -471,6 +540,9 @@ impl BotSettings {
         self.view
             .check_box(cx, ids!(app_service_switch))
             .set_active(cx, bot_settings.enabled);
+        self.view
+            .text_input(cx, ids!(botfather_user_id_input))
+            .set_text(cx, bot_settings.botfather_user_id.trim());
         self.view
             .text_input(cx, ids!(octos_service_input))
             .set_text(cx, bot_settings.resolved_octos_service_url());

@@ -1,10 +1,30 @@
 spec: task
-name: "Telegram Bot UI Alignment — Phase 2: Explicit Target Model"
+name: "Telegram Bot UI Alignment — Phase 2: Explicit Target Model (SUPERSEDED)"
 inherits: project
-tags: [bot, ui, telegram-parity, target-model]
+tags: [bot, ui, telegram-parity, target-model, superseded]
 depends: [task-tg-bot-ui-alignment]
 estimate: 3d
 ---
+
+> **⚠️ SUPERSEDED (2026-04-13).** This spec represented the Phase 2 design based
+> on a persistent target chip UI for explicit bot targeting. The product
+> direction was revised on 2026-04-12 to a **mention/reply-first** model which
+> hides the target chip entirely and treats bot-bound multi-member rooms as
+> room-first by default.
+>
+> The authoritative active spec is
+> [`task-tg-bot-mention-reply-first.spec.md`](./task-tg-bot-mention-reply-first.spec.md)
+> (Phase 3). This Phase 2 document is kept for historical context only —
+> do NOT use it as the basis for new implementation work. Sections about the
+> target chip, the chip switching menu, `RoomDefault` vs `ExplicitBot` visual
+> distinction, and persisted `ExplicitOverride` restore are all obsolete.
+>
+> What remains valid from Phase 2 and was carried forward into Phase 3:
+> - The `ExplicitOverride` / `ResolvedTarget` two-layer type model
+> - The `is_known_or_likely_bot()` helper and context fields on `RoomScreenProps`
+> - The reply-to-human-must-not-trigger-bot-targeting fix
+>
+> Everything else in this document is historical.
 
 ## Intent
 

@@ -286,6 +286,7 @@
   "settings.labs.app_service.health.status.unreachable": "不可访问",
   "settings.labs.app_service.health.popup.saved": "已保存 Octos 服务地址。",
   "settings.labs.app_service.health.validation.invalid_url": "Octos 服务地址无效。\n\n{error}",
+  "settings.labs.app_service.validation.invalid_botfather_user_id": "BotFather 用户 ID 无效。\n\n{error}",
   "settings.labs.app_service.button.save": "保存",
   "settings.labs.app_service.popup.saved": "已保存 Matrix 应用服务设置。",
 
@@ -309,6 +310,7 @@
   "room_input_bar.translation.preview.idle": "开始输入即可翻译...",
   "room_input_bar.translation.preview.loading": "翻译中...",
   "room_input_bar.translation.preview.error": "错误：{error}",
+  "room_input_bar.bot_menu_button.tooltip": "Bot 命令",
   "room_input_bar.target.default": "默认：{display_name}",
   "room_input_bar.target.to_bot": "发给 {display_name}",
   "room_input_bar.target.to_room": "发到房间",

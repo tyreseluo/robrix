@@ -286,6 +286,7 @@
   "settings.labs.app_service.health.status.unreachable": "Unreachable",
   "settings.labs.app_service.health.popup.saved": "Saved Octos service URL.",
   "settings.labs.app_service.health.validation.invalid_url": "Invalid Octos service URL.\n\n{error}",
+  "settings.labs.app_service.validation.invalid_botfather_user_id": "Invalid BotFather user ID.\n\n{error}",
   "settings.labs.app_service.button.save": "Save",
   "settings.labs.app_service.popup.saved": "Saved Matrix app service settings.",
 
@@ -309,6 +310,7 @@
   "room_input_bar.translation.preview.idle": "Start typing to translate...",
   "room_input_bar.translation.preview.loading": "Translating...",
   "room_input_bar.translation.preview.error": "Error: {error}",
+  "room_input_bar.bot_menu_button.tooltip": "Bot commands",
   "room_input_bar.target.default": "Default: {display_name}",
   "room_input_bar.target.to_bot": "To {display_name}",
   "room_input_bar.target.to_room": "To room",

@@ -23,7 +23,7 @@ use matrix_sdk::{
 use matrix_sdk_ui::timeline::{
     self, EmbeddedEvent, EncryptedMessage, EventTimelineItem, InReplyToDetails, LiveLocationState, MemberProfileChange, MembershipChange, MsgLikeContent, MsgLikeKind, OtherMessageLike, PollState, RoomMembershipChange, TimelineDetails, TimelineEventItemId, TimelineItem, TimelineItemContent, TimelineItemKind, VirtualTimelineItem
 };
-use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}, owned_room_id};
+use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent}};
 
 use matrix_sdk_ui::sync_service::State;
 use crate::{
@@ -4249,153 +4249,18 @@ impl Widget for RoomScreen {
         //       so the only thing we'd need here is the conditional below.
 
         if room_info_action_modal_open || !is_pane_shown || !is_interactive_hit {
-            // Create a Scope with RoomScreenProps containing the room members.
-            // This scope is needed by child widgets like MentionableTextInput during event handling.
-            let room_props = if let Some(tl) = self.tl_state.as_ref() {
-                let room_id = tl.kind.room_id().clone();
-                let room_members = tl.room_members.clone();
-                let is_direct_room = cx.get_global::<RoomsListRef>()
-                    .is_direct_room(&room_id)
-                    .unwrap_or(false);
-                let (
-                    app_service_enabled,
-                    app_service_room_bound,
-                    bound_bot_user_id,
-                    resolved_parent_bot_user_id,
-                    room_bot_user_ids,
-                    known_bot_user_ids,
-                ) = scope
-                    .data
-                    .get::<AppState>()
-                    .map(|app_state| {
-                        let app_service_enabled = app_state.bot_settings.enabled;
-                        let persisted_bound_bot_user_id =
-                            app_state.bot_settings.bound_bot_user_id(&room_id).map(ToOwned::to_owned);
-                        let persisted_room_bot_user_ids = if app_service_enabled {
-                            app_state.bot_settings.bound_bot_user_ids(&room_id)
-                        } else {
-                            Vec::new()
-                        };
-                        let resolved_parent_bot_user_id = if app_service_enabled {
-                            app_state
-                                .bot_settings
-                                .resolved_bot_user_id(current_user_id().as_deref())
-                                .ok()
-                        } else {
-                            None
-                        };
-                        let known_bot_user_ids = if app_service_enabled {
-                            app_state.bot_settings.known_bot_user_ids()
-                        } else {
-                            Vec::new()
-                        };
-                        let room_bot_user_ids = room_members
-                            .as_ref()
-                            .map(|members|
-                                collect_room_bot_user_ids(
-                                    members.as_ref(),
-                                    resolved_parent_bot_user_id.as_deref(),
-                                    &known_bot_user_ids,
-                                    &persisted_room_bot_user_ids,
-                                )
-                            )
-                            .unwrap_or(persisted_room_bot_user_ids);
-                        let detected_bound_bot_user_id = room_members
-                            .as_ref()
-                            .and_then(|members|
-                                detected_bot_binding_for_members(
-                                    app_state,
-                                    &room_id,
-                                    members.as_ref(),
-                                )
-                            );
-                        if persisted_bound_bot_user_id.is_none()
-                            && detected_bound_bot_user_id.is_some()
-                            && let Some(bot_user_id) = detected_bound_bot_user_id.as_ref()
-                        {
-                            Cx::post_action(AppStateAction::BotRoomBindingDetected {
-                                room_id: room_id.clone(),
-                                bot_user_id: bot_user_id.clone(),
-                            });
-                        }
-                        let bound_bot_user_id = if app_service_enabled {
-                            persisted_bound_bot_user_id.or(detected_bound_bot_user_id)
-                        } else {
-                            None
-                        };
-                        let app_service_room_bound = bound_bot_user_id.is_some();
-                        (
-                            app_service_enabled,
-                            app_service_room_bound,
-                            bound_bot_user_id,
-                            resolved_parent_bot_user_id,
-                            room_bot_user_ids,
-                            known_bot_user_ids,
-                        )
-                    })
-                    .unwrap_or((false, false, None, None, Vec::new(), Vec::new()));
-
-                RoomScreenProps {
-                    room_screen_widget_uid,
-                    room_name_id: self.room_name_id.clone().unwrap_or_else(|| RoomNameId::empty(room_id)),
-                    timeline_kind: tl.kind.clone(),
-                    room_members,
-                    is_direct_room,
-                    room_bot_user_ids,
-                    room_members_sync_pending: tl.room_members_sync_pending,
-                    room_members_sort: tl.room_members_sort.clone(),
-                    room_avatar_url: self.room_avatar_url.clone(),
-                    app_service_enabled,
-                    app_service_room_bound,
-                    bound_bot_user_id,
-                    resolved_parent_bot_user_id,
-                    known_bot_user_ids,
-                }
-            } else if let Some(room_name) = &self.room_name_id {
-                // Fallback case: we have a room_name but no tl_state yet
-                RoomScreenProps {
-                    room_screen_widget_uid,
-                    room_name_id: room_name.clone(),
-                    timeline_kind: self.timeline_kind.clone()
-                        .expect("BUG: room_name_id was set but timeline_kind was missing"),
-                    room_members: None,
-                    is_direct_room: false,
-                    room_bot_user_ids: Vec::new(),
-                    room_members_sort: None,
-                    room_members_sync_pending: false,
-                    room_avatar_url: None,
-                    app_service_enabled: false,
-                    app_service_room_bound: false,
-                    bound_bot_user_id: None,
-                    resolved_parent_bot_user_id: None,
-                    known_bot_user_ids: Vec::new(),
-                }
-            } else {
-                // No room selected yet, skip event handling that requires room context
+            let Some(room_props) = self.build_room_screen_props(cx, scope, room_screen_widget_uid) else {
                 if !is_pane_shown || !is_interactive_hit {
                     return;
                 }
                 log!("RoomScreen handling event with no room_name_id and no tl_state, skipping room-dependent event handling");
-                // Use a dummy room props for non-room-specific events
-                let room_id = owned_room_id!("!dummy:matrix.org");
-                RoomScreenProps {
-                    room_screen_widget_uid,
-                    room_name_id: RoomNameId::empty(room_id.clone()),
-                    timeline_kind: TimelineKind::MainRoom { room_id },
-                    room_members: None,
-                    is_direct_room: false,
-                    room_bot_user_ids: Vec::new(),
-                    room_members_sort: None,
-                    room_members_sync_pending: false,
-                    room_avatar_url: None,
-                    app_service_enabled: false,
-                    app_service_room_bound: false,
-                    bound_bot_user_id: None,
-                    resolved_parent_bot_user_id: None,
-                    known_bot_user_ids: Vec::new(),
-                }
+                return;
             };
-            let mut room_scope = Scope::with_props(&room_props);
+            let mut room_scope = if let Some(app_state) = scope.data.get_mut::<AppState>() {
+                Scope::with_data_props(app_state, &room_props)
+            } else {
+                Scope::with_props(&room_props)
+            };
             let leave_room_confirm_modal_uid = self
                 .confirmation_modal(cx, ids!(leave_room_confirm_modal_inner))
                 .widget_uid();
@@ -4744,7 +4609,15 @@ impl Widget for RoomScreen {
 
 
         let room_screen_widget_uid = self.widget_uid();
-        while let Some(subview) = self.view.draw_walk(cx, scope, walk).step() {
+        let Some(room_props) = self.build_room_screen_props(cx, scope, room_screen_widget_uid) else {
+            return DrawStep::done();
+        };
+        let mut room_scope = if let Some(app_state) = scope.data.get_mut::<AppState>() {
+            Scope::with_data_props(app_state, &room_props)
+        } else {
+            Scope::with_props(&room_props)
+        };
+        while let Some(subview) = self.view.draw_walk(cx, &mut room_scope, walk).step() {
             // Here, we only need to handle drawing the portal list.
             let portal_list_ref = subview.as_portal_list();
             let Some(mut list_ref) = portal_list_ref.borrow_mut() else { continue };
@@ -4764,7 +4637,7 @@ impl Widget for RoomScreen {
                 room_bot_user_ids,
                 known_bot_user_ids,
             ) = compute_timeline_bot_context(
-                scope.data.get::<AppState>(),
+                room_scope.data.get::<AppState>(),
                 tl_state.kind.room_id(),
                 tl_state.room_members.as_ref(),
             );
@@ -4942,7 +4815,7 @@ impl Widget for RoomScreen {
                     item
                     }
                 };
-                item.draw_all(cx, scope);
+                item.draw_all(cx, &mut room_scope);
             }
 
             // If the list is not filling the viewport, we need to back paginate the timeline
@@ -5042,6 +4915,137 @@ impl RoomScreen {
         self.view
             .button(cx, ids!(translation_lang_modal.content.translation_lang_popup.translation_lang_scroll.lang_hi))
             .set_text(cx, &translation::language_popup_label("hi"));
+    }
+
+    fn build_room_screen_props(
+        &self,
+        cx: &mut Cx,
+        scope: &mut Scope,
+        room_screen_widget_uid: WidgetUid,
+    ) -> Option<RoomScreenProps> {
+        if let Some(tl) = self.tl_state.as_ref() {
+            let room_id = tl.kind.room_id().clone();
+            let room_members = tl.room_members.clone();
+            let is_direct_room = cx.get_global::<RoomsListRef>()
+                .is_direct_room(&room_id)
+                .unwrap_or(false);
+            let (
+                app_service_enabled,
+                app_service_room_bound,
+                has_persisted_management_binding,
+                bound_bot_user_id,
+                resolved_parent_bot_user_id,
+                room_bot_user_ids,
+                known_bot_user_ids,
+            ) = scope
+                .data
+                .get::<AppState>()
+                .map(|app_state| {
+                    let app_service_enabled = app_state.bot_settings.enabled;
+                    let persisted_bound_bot_user_id =
+                        app_state.bot_settings.bound_bot_user_id(&room_id).map(ToOwned::to_owned);
+                    let persisted_room_bot_user_ids = if app_service_enabled {
+                        app_state.bot_settings.bound_bot_user_ids(&room_id)
+                    } else {
+                        Vec::new()
+                    };
+                    let resolved_parent_bot_user_id = if app_service_enabled {
+                        app_state
+                            .bot_settings
+                            .resolved_bot_user_id(current_user_id().as_deref())
+                            .ok()
+                    } else {
+                        None
+                    };
+                    let known_bot_user_ids = if app_service_enabled {
+                        app_state.bot_settings.known_bot_user_ids()
+                    } else {
+                        Vec::new()
+                    };
+                    let has_persisted_management_binding = resolved_parent_bot_user_id
+                        .as_ref()
+                        .is_some_and(|resolved_parent_bot_user_id|
+                            persisted_room_bot_user_ids
+                                .iter()
+                                .any(|bot_user_id| bot_user_id == resolved_parent_bot_user_id)
+                        );
+                    let room_bot_user_ids = room_members
+                        .as_ref()
+                        .map(|members|
+                            collect_room_bot_user_ids(
+                                members.as_ref(),
+                                resolved_parent_bot_user_id.as_deref(),
+                                &known_bot_user_ids,
+                                &persisted_room_bot_user_ids,
+                            )
+                        )
+                        .unwrap_or(persisted_room_bot_user_ids);
+                    let detected_bound_bot_user_id = room_members
+                        .as_ref()
+                        .and_then(|members|
+                            detected_bot_binding_for_members(
+                                app_state,
+                                &room_id,
+                                members.as_ref(),
+                            )
+                        );
+                    let bound_bot_user_id = if app_service_enabled {
+                        persisted_bound_bot_user_id.or(detected_bound_bot_user_id)
+                    } else {
+                        None
+                    };
+                    let app_service_room_bound = bound_bot_user_id.is_some();
+                    (
+                        app_service_enabled,
+                        app_service_room_bound,
+                        has_persisted_management_binding,
+                        bound_bot_user_id,
+                        resolved_parent_bot_user_id,
+                        room_bot_user_ids,
+                        known_bot_user_ids,
+                    )
+                })
+                .unwrap_or((false, false, false, None, None, Vec::new(), Vec::new()));
+
+            Some(RoomScreenProps {
+                room_screen_widget_uid,
+                room_name_id: self.room_name_id.clone().unwrap_or_else(|| RoomNameId::empty(room_id.clone())),
+                timeline_kind: tl.kind.clone(),
+                room_members,
+                is_direct_room,
+                room_bot_user_ids,
+                room_members_sync_pending: tl.room_members_sync_pending,
+                room_members_sort: tl.room_members_sort.clone(),
+                room_avatar_url: self.room_avatar_url.clone(),
+                app_service_enabled,
+                app_service_room_bound,
+                has_persisted_management_binding,
+                bound_bot_user_id,
+                resolved_parent_bot_user_id,
+                known_bot_user_ids,
+            })
+        } else if let Some(room_name) = &self.room_name_id {
+            Some(RoomScreenProps {
+                room_screen_widget_uid,
+                room_name_id: room_name.clone(),
+                timeline_kind: self.timeline_kind.clone()
+                    .expect("BUG: room_name_id was set but timeline_kind was missing"),
+                room_members: None,
+                is_direct_room: false,
+                room_bot_user_ids: Vec::new(),
+                room_members_sort: None,
+                room_members_sync_pending: false,
+                room_avatar_url: None,
+                app_service_enabled: false,
+                app_service_room_bound: false,
+                has_persisted_management_binding: false,
+                bound_bot_user_id: None,
+                resolved_parent_bot_user_id: None,
+                known_bot_user_ids: Vec::new(),
+            })
+        } else {
+            None
+        }
     }
 
     fn room_id(&self) -> Option<&OwnedRoomId> {
@@ -5787,19 +5791,6 @@ impl RoomScreen {
                 }
                 TimelineUpdate::RoomMembersListFetched { members } => {
                     let members = Arc::new(members);
-                    if let Some(app_state) = app_state {
-                        let room_id = tl.kind.room_id().clone();
-                        if let Some(bot_user_id) = detected_bot_binding_for_members(
-                            app_state,
-                            &room_id,
-                            members.as_ref(),
-                        ) {
-                            Cx::post_action(AppStateAction::BotRoomBindingDetected {
-                                room_id,
-                                bot_user_id,
-                            });
-                        }
-                    }
                     if tl.awaiting_post_sync_member_refresh {
                         tl.room_members_sync_pending = false;
                         tl.awaiting_post_sync_member_refresh = false;
@@ -7346,6 +7337,7 @@ pub struct RoomScreenProps {
     pub room_avatar_url: Option<OwnedMxcUri>,
     pub app_service_enabled: bool,
     pub app_service_room_bound: bool,
+    pub has_persisted_management_binding: bool,
     pub bound_bot_user_id: Option<OwnedUserId>,
     pub resolved_parent_bot_user_id: Option<OwnedUserId>,
     pub known_bot_user_ids: Vec<OwnedUserId>,
