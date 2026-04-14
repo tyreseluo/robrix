@@ -304,7 +304,7 @@ fn matching_slash_commands(search_text: &str) -> Vec<SlashCommand> {
 }
 
 pub(crate) fn classify_known_slash_command_for_submission(text: &str) -> Option<SlashCommand> {
-    let first_token = text.trim().split_whitespace().next()?;
+    let first_token = text.split_whitespace().next()?;
     SLASH_COMMANDS
         .iter()
         .copied()

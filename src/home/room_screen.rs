@@ -5731,8 +5731,8 @@ impl RoomScreen {
                 resolved_parent_bot_user_id,
                 known_bot_user_ids,
             })
-        } else if let Some(room_name) = &self.room_name_id {
-            Some(RoomScreenProps {
+        } else {
+            self.room_name_id.as_ref().map(|room_name| RoomScreenProps {
                 room_screen_widget_uid,
                 room_name_id: room_name.clone(),
                 timeline_kind: self.timeline_kind.clone()
@@ -5750,8 +5750,6 @@ impl RoomScreen {
                 resolved_parent_bot_user_id: None,
                 known_bot_user_ids: Vec::new(),
             })
-        } else {
-            None
         }
     }
 

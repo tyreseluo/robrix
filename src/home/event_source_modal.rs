@@ -453,11 +453,11 @@ fn format_event_source_html(json: &str) -> String {
                 i += 1;
             }
             ch if ch.is_whitespace() => {
-                out.push_str(&htmlize::escape_text(&ch.to_string()));
+                out.push_str(&htmlize::escape_text(ch.to_string()));
                 i += 1;
             }
             ch => {
-                out.push_str(&htmlize::escape_text(&ch.to_string()));
+                out.push_str(&htmlize::escape_text(ch.to_string()));
                 i += 1;
                 at_line_start = false;
             }
