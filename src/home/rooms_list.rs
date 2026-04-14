@@ -547,6 +547,11 @@ impl RoomsList {
         None
     }
 
+    /// Returns whether the given joined room is marked as a direct room.
+    pub fn is_direct_room(&self, room_id: &OwnedRoomId) -> Option<bool> {
+        self.all_joined_rooms.get(room_id).map(|jr| jr.is_direct)
+    }
+
     fn upsert_created_room_placeholder(
         &mut self,
         cx: &mut Cx,
@@ -1721,6 +1726,11 @@ impl RoomsListRef {
     /// See [`RoomsList::get_room_state()`].
     pub fn get_room_state(&self, room_id: &OwnedRoomId) -> Option<RoomState> {
         self.borrow()?.get_room_state(room_id)
+    }
+
+    /// Returns whether the given joined room is marked as a direct room.
+    pub fn is_direct_room(&self, room_id: &OwnedRoomId) -> Option<bool> {
+        self.borrow()?.is_direct_room(room_id)
     }
 
     /// Returns the name of the given room, if it is known and loaded.
