@@ -192,6 +192,12 @@ pub(crate) struct SlashCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ParsedSlashCommand {
+    pub command: String,
+    pub target_localpart: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct TrackedVisibleMention {
     user_id: OwnedUserId,
     visible_text: String,
@@ -303,6 +309,56 @@ pub(crate) fn classify_known_slash_command_for_submission(text: &str) -> Option<
         .iter()
         .copied()
         .find(|command| command.command == first_token)
+}
+
+pub(crate) fn parse_command_with_at_suffix(input: &str) -> Option<ParsedSlashCommand> {
+    let trimmed = input.trim_start();
+    let first_token = trimmed.split_whitespace().next()?;
+    if !first_token.starts_with('/') || first_token.len() <= 1 {
+        return None;
+    }
+
+    let Some(at_idx) = first_token.find('@') else {
+        return Some(ParsedSlashCommand {
+            command: first_token.to_owned(),
+            target_localpart: None,
+        });
+    };
+
+    if at_idx <= 1 {
+        return None;
+    }
+
+    let command = first_token[..at_idx].to_owned();
+    let suffix = &first_token[at_idx + 1..];
+    let target_localpart = suffix
+        .split(':')
+        .next()
+        .map(str::trim)
+        .filter(|localpart| !localpart.is_empty())
+        .map(ToOwned::to_owned);
+
+    Some(ParsedSlashCommand {
+        command,
+        target_localpart,
+    })
+}
+
+pub(crate) fn normalize_command_with_at_suffix_for_send(input: &str) -> String {
+    let Some(parsed) = parse_command_with_at_suffix(input) else {
+        return input.to_owned();
+    };
+
+    if parsed.target_localpart.is_none() {
+        return input.to_owned();
+    }
+
+    let trimmed = input.trim_start();
+    let first_token_end = trimmed
+        .find(char::is_whitespace)
+        .unwrap_or(trimmed.len());
+    let suffix = &trimmed[first_token_end..];
+    format!("{}{}", parsed.command, suffix)
 }
 
 fn primary_submit_modifiers() -> KeyModifiers {
@@ -2745,6 +2801,36 @@ impl MentionableTextInputRef {
             inner.possible_room_mention,
         )
     }
+
+    pub fn create_message_with_mentions_for_submission(
+        &self,
+        entered_text: &str,
+    ) -> RoomMessageEventContent {
+        let Some(inner) = self.borrow() else {
+            let normalized_text = normalize_command_with_at_suffix_for_send(entered_text);
+            return create_message_with_tracked_mentions(&normalized_text, &[], false);
+        };
+
+        let normalized_text = normalize_command_with_at_suffix_for_send(entered_text);
+        if normalized_text == entered_text {
+            return create_message_with_tracked_mentions(
+                entered_text,
+                &inner.tracked_visible_mentions,
+                inner.possible_room_mention,
+            );
+        }
+
+        let adjusted_mentions = reconcile_visible_mentions_after_text_change(
+            entered_text,
+            &normalized_text,
+            &inner.tracked_visible_mentions,
+        );
+        create_message_with_tracked_mentions(
+            &normalized_text,
+            &adjusted_mentions,
+            inner.possible_room_mention,
+        )
+    }
 }
 
 fn create_message_with_tracked_mentions(
@@ -2974,6 +3060,85 @@ mod tests {
             })
         );
         assert_eq!(classify_known_slash_command_for_submission("/unknown arg"), None);
+    }
+
+    #[test]
+    fn test_parse_command_at_localpart() {
+        assert_eq!(
+            parse_command_with_at_suffix("/listbots@octosbot_weather"),
+            Some(ParsedSlashCommand {
+                command: "/listbots".to_owned(),
+                target_localpart: Some("octosbot_weather".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_command_at_full_mxid() {
+        assert_eq!(
+            parse_command_with_at_suffix("/listbots@octosbot:127.0.0.1:8128"),
+            Some(ParsedSlashCommand {
+                command: "/listbots".to_owned(),
+                target_localpart: Some("octosbot".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_bare_command_no_target() {
+        assert_eq!(
+            parse_command_with_at_suffix("/listbots"),
+            Some(ParsedSlashCommand {
+                command: "/listbots".to_owned(),
+                target_localpart: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_command_at_with_args() {
+        assert_eq!(
+            parse_command_with_at_suffix("/createbot@octosbot weather Weather Bot"),
+            Some(ParsedSlashCommand {
+                command: "/createbot".to_owned(),
+                target_localpart: Some("octosbot".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parser_rejects_bare_mention() {
+        assert_eq!(parse_command_with_at_suffix("@octosbot hello"), None);
+    }
+
+    #[test]
+    fn test_parser_rejects_space_before_at() {
+        assert_eq!(
+            parse_command_with_at_suffix("/listbots @octosbot"),
+            Some(ParsedSlashCommand {
+                command: "/listbots".to_owned(),
+                target_localpart: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parameterized_command_at_bot_normalizes() {
+        assert_eq!(
+            normalize_command_with_at_suffix_for_send("/createbot@octosbot weather Weather Bot"),
+            "/createbot weather Weather Bot".to_owned(),
+        );
+    }
+
+    #[test]
+    fn test_input_box_preserves_at_bot_during_typing() {
+        let visible_text = "/listbots@octosbot";
+
+        assert_eq!(visible_text, "/listbots@octosbot");
+        assert_eq!(
+            normalize_command_with_at_suffix_for_send(visible_text),
+            "/listbots".to_owned(),
+        );
     }
 
     #[test]

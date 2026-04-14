@@ -44,7 +44,7 @@ use hashbrown::{HashMap, HashSet};
 use crate::{
     account_manager::{self, Account},
     app::{AppStateAction, RoomFilterRemoteSearchAction}, app_data_dir, avatar_cache::AvatarUpdate, event_preview::{BeforeText, TextPreview, text_preview_of_raw_timeline_event, text_preview_of_timeline_item}, home::{
-        add_room::{CreatableSpacesAction, CreateRoomAction, CreateRoomContext, KnockResultAction}, invite_screen::{JoinRoomResultAction, LeaveRoomResultAction}, link_preview::{LinkPreviewData, LinkPreviewDataNonNumeric, LinkPreviewRateLimitResponse}, room_screen::{InviteResultAction, ReportRoomResultAction, TimelineUpdate}, rooms_list::{self, InvitedRoomInfo, InviterInfo, JoinedRoomInfo, RoomsListUpdate, build_room_search_text, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, tombstone_footer::SuccessorRoomDetails
+        add_room::{CreatableSpacesAction, CreateRoomAction, CreateRoomContext, KnockResultAction}, invite_screen::{JoinRoomResultAction, LeaveRoomResultAction}, link_preview::{LinkPreviewData, LinkPreviewDataNonNumeric, LinkPreviewRateLimitResponse}, room_screen::{ActionResponseResultAction, InviteResultAction, ReportRoomResultAction, TimelineUpdate}, rooms_list::{self, InvitedRoomInfo, InviterInfo, JoinedRoomInfo, RoomsListUpdate, build_room_search_text, enqueue_rooms_list_update}, rooms_list_header::RoomsListHeaderAction, tombstone_footer::SuccessorRoomDetails
     }, login::login_screen::LoginAction, logout::{logout_confirm_modal::LogoutAction, logout_state_machine::{LogoutConfig, is_logout_in_progress, logout_with_state_machine}}, media_cache::{MediaCacheEntry, MediaCacheEntryRef}, persistence::{self, ClientSessionPersisted, load_app_state, take_skip_app_state_restore_once}, profile::{
         user_profile::UserProfile,
         user_profile_cache::{UserProfileUpdate, enqueue_user_profile_update},
@@ -936,6 +936,14 @@ pub enum MatrixRequest {
         explicit_room: bool,
         #[cfg(feature = "tsp")]
         sign_with_tsp: bool,
+    },
+    /// Request to send a bot action response below a timeline message.
+    SendActionResponse {
+        timeline_kind: TimelineKind,
+        content: serde_json::Value,
+        target_user_id: OwnedUserId,
+        explicit_room: bool,
+        source_event_id: OwnedEventId,
     },
     /// Request to send a file attachment to the given room.
     SendAttachment {
@@ -2992,6 +3000,60 @@ async fn matrix_worker_task(
                         }
                     }
                     SignalToUI::set_ui_signal();
+                });
+            }
+
+            MatrixRequest::SendActionResponse {
+                timeline_kind,
+                content,
+                target_user_id,
+                explicit_room,
+                source_event_id,
+            } => {
+                let Some((timeline, _sender)) = get_timeline_and_sender(&timeline_kind) else {
+                    log!("BUG: {timeline_kind} not found for send action response request");
+                    continue;
+                };
+                let room_id = timeline_kind.room_id().to_owned();
+
+                let _send_action_response_task = Handle::current().spawn(async move {
+                    if let Err(error) = ensure_target_user_joined_room(
+                        timeline.room(),
+                        target_user_id.as_ref(),
+                    )
+                    .await
+                    {
+                        error!("Failed to ensure targeted bot {target_user_id} joined {timeline_kind}: {error:?}");
+                        Cx::post_action(ActionResponseResultAction::Failed {
+                            room_id,
+                            source_event_id,
+                            error: error.to_string(),
+                        });
+                        return;
+                    }
+
+                    let raw_content = add_octos_routing_metadata(
+                        content,
+                        Some(target_user_id.as_ref()),
+                        explicit_room,
+                    );
+                    match timeline.room().send_raw("m.room.message", raw_content).await {
+                        Ok(_response) => {
+                            log!("Sent action response message to {timeline_kind}.");
+                            Cx::post_action(ActionResponseResultAction::Sent {
+                                room_id,
+                                source_event_id,
+                            });
+                        }
+                        Err(error) => {
+                            error!("Failed to send action response to {timeline_kind}: {error:?}");
+                            Cx::post_action(ActionResponseResultAction::Failed {
+                                room_id,
+                                source_event_id,
+                                error: error.to_string(),
+                            });
+                        }
+                    }
                 });
             }
 

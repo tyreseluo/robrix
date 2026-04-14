@@ -100,6 +100,13 @@ inline 按钮发起 URL 跳转等 TG 高级特性——这些是后续增量。
   "一边 reply 另一条消息一边点 button"时的状态冲突。
 - **按钮禁用状态**：action button 默认在点击后**立即禁用**所有按钮，避免
   重复提交。禁用状态通过本地 UI state 维护，不修改原事件。
+- **本地选择回显**：用户点击某个 action button 后，Robrix 必须在原消息
+  的 action 区立即回显“已点击的是哪个按钮”。v1 的回显规则是：
+  - 只保留被点击的那个按钮
+  - 该按钮文案前加 `✓`
+  - 该按钮保持禁用状态
+  - 其它按钮本地隐藏
+  如果 action response 发送失败，Robrix 必须恢复原始按钮组，允许用户重试。
 - **原事件不可变**：action buttons 是 client-side 附加的交互层，**不**通过
   Matrix edit (`m.replace`) 机制更新原消息。如果 bot 想更新按钮状态，需
   要发送一条新消息。
@@ -183,6 +190,16 @@ Scenario: Clicked button is disabled locally to prevent double submission
   Then both the "Regenerate PPT" and "Cancel" buttons become disabled
   And clicking them again does not send additional messages
   And the original event's `org.octos.actions` field is unchanged (no m.replace emitted)
+
+Scenario: Clicked button remains visible as the selected local acknowledgement
+  Test: test_clicked_action_button_collapses_to_selected_acknowledgement
+  Given a rendered bot message with two action buttons "retry_pptx" and "cancel"
+  When the user clicks "Regenerate PPT"
+  Then 只保留被点击的那个按钮
+  And the remaining button label is "✓ Regenerate PPT"
+  And the remaining button uses the original clicked button style
+  And 该按钮保持禁用状态
+  And 其它按钮本地隐藏
 
 Scenario: Action response routes to original sender via one-shot target (bypassing input bar state)
   Test: test_action_response_routes_to_original_sender

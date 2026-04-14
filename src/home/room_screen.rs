@@ -78,6 +78,7 @@ const BOT_BADGE_HORIZONTAL_PADDING: f64 = 6.0;
 const BOT_BADGE_BORDER_RADIUS: f64 = 3.0;
 const BOT_BADGE_TEXT_FONT_SIZE: f64 = 8.5;
 const BOT_BADGE_TEXT_TOP_DROP: f64 = -0.08;
+const MAX_OCTOS_ACTION_BUTTONS: usize = 6;
 
 const fn centered_top_margin(outer_top_margin: f64, outer_height: f64, inner_height: f64) -> f64 {
     outer_top_margin + ((outer_height - inner_height) * 0.5)
@@ -147,6 +148,515 @@ struct BotTimelineRenderState {
     provider: Option<String>,
     body: String,
     footer: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OctosActionStyle {
+    Primary,
+    Secondary,
+    Danger,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OctosActionButton {
+    id: String,
+    label: String,
+    style: OctosActionStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActionButtonRenderSlot {
+    id: String,
+    label: String,
+    style: OctosActionStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SelectedOctosActionState {
+    id: String,
+    label: String,
+    style: OctosActionStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ApprovalCardRenderState {
+    title: String,
+    summary: String,
+    buttons_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActionButtonRenderState {
+    show_container: bool,
+    show_button_row: bool,
+    approval_card: Option<ApprovalCardRenderState>,
+    buttons_enabled: bool,
+    visible_slots: Vec<ActionButtonRenderSlot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedOctosActionPayload {
+    approval_request: Option<OctosApprovalRequest>,
+    actions: Vec<OctosActionButton>,
+    malformed_approval_request: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OctosApprovalRiskLevel {
+    Normal,
+    Critical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OctosApprovalTimeoutBehavior {
+    Notify,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OctosApprovalRequest {
+    request_id: String,
+    tool_name: String,
+    tool_args_digest: String,
+    title: String,
+    summary: String,
+    risk_level: OctosApprovalRiskLevel,
+    authorized_approvers: Vec<String>,
+    expires_at: String,
+    on_timeout: OctosApprovalTimeoutBehavior,
+}
+
+fn parse_octos_action_style(style: Option<&str>) -> OctosActionStyle {
+    match style {
+        Some("primary") => OctosActionStyle::Primary,
+        Some("danger") => OctosActionStyle::Danger,
+        _ => OctosActionStyle::Secondary,
+    }
+}
+
+fn effective_octos_message_content(content: &serde_json::Value) -> &serde_json::Value {
+    content.get("m.new_content").unwrap_or(content)
+}
+
+fn latest_effective_event_content_json(
+    event_tl_item: &EventTimelineItem,
+) -> Option<serde_json::Value> {
+    event_tl_item.latest_edit_json()
+        .or_else(|| event_tl_item.original_json())
+        .and_then(|raw| raw.get_field::<serde_json::Value>("content").ok())
+        .flatten()
+        .map(|content| effective_octos_message_content(&content).clone())
+}
+
+fn original_event_content_json(
+    event_tl_item: &EventTimelineItem,
+) -> Option<serde_json::Value> {
+    event_tl_item.original_json()
+        .and_then(|raw| raw.get_field::<serde_json::Value>("content").ok())
+        .flatten()
+}
+
+fn parse_octos_approval_risk_level(value: Option<&str>) -> Option<OctosApprovalRiskLevel> {
+    match value {
+        Some("normal") => Some(OctosApprovalRiskLevel::Normal),
+        Some("critical") => Some(OctosApprovalRiskLevel::Critical),
+        _ => None,
+    }
+}
+
+fn parse_octos_approval_timeout_behavior(value: Option<&str>) -> Option<OctosApprovalTimeoutBehavior> {
+    match value {
+        Some("notify") => Some(OctosApprovalTimeoutBehavior::Notify),
+        _ => None,
+    }
+}
+
+fn parse_octos_approval_request_from_content(content: &serde_json::Value) -> Option<OctosApprovalRequest> {
+    let approval = content.get("org.octos.approval_request")?;
+    let request_id = approval.get("request_id")?.as_str()?.trim();
+    let tool_name = approval.get("tool_name")?.as_str()?.trim();
+    let tool_args_digest = approval.get("tool_args_digest")?.as_str()?.trim();
+    let title = approval.get("title")?.as_str()?.trim();
+    let summary = approval.get("summary")?.as_str()?.trim();
+    let risk_level = parse_octos_approval_risk_level(
+        approval.get("risk_level").and_then(|value| value.as_str()).map(str::trim),
+    )?;
+
+    let approvers = approval.get("authorized_approvers")?.as_array()?;
+    let authorized_approvers = approvers
+        .iter()
+        .filter_map(|value| value.as_str().map(str::trim))
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if authorized_approvers.is_empty() {
+        return None;
+    }
+
+    let expires_at = approval.get("expires_at")?.as_str()?.trim();
+    let on_timeout = parse_octos_approval_timeout_behavior(
+        approval.get("on_timeout").and_then(|value| value.as_str()).map(str::trim),
+    )?;
+
+    if request_id.is_empty()
+        || tool_name.is_empty()
+        || tool_args_digest.is_empty()
+        || title.is_empty()
+        || summary.is_empty()
+        || expires_at.is_empty()
+    {
+        return None;
+    }
+
+    Some(OctosApprovalRequest {
+        request_id: request_id.to_owned(),
+        tool_name: tool_name.to_owned(),
+        tool_args_digest: tool_args_digest.to_owned(),
+        title: title.to_owned(),
+        summary: summary.to_owned(),
+        risk_level,
+        authorized_approvers,
+        expires_at: expires_at.to_owned(),
+        on_timeout,
+    })
+}
+
+fn parse_octos_actions_from_content(content: &serde_json::Value) -> Vec<OctosActionButton> {
+    let Some(actions) = effective_octos_message_content(content)
+        .get("org.octos.actions")
+        .and_then(|value| value.as_array())
+    else {
+        return Vec::new();
+    };
+
+    let mut parsed = Vec::new();
+    for (index, action) in actions.iter().enumerate() {
+        if parsed.len() >= MAX_OCTOS_ACTION_BUTTONS {
+            warning!(
+                "org.octos.actions: truncated {} extra buttons",
+                actions.len().saturating_sub(MAX_OCTOS_ACTION_BUTTONS)
+            );
+            break;
+        }
+
+        let Some(id) = action.get("id").and_then(|value| value.as_str()).map(str::trim) else {
+            warning!("org.octos.actions: skipping malformed entry at index {index}");
+            continue;
+        };
+        let Some(label) = action.get("label").and_then(|value| value.as_str()).map(str::trim) else {
+            warning!("org.octos.actions: skipping malformed entry at index {index}");
+            continue;
+        };
+        if id.is_empty() || label.is_empty() {
+            warning!("org.octos.actions: skipping malformed entry at index {index}");
+            continue;
+        }
+
+        parsed.push(OctosActionButton {
+            id: id.to_owned(),
+            label: label.to_owned(),
+            style: parse_octos_action_style(action.get("style").and_then(|value| value.as_str())),
+        });
+    }
+
+    parsed
+}
+
+fn parse_octos_approval_actions_from_content(content: &serde_json::Value) -> Vec<OctosActionButton> {
+    parse_octos_actions_from_content(content)
+        .into_iter()
+        .filter(|action| matches!(action.id.as_str(), "approve" | "deny"))
+        .collect()
+}
+
+fn parse_octos_action_payload_for_render(
+    content: Option<&serde_json::Value>,
+    original_content: Option<&serde_json::Value>,
+) -> ParsedOctosActionPayload {
+    let approval_request = original_content
+        .and_then(parse_octos_approval_request_from_content);
+    let malformed_approval_request = original_content
+        .is_some_and(|content| content.get("org.octos.approval_request").is_some())
+        && approval_request.is_none();
+
+    let actions = if malformed_approval_request {
+        Vec::new()
+    } else if approval_request.is_some() {
+        original_content
+            .map(parse_octos_approval_actions_from_content)
+            .unwrap_or_default()
+    } else {
+        content
+            .map(parse_octos_actions_from_content)
+            .unwrap_or_default()
+    };
+
+    ParsedOctosActionPayload {
+        approval_request,
+        actions,
+        malformed_approval_request,
+    }
+}
+
+fn compute_action_button_render_state(
+    actions: &[OctosActionButton],
+    approval_request: Option<&OctosApprovalRequest>,
+    current_user_id: Option<&UserId>,
+) -> ActionButtonRenderState {
+    let approval_card = approval_request
+        .and_then(|approval_request| (!actions.is_empty()).then(|| ApprovalCardRenderState {
+            title: approval_request.title.clone(),
+            summary: approval_request.summary.clone(),
+            buttons_enabled: local_user_can_approve(approval_request, current_user_id),
+        }));
+    let visible_slots = actions
+        .iter()
+        .take(MAX_OCTOS_ACTION_BUTTONS)
+        .map(|action| ActionButtonRenderSlot {
+            id: action.id.clone(),
+            label: action.label.clone(),
+            style: action.style,
+        })
+        .collect::<Vec<_>>();
+
+    let buttons_enabled = approval_card
+        .as_ref()
+        .map(|approval_card| approval_card.buttons_enabled)
+        .unwrap_or(true);
+    let show_button_row = !visible_slots.is_empty();
+
+    ActionButtonRenderState {
+        show_container: approval_card.is_some() || show_button_row,
+        show_button_row,
+        approval_card,
+        buttons_enabled,
+        visible_slots,
+    }
+}
+
+fn action_button_render_slots_for_display(
+    render_state: &ActionButtonRenderState,
+    selected_action: Option<&SelectedOctosActionState>,
+) -> Vec<ActionButtonRenderSlot> {
+    if let Some(selected_action) = selected_action {
+        vec![ActionButtonRenderSlot {
+            id: selected_action.id.clone(),
+            label: format!("✓ {}", selected_action.label),
+            style: selected_action.style,
+        }]
+    } else {
+        render_state.visible_slots.clone()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OctosActionResponseRequest {
+    timeline_kind: TimelineKind,
+    content: serde_json::Value,
+    target_user_id: OwnedUserId,
+    explicit_room: bool,
+    source_event_id: OwnedEventId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OctosActionButtonRequest {
+    Generic {
+        action_id: String,
+        label: String,
+        style: OctosActionStyle,
+    },
+    Approval {
+        request_id: String,
+        title: String,
+        decision: String,
+        label: String,
+        tool_args_digest: String,
+        style: OctosActionStyle,
+    },
+}
+
+impl OctosActionButtonRequest {
+    fn action_id(&self) -> &str {
+        match self {
+            Self::Generic { action_id, .. } => action_id,
+            Self::Approval { decision, .. } => decision,
+        }
+    }
+
+    fn label(&self) -> &str {
+        match self {
+            Self::Generic { label, .. } => label,
+            Self::Approval { label, .. } => label,
+        }
+    }
+
+    fn style(&self) -> OctosActionStyle {
+        match self {
+            Self::Generic { style, .. } | Self::Approval { style, .. } => *style,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OctosActionButtonContext {
+    source_event_id: OwnedEventId,
+    original_sender: OwnedUserId,
+    request: OctosActionButtonRequest,
+}
+
+fn build_octos_approval_response_request(
+    timeline_kind: &TimelineKind,
+    title: &str,
+    request_id: &str,
+    decision: &str,
+    tool_args_digest: &str,
+    source_event_id: &EventId,
+    original_sender: &UserId,
+) -> OctosActionResponseRequest {
+    OctosActionResponseRequest {
+        timeline_kind: timeline_kind.clone(),
+        content: serde_json::json!({
+            "msgtype": "m.text",
+            "body": format!("[Approval: {decision}] {title}"),
+            "org.octos.approval_response": {
+                "request_id": request_id,
+                "decision": decision,
+                "source_event_id": source_event_id.as_str(),
+                "tool_args_digest": tool_args_digest,
+            },
+            "m.relates_to": {
+                "m.in_reply_to": {
+                    "event_id": source_event_id.as_str(),
+                }
+            }
+        }),
+        target_user_id: original_sender.to_owned(),
+        explicit_room: false,
+        source_event_id: source_event_id.to_owned(),
+    }
+}
+
+fn build_octos_action_response_request(
+    timeline_kind: &TimelineKind,
+    label: &str,
+    action_id: &str,
+    source_event_id: &EventId,
+    original_sender: &UserId,
+) -> OctosActionResponseRequest {
+    OctosActionResponseRequest {
+        timeline_kind: timeline_kind.clone(),
+        content: serde_json::json!({
+            "msgtype": "m.text",
+            "body": format!("[Action: {label}]"),
+            "org.octos.action_response": {
+                "action_id": action_id,
+                "source_event_id": source_event_id.as_str(),
+            },
+            "m.relates_to": {
+                "m.in_reply_to": {
+                    "event_id": source_event_id.as_str(),
+                }
+            }
+        }),
+        target_user_id: original_sender.to_owned(),
+        explicit_room: false,
+        source_event_id: source_event_id.to_owned(),
+    }
+}
+
+fn local_user_can_approve(
+    approval_request: &OctosApprovalRequest,
+    current_user_id: Option<&UserId>,
+) -> bool {
+    let Some(current_user_id) = current_user_id else {
+        return false;
+    };
+
+    approval_request.authorized_approvers
+        .iter()
+        .any(|approver| approver == current_user_id.as_str())
+}
+
+fn mark_action_buttons_disabled(
+    disabled_source_event_ids: &mut HashSet<OwnedEventId>,
+    source_event_id: &OwnedEventId,
+) {
+    disabled_source_event_ids.insert(source_event_id.clone());
+}
+
+fn mark_selected_octos_action(
+    selected_actions: &mut HashMap<OwnedEventId, SelectedOctosActionState>,
+    source_event_id: &OwnedEventId,
+    action_id: &str,
+    label: &str,
+    style: OctosActionStyle,
+) {
+    selected_actions.insert(source_event_id.clone(), SelectedOctosActionState {
+        id: action_id.to_owned(),
+        label: label.to_owned(),
+        style,
+    });
+}
+
+fn clear_selected_octos_action(
+    selected_actions: &mut HashMap<OwnedEventId, SelectedOctosActionState>,
+    source_event_id: &EventId,
+) {
+    selected_actions.remove(source_event_id);
+}
+
+fn clear_action_buttons_disabled(
+    disabled_source_event_ids: &mut HashSet<OwnedEventId>,
+    source_event_id: &EventId,
+) {
+    disabled_source_event_ids.remove(source_event_id);
+}
+
+fn are_action_buttons_disabled(
+    disabled_source_event_ids: &HashSet<OwnedEventId>,
+    source_event_id: &EventId,
+) -> bool {
+    disabled_source_event_ids.contains(source_event_id)
+}
+
+fn octos_action_button_paths(index: usize) -> (&'static [LiveId], &'static [LiveId], &'static [LiveId], &'static [LiveId]) {
+    match index {
+        0 => (
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_0)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_0), live_id!(primary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_0), live_id!(secondary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_0), live_id!(danger_button)],
+        ),
+        1 => (
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_1)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_1), live_id!(primary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_1), live_id!(secondary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_1), live_id!(danger_button)],
+        ),
+        2 => (
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_2)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_2), live_id!(primary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_2), live_id!(secondary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_2), live_id!(danger_button)],
+        ),
+        3 => (
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_3)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_3), live_id!(primary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_3), live_id!(secondary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_3), live_id!(danger_button)],
+        ),
+        4 => (
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_4)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_4), live_id!(primary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_4), live_id!(secondary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_4), live_id!(danger_button)],
+        ),
+        _ => (
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_5)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_5), live_id!(primary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_5), live_id!(secondary_button)],
+            &[live_id!(content), live_id!(action_buttons), live_id!(action_button_row), live_id!(action_button_slot_5), live_id!(danger_button)],
+        ),
+    }
 }
 
 fn is_bot_provider_line(line: &str) -> bool {
@@ -993,6 +1503,54 @@ script_mod! {
     mod.widgets.COLOR_BOT_CODE_BG = #xECF2F8
     mod.widgets.COLOR_BOT_CODE_BORDER = #xD5E0ED
 
+    mod.widgets.MessageActionPrimaryButton = RobrixPositiveIconButton {
+        width: Fit
+        height: Fit
+        spacing: 6.0
+        padding: Inset{ left: 10.0, right: 10.0, top: 7.0, bottom: 7.0 }
+        draw_text +: {
+            text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 10.0 }
+        }
+    }
+
+    mod.widgets.MessageActionSecondaryButton = Button {
+        width: Fit
+        height: Fit
+        spacing: 6.0
+        padding: Inset{ left: 10.0, right: 10.0, top: 7.0, bottom: 7.0 }
+        draw_text +: {
+            text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 10.0 }
+        }
+        text: ""
+    }
+
+    mod.widgets.MessageActionDangerButton = RobrixNegativeIconButton {
+        width: Fit
+        height: Fit
+        spacing: 6.0
+        padding: Inset{ left: 10.0, right: 10.0, top: 7.0, bottom: 7.0 }
+        draw_text +: {
+            text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 10.0 }
+        }
+    }
+
+    mod.widgets.MessageActionButtonSlot = View {
+        visible: false
+        width: Fit
+        height: Fit
+        flow: Overlay
+
+        primary_button := mod.widgets.MessageActionPrimaryButton {
+            visible: false
+        }
+        secondary_button := mod.widgets.MessageActionSecondaryButton {
+            visible: false
+        }
+        danger_button := mod.widgets.MessageActionDangerButton {
+            visible: false
+        }
+    }
+
     mod.widgets.BotTimelineMarkdown = Markdown {
         width: Fill
         height: Fit
@@ -1408,6 +1966,66 @@ script_mod! {
 
                 message := HtmlOrPlaintext { }
                 splash_card := Splash { visible: false }
+                action_buttons := View {
+                    visible: false
+                    width: Fill
+                    height: Fit
+                    flow: Down
+                    spacing: 6.0
+                    margin: Inset{ top: 8.0, bottom: 2.0 }
+
+                    approval_request_view := RoundedView {
+                        visible: false
+                        width: Fill
+                        height: Fit
+                        flow: Down
+                        new_batch: true
+                        spacing: 4.0
+                        padding: Inset{ left: 12.0, right: 12.0, top: 10.0, bottom: 10.0 }
+                        show_bg: true
+                        draw_bg +: {
+                            color: (mod.widgets.COLOR_BOT_STATUS_BG)
+                            border_radius: 12.0
+                            border_size: 1.0
+                            border_color: (mod.widgets.COLOR_BOT_CARD_BORDER)
+                        }
+
+                        approval_title_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: theme.font_bold { font_size: 10.5 }
+                                color: (mod.widgets.COLOR_TEXT)
+                            }
+                            text: ""
+                        }
+
+                        approval_summary_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 10.0 }
+                                color: (mod.widgets.COLOR_BOT_STATUS_TEXT)
+                            }
+                            text: ""
+                        }
+                    }
+
+                    action_button_row := View {
+                        visible: false
+                        width: Fill
+                        height: Fit
+                        flow: Flow.Right{wrap: true}
+                        spacing: 8.0
+
+                        action_button_slot_0 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_1 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_2 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_3 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_4 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_5 := mod.widgets.MessageActionButtonSlot {}
+                    }
+                }
                 link_preview_view := mod.widgets.LinkPreview {}
                 View {
                     width: Fill,
@@ -1540,6 +2158,66 @@ script_mod! {
                 }
 
                 message := HtmlOrPlaintext { }
+                action_buttons := View {
+                    visible: false
+                    width: Fill
+                    height: Fit
+                    flow: Down
+                    spacing: 6.0
+                    margin: Inset{ top: 8.0, bottom: 2.0 }
+
+                    approval_request_view := RoundedView {
+                        visible: false
+                        width: Fill
+                        height: Fit
+                        flow: Down
+                        new_batch: true
+                        spacing: 4.0
+                        padding: Inset{ left: 12.0, right: 12.0, top: 10.0, bottom: 10.0 }
+                        show_bg: true
+                        draw_bg +: {
+                            color: (mod.widgets.COLOR_BOT_STATUS_BG)
+                            border_radius: 12.0
+                            border_size: 1.0
+                            border_color: (mod.widgets.COLOR_BOT_CARD_BORDER)
+                        }
+
+                        approval_title_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: theme.font_bold { font_size: 10.5 }
+                                color: (mod.widgets.COLOR_TEXT)
+                            }
+                            text: ""
+                        }
+
+                        approval_summary_label := Label {
+                            width: Fill
+                            height: Fit
+                            draw_text +: {
+                                text_style: mod.widgets.MESSAGE_TEXT_STYLE { font_size: 10.0 }
+                                color: (mod.widgets.COLOR_BOT_STATUS_TEXT)
+                            }
+                            text: ""
+                        }
+                    }
+
+                    action_button_row := View {
+                        visible: false
+                        width: Fill
+                        height: Fit
+                        flow: Flow.Right{wrap: true}
+                        spacing: 8.0
+
+                        action_button_slot_0 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_1 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_2 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_3 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_4 := mod.widgets.MessageActionButtonSlot {}
+                        action_button_slot_5 := mod.widgets.MessageActionButtonSlot {}
+                    }
+                }
                 link_preview_view := mod.widgets.LinkPreview {}
                 View {
                     width: Fill,
@@ -3652,6 +4330,9 @@ pub struct RoomScreen {
     #[rust] app_language: AppLanguage,
     #[rust] app_language_initialized: bool,
     #[rust] pending_invited_users: HashSet<OwnedUserId>,
+    #[rust] octos_action_button_contexts: HashMap<WidgetUid, OctosActionButtonContext>,
+    #[rust] disabled_octos_action_source_event_ids: HashSet<OwnedEventId>,
+    #[rust] selected_octos_action_by_source_event_id: HashMap<OwnedEventId, SelectedOctosActionState>,
 }
 
 impl Drop for RoomScreen {
@@ -4007,6 +4688,28 @@ impl Widget for RoomScreen {
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
                         enqueue_popup_notification(
                             format!("Failed to report room.\n\nError: {error}"),
+                            PopupKind::Error,
+                            Some(5.0),
+                        );
+                    }
+                }
+                if let Some(ActionResponseResultAction::Failed { room_id, source_event_id, error }) = action.downcast_ref() {
+                    if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
+                        clear_action_buttons_disabled(
+                            &mut self.disabled_octos_action_source_event_ids,
+                            source_event_id.as_ref(),
+                        );
+                        clear_selected_octos_action(
+                            &mut self.selected_octos_action_by_source_event_id,
+                            source_event_id.as_ref(),
+                        );
+                        self.redraw_timeline_list(cx);
+                        enqueue_popup_notification(
+                            tr_fmt(
+                                self.app_language,
+                                "room_screen.popup.action_response.failed",
+                                &[("error", error.as_str())],
+                            ),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -4617,6 +5320,7 @@ impl Widget for RoomScreen {
         } else {
             Scope::with_props(&room_props)
         };
+        self.octos_action_button_contexts.clear();
         while let Some(subview) = self.view.draw_walk(cx, &mut room_scope, walk).step() {
             // Here, we only need to handle drawing the portal list.
             let portal_list_ref = subview.as_portal_list();
@@ -4697,6 +5401,9 @@ impl Widget for RoomScreen {
                                                 &room_bot_user_ids,
                                                 &known_bot_user_ids,
                                                 &mut tl_state.streaming_messages,
+                                                &mut self.octos_action_button_contexts,
+                                                &self.disabled_octos_action_source_event_ids,
+                                                &self.selected_octos_action_by_source_event_id,
                                             )
                                         },
                                         // TODO: properly implement `Poll` as a regular Message-like timeline item.
@@ -6169,6 +6876,59 @@ impl RoomScreen {
         portal_list: &PortalListRef,
         loading_pane: &LoadingPaneRef,
     ) {
+        if let Some(clicked_context) = self.octos_action_button_contexts
+            .iter()
+            .find_map(|(widget_uid, context)| {
+                actions.find_widget_action(*widget_uid)
+                    .and_then(|item| matches!(item.cast(), ButtonAction::Clicked(_)).then(|| context.clone()))
+            })
+        {
+            if !are_action_buttons_disabled(
+                &self.disabled_octos_action_source_event_ids,
+                clicked_context.source_event_id.as_ref(),
+            ) {
+                let Some(tl) = self.tl_state.as_ref() else { return };
+                let request = match &clicked_context.request {
+                    OctosActionButtonRequest::Generic { action_id, label, .. } => build_octos_action_response_request(
+                        &tl.kind,
+                        label,
+                        action_id,
+                        clicked_context.source_event_id.as_ref(),
+                        clicked_context.original_sender.as_ref(),
+                    ),
+                    OctosActionButtonRequest::Approval { request_id, title, decision, tool_args_digest, .. } => build_octos_approval_response_request(
+                        &tl.kind,
+                        title,
+                        request_id,
+                        decision,
+                        tool_args_digest,
+                        clicked_context.source_event_id.as_ref(),
+                        clicked_context.original_sender.as_ref(),
+                    ),
+                };
+                mark_action_buttons_disabled(
+                    &mut self.disabled_octos_action_source_event_ids,
+                    &clicked_context.source_event_id,
+                );
+                mark_selected_octos_action(
+                    &mut self.selected_octos_action_by_source_event_id,
+                    &clicked_context.source_event_id,
+                    clicked_context.request.action_id(),
+                    clicked_context.request.label(),
+                    clicked_context.request.style(),
+                );
+                self.redraw_timeline_list(cx);
+                submit_async_request(MatrixRequest::SendActionResponse {
+                    timeline_kind: request.timeline_kind,
+                    content: request.content,
+                    target_user_id: request.target_user_id,
+                    explicit_room: request.explicit_room,
+                    source_event_id: request.source_event_id,
+                });
+            }
+            return;
+        }
+
         let room_screen_widget_uid = self.widget_uid();
         for action in actions {
             match action.as_widget_action().widget_uid_eq(room_screen_widget_uid).cast_ref() {
@@ -7759,6 +8519,9 @@ fn populate_message_view(
     room_bot_user_ids: &[OwnedUserId],
     known_bot_user_ids: &[OwnedUserId],
     streaming_messages: &mut HashMap<OwnedEventId, super::streaming_animation::StreamingAnimState>,
+    action_button_contexts: &mut HashMap<WidgetUid, OctosActionButtonContext>,
+    disabled_action_source_event_ids: &HashSet<OwnedEventId>,
+    selected_actions: &HashMap<OwnedEventId, SelectedOctosActionState>,
 ) -> (WidgetRef, ItemDrawnStatus) {
     let mut new_drawn_status = item_drawn_status;
     let ts_millis = event_tl_item.timestamp();
@@ -7844,10 +8607,12 @@ fn populate_message_view(
                             new_drawn_status.content_drawn = false; // force re-render
                         } else {
                             // Check for Splash card in custom event field
-                            let splash_code = event_tl_item.original_json()
-                                .and_then(|raw| raw.get_field::<serde_json::Value>("content").ok())
-                                .flatten()
-                                .and_then(|content| content.get("org.octos.splash_card").and_then(|v| v.as_str().map(|s| s.to_string())));
+                            let splash_code = latest_effective_event_content_json(event_tl_item)
+                                .and_then(|content|
+                                    content
+                                        .get("org.octos.splash_card")
+                                        .and_then(|v| v.as_str().map(|s| s.to_string()))
+                                );
 
                             if let Some(ref splash) = splash_code {
                                 // SPLASH CARD MODE: render native Makepad card
@@ -8391,6 +9156,21 @@ fn populate_message_view(
         }
     }
 
+    let action_button_content = latest_effective_event_content_json(event_tl_item);
+    let original_action_button_content = original_event_content_json(event_tl_item);
+    let source_event_id = event_tl_item.event_id().map(|event_id| event_id.to_owned());
+    populate_octos_action_buttons(
+        cx,
+        &item,
+        action_button_content.as_ref(),
+        original_action_button_content.as_ref(),
+        source_event_id.as_ref(),
+        event_tl_item.sender(),
+        action_button_contexts,
+        disabled_action_source_event_ids,
+        selected_actions,
+    );
+
     // If we've previously drawn the item content, skip all other steps.
     if used_cached_item && item_drawn_status.content_drawn && item_drawn_status.profile_drawn {
         return (item, new_drawn_status);
@@ -8620,6 +9400,109 @@ fn populate_bot_text_message_content(
         }
     } else {
         true
+    }
+}
+
+fn populate_octos_action_buttons(
+    cx: &mut Cx,
+    item: &WidgetRef,
+    content: Option<&serde_json::Value>,
+    original_content: Option<&serde_json::Value>,
+    source_event_id: Option<&OwnedEventId>,
+    original_sender: &UserId,
+    action_button_contexts: &mut HashMap<WidgetUid, OctosActionButtonContext>,
+    disabled_source_event_ids: &HashSet<OwnedEventId>,
+    selected_actions: &HashMap<OwnedEventId, SelectedOctosActionState>,
+) {
+    let container = item.view(cx, ids!(content.action_buttons));
+    let approval_request_view = item.view(cx, ids!(content.action_buttons.approval_request_view));
+    let button_row = item.view(cx, ids!(content.action_buttons.action_button_row));
+    let Some(source_event_id) = source_event_id else {
+        container.set_visible(cx, false);
+        return;
+    };
+
+    let parsed_payload = parse_octos_action_payload_for_render(content, original_content);
+
+    if parsed_payload.malformed_approval_request {
+        warning!("org.octos.approval_request: skipping malformed approval request");
+    }
+
+    let render_state = compute_action_button_render_state(
+        &parsed_payload.actions,
+        parsed_payload.approval_request.as_ref(),
+        current_user_id().as_deref(),
+    );
+    let is_disabled = are_action_buttons_disabled(disabled_source_event_ids, source_event_id.as_ref())
+        || !render_state.buttons_enabled;
+    let selected_action = selected_actions.get(source_event_id);
+    let visible_slots = action_button_render_slots_for_display(&render_state, selected_action);
+
+    container.set_visible(cx, render_state.show_container);
+    button_row.set_visible(cx, render_state.show_button_row && !visible_slots.is_empty());
+    approval_request_view.set_visible(cx, render_state.approval_card.is_some());
+    if let Some(approval_card) = render_state.approval_card.as_ref() {
+        item.label(cx, ids!(content.action_buttons.approval_request_view.approval_title_label))
+            .set_text(cx, &approval_card.title);
+        item.label(cx, ids!(content.action_buttons.approval_request_view.approval_summary_label))
+            .set_text(cx, &approval_card.summary);
+    }
+
+    for index in 0..MAX_OCTOS_ACTION_BUTTONS {
+        let (slot_path, primary_path, secondary_path, danger_path) = octos_action_button_paths(index);
+        item.view(cx, slot_path).set_visible(cx, false);
+
+        let primary_button = item.button(cx, primary_path);
+        action_button_contexts.remove(&primary_button.widget_uid());
+        primary_button.set_visible(cx, false);
+        primary_button.set_enabled(cx, !is_disabled);
+
+        let secondary_button = item.button(cx, secondary_path);
+        action_button_contexts.remove(&secondary_button.widget_uid());
+        secondary_button.set_visible(cx, false);
+        secondary_button.set_enabled(cx, !is_disabled);
+
+        let danger_button = item.button(cx, danger_path);
+        action_button_contexts.remove(&danger_button.widget_uid());
+        danger_button.set_visible(cx, false);
+        danger_button.set_enabled(cx, !is_disabled);
+
+        let Some(render_slot) = visible_slots.get(index) else { continue };
+        item.view(cx, slot_path).set_visible(cx, true);
+
+        let active_button = match render_slot.style {
+            OctosActionStyle::Primary => primary_button,
+            OctosActionStyle::Secondary => secondary_button,
+            OctosActionStyle::Danger => danger_button,
+        };
+        active_button.set_visible(cx, true);
+        active_button.set_enabled(cx, !is_disabled);
+        active_button.set_text(cx, &render_slot.label);
+
+        if !is_disabled {
+            let request = if let Some(approval_request) = parsed_payload.approval_request.as_ref() {
+                OctosActionButtonRequest::Approval {
+                    request_id: approval_request.request_id.clone(),
+                    title: approval_request.title.clone(),
+                    decision: render_slot.id.clone(),
+                    label: render_slot.label.clone(),
+                    tool_args_digest: approval_request.tool_args_digest.clone(),
+                    style: render_slot.style,
+                }
+            } else {
+                OctosActionButtonRequest::Generic {
+                    action_id: render_slot.id.clone(),
+                    label: render_slot.label.clone(),
+                    style: render_slot.style,
+                }
+            };
+
+            action_button_contexts.insert(active_button.widget_uid(), OctosActionButtonContext {
+                source_event_id: source_event_id.clone(),
+                original_sender: original_sender.to_owned(),
+                request,
+            });
+        }
     }
 }
 
@@ -9601,6 +10484,19 @@ pub enum ReportRoomResultAction {
     },
 }
 
+#[derive(Debug)]
+pub enum ActionResponseResultAction {
+    Sent {
+        room_id: OwnedRoomId,
+        source_event_id: OwnedEventId,
+    },
+    Failed {
+        room_id: OwnedRoomId,
+        source_event_id: OwnedEventId,
+        error: String,
+    },
+}
+
 #[derive(Clone, Default, Debug)]
 pub enum MessageAction {
     /// The user clicked the "react" button on a message
@@ -10329,6 +11225,457 @@ mod tests {
             layers.footer.as_deref(),
             Some("_moonshot@api/kimi-k2.5 · 5.3K in · 330 out · 6s_"),
         );
+    }
+
+    #[test]
+    fn test_parse_octos_actions_skips_malformed_entries() {
+        let actions = parse_octos_actions_from_content(&serde_json::json!({
+            "org.octos.actions": [
+                { "id": "retry_pptx", "label": "Regenerate PPT", "style": "primary" },
+                { "label": "Missing id" },
+                { "id": "cancel", "label": "Cancel", "style": "secondary" }
+            ]
+        }));
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].id, "retry_pptx");
+        assert_eq!(actions[1].id, "cancel");
+    }
+
+    #[test]
+    fn test_parse_octos_actions_truncates_after_six() {
+        let actions = parse_octos_actions_from_content(&serde_json::json!({
+            "org.octos.actions": [
+                { "id": "a1", "label": "A1" },
+                { "id": "a2", "label": "A2" },
+                { "id": "a3", "label": "A3" },
+                { "id": "a4", "label": "A4" },
+                { "id": "a5", "label": "A5" },
+                { "id": "a6", "label": "A6" },
+                { "id": "a7", "label": "A7" }
+            ]
+        }));
+
+        assert_eq!(actions.len(), 6);
+        assert_eq!(actions.last().map(|action| action.id.as_str()), Some("a6"));
+    }
+
+    #[test]
+    fn test_parse_octos_actions_reads_m_new_content_wrapper() {
+        let actions = parse_octos_actions_from_content(&serde_json::json!({
+            "m.new_content": {
+                "org.octos.actions": [
+                    { "id": "confirm", "label": "确认", "style": "primary" },
+                    { "id": "cancel", "label": "取消", "style": "secondary" }
+                ]
+            },
+            "org.octos.actions": [
+                { "id": "stale", "label": "旧按钮" }
+            ]
+        }));
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].id, "confirm");
+        assert_eq!(actions[1].id, "cancel");
+    }
+
+    #[test]
+    fn test_parse_octos_approval_request_from_content() {
+        let approval = parse_octos_approval_request_from_content(&serde_json::json!({
+            "org.octos.approval_request": {
+                "request_id": "req_abc123",
+                "tool_name": "shell",
+                "tool_args_digest": "sha256:4bf5",
+                "title": "Execute shell command",
+                "summary": "rm -rf ~/tmp/cache",
+                "risk_level": "critical",
+                "authorized_approvers": ["@alice:example.org"],
+                "expires_at": "2026-04-14T14:30:00Z",
+                "on_timeout": "notify"
+            }
+        })).expect("approval request should parse");
+
+        assert_eq!(approval.request_id, "req_abc123");
+        assert_eq!(approval.tool_name, "shell");
+        assert_eq!(approval.tool_args_digest, "sha256:4bf5");
+        assert_eq!(approval.title, "Execute shell command");
+        assert_eq!(approval.summary, "rm -rf ~/tmp/cache");
+        assert_eq!(approval.risk_level, OctosApprovalRiskLevel::Critical);
+        assert_eq!(approval.authorized_approvers, vec!["@alice:example.org"]);
+        assert_eq!(approval.on_timeout, OctosApprovalTimeoutBehavior::Notify);
+    }
+
+    #[test]
+    fn test_parse_octos_approval_request_ignores_m_new_content_wrapper() {
+        let approval = parse_octos_approval_request_from_content(&serde_json::json!({
+            "org.octos.approval_request": {
+                "request_id": "req_original",
+                "tool_name": "shell",
+                "tool_args_digest": "sha256:4bf5",
+                "title": "Original request",
+                "summary": "rm -rf ~/tmp/cache",
+                "risk_level": "critical",
+                "authorized_approvers": ["@alice:example.org"],
+                "expires_at": "2026-04-14T14:30:00Z",
+                "on_timeout": "notify"
+            },
+            "m.new_content": {
+                "org.octos.approval_request": {
+                    "request_id": "req_edited",
+                    "tool_name": "shell",
+                    "tool_args_digest": "sha256:mallory",
+                    "title": "Edited request",
+                    "summary": "whoami",
+                    "risk_level": "normal",
+                    "authorized_approvers": ["@mallory:example.org"],
+                    "expires_at": "2026-04-14T14:30:00Z",
+                    "on_timeout": "notify"
+                }
+            }
+        })).expect("approval request should parse from original content");
+
+        assert_eq!(approval.request_id, "req_original");
+        assert_eq!(approval.authorized_approvers, vec!["@alice:example.org"]);
+        assert_eq!(approval.risk_level, OctosApprovalRiskLevel::Critical);
+    }
+
+    #[test]
+    fn test_parse_octos_approval_request_rejects_empty_authorized_approvers() {
+        assert!(parse_octos_approval_request_from_content(&serde_json::json!({
+            "org.octos.approval_request": {
+                "request_id": "req_abc123",
+                "tool_name": "shell",
+                "tool_args_digest": "sha256:4bf5",
+                "title": "Execute shell command",
+                "summary": "rm -rf ~/tmp/cache",
+                "risk_level": "critical",
+                "authorized_approvers": [],
+                "expires_at": "2026-04-14T14:30:00Z",
+                "on_timeout": "notify"
+            }
+        })).is_none());
+    }
+
+    #[test]
+    fn test_build_approval_response_request_targets_original_sender() {
+        let timeline_kind = TimelineKind::MainRoom {
+            room_id: "!room:127.0.0.1:8128".try_into().unwrap(),
+        };
+        let source_event_id: OwnedEventId = "$orig123".try_into().unwrap();
+        let original_sender: OwnedUserId = "@octosbot:127.0.0.1:8128".try_into().unwrap();
+
+        let request = build_octos_approval_response_request(
+            &timeline_kind,
+            "Execute shell command",
+            "req_abc123",
+            "approve",
+            "sha256:4bf5",
+            source_event_id.as_ref(),
+            original_sender.as_ref(),
+        );
+
+        assert_eq!(request.timeline_kind, timeline_kind);
+        assert_eq!(request.target_user_id, original_sender);
+        assert!(!request.explicit_room);
+        assert_eq!(request.content["org.octos.approval_response"]["request_id"], "req_abc123");
+        assert_eq!(request.content["org.octos.approval_response"]["decision"], "approve");
+        assert_eq!(request.content["org.octos.approval_response"]["tool_args_digest"], "sha256:4bf5");
+    }
+
+    #[test]
+    fn test_action_buttons_render_state_hidden_without_actions() {
+        let state = compute_action_button_render_state(&[], None, None);
+
+        assert!(!state.show_container);
+        assert!(state.visible_slots.is_empty());
+    }
+
+    #[test]
+    fn test_action_buttons_render_state_with_primary_secondary_danger() {
+        let state = compute_action_button_render_state(&[
+            OctosActionButton {
+                id: "retry".into(),
+                label: "Regenerate PPT".into(),
+                style: OctosActionStyle::Primary,
+            },
+            OctosActionButton {
+                id: "cancel".into(),
+                label: "Cancel".into(),
+                style: OctosActionStyle::Secondary,
+            },
+            OctosActionButton {
+                id: "delete".into(),
+                label: "Delete".into(),
+                style: OctosActionStyle::Danger,
+            },
+        ], None, None);
+
+        assert!(state.show_container);
+        assert!(state.show_button_row);
+        assert!(state.buttons_enabled);
+        assert!(state.approval_card.is_none());
+        assert_eq!(state.visible_slots.len(), 3);
+        assert_eq!(state.visible_slots[0].style, OctosActionStyle::Primary);
+        assert_eq!(state.visible_slots[1].style, OctosActionStyle::Secondary);
+        assert_eq!(state.visible_slots[2].style, OctosActionStyle::Danger);
+    }
+
+    #[test]
+    fn test_approval_buttons_disabled_for_unauthorized_user() {
+        let approval_request = OctosApprovalRequest {
+            request_id: "req_abc123".into(),
+            tool_name: "shell".into(),
+            tool_args_digest: "sha256:4bf5".into(),
+            title: "Execute shell command".into(),
+            summary: "rm -rf ~/tmp/cache".into(),
+            risk_level: OctosApprovalRiskLevel::Critical,
+            authorized_approvers: vec!["@alice:example.org".into()],
+            expires_at: "2026-04-14T14:30:00Z".into(),
+            on_timeout: OctosApprovalTimeoutBehavior::Notify,
+        };
+        let current_user_id = UserId::parse("@mallory:example.org").unwrap();
+        let state = compute_action_button_render_state(&[
+            OctosActionButton {
+                id: "approve".into(),
+                label: "Approve".into(),
+                style: OctosActionStyle::Primary,
+            },
+            OctosActionButton {
+                id: "deny".into(),
+                label: "Deny".into(),
+                style: OctosActionStyle::Danger,
+            },
+        ], Some(&approval_request), Some(current_user_id.as_ref()));
+
+        assert!(state.show_container);
+        assert!(state.show_button_row);
+        assert!(!state.buttons_enabled);
+        assert_eq!(
+            state.approval_card.as_ref().map(|card| card.title.as_str()),
+            Some("Execute shell command"),
+        );
+        assert_eq!(
+            state.approval_card.as_ref().map(|card| card.summary.as_str()),
+            Some("rm -rf ~/tmp/cache"),
+        );
+    }
+
+    #[test]
+    fn test_selected_action_reduces_visible_slots_to_clicked_button() {
+        let render_state = compute_action_button_render_state(&[
+            OctosActionButton {
+                id: "approve".into(),
+                label: "Approve".into(),
+                style: OctosActionStyle::Primary,
+            },
+            OctosActionButton {
+                id: "deny".into(),
+                label: "Deny".into(),
+                style: OctosActionStyle::Danger,
+            },
+        ], None, None);
+
+        let visible_slots = action_button_render_slots_for_display(&render_state, Some(&SelectedOctosActionState {
+            id: "deny".into(),
+            label: "Deny".into(),
+            style: OctosActionStyle::Danger,
+        }));
+
+        assert_eq!(visible_slots.len(), 1);
+        assert_eq!(visible_slots[0].id, "deny");
+        assert_eq!(visible_slots[0].label, "✓ Deny");
+        assert_eq!(visible_slots[0].style, OctosActionStyle::Danger);
+    }
+
+    #[test]
+    fn test_generic_actions_without_approval_request_remain_supported() {
+        let payload = parse_octos_action_payload_for_render(
+            Some(&serde_json::json!({
+                "org.octos.actions": [
+                    { "id": "retry_pptx", "label": "Regenerate PPT", "style": "primary" }
+                ]
+            })),
+            None,
+        );
+
+        assert!(payload.approval_request.is_none());
+        assert!(!payload.malformed_approval_request);
+        assert_eq!(payload.actions.len(), 1);
+        assert_eq!(payload.actions[0].id, "retry_pptx");
+    }
+
+    #[test]
+    fn test_malformed_approval_request_hides_buttons() {
+        let payload = parse_octos_action_payload_for_render(
+            Some(&serde_json::json!({
+                "org.octos.actions": [
+                    { "id": "approve", "label": "Approve", "style": "primary" },
+                    { "id": "deny", "label": "Deny", "style": "danger" }
+                ]
+            })),
+            Some(&serde_json::json!({
+                "org.octos.approval_request": {
+                    "request_id": "req_abc123"
+                },
+                "org.octos.actions": [
+                    { "id": "approve", "label": "Approve", "style": "primary" },
+                    { "id": "deny", "label": "Deny", "style": "danger" }
+                ]
+            })),
+        );
+        let state = compute_action_button_render_state(
+            &payload.actions,
+            payload.approval_request.as_ref(),
+            None,
+        );
+
+        assert!(payload.malformed_approval_request);
+        assert!(!state.show_container);
+        assert!(state.visible_slots.is_empty());
+    }
+
+    #[test]
+    fn test_approval_request_ignores_m_replace_edits() {
+        let payload = parse_octos_action_payload_for_render(
+            Some(&serde_json::json!({
+                "m.new_content": {
+                    "org.octos.approval_request": {
+                        "request_id": "req_replaced",
+                        "tool_name": "shell",
+                        "tool_args_digest": "sha256:replaced",
+                        "title": "Replaced request",
+                        "summary": "echo hacked",
+                        "risk_level": "normal",
+                        "authorized_approvers": ["@mallory:example.org"],
+                        "expires_at": "2026-04-14T14:35:00Z",
+                        "on_timeout": "notify"
+                    },
+                    "org.octos.actions": [
+                        { "id": "approve", "label": "Approve", "style": "primary" },
+                        { "id": "deny", "label": "Deny", "style": "danger" }
+                    ]
+                }
+            })),
+            Some(&serde_json::json!({
+                "org.octos.approval_request": {
+                    "request_id": "req_original",
+                    "tool_name": "shell",
+                    "tool_args_digest": "sha256:original",
+                    "title": "Original request",
+                    "summary": "rm -rf ~/tmp/cache",
+                    "risk_level": "critical",
+                    "authorized_approvers": ["@alice:example.org"],
+                    "expires_at": "2026-04-14T14:30:00Z",
+                    "on_timeout": "notify"
+                },
+                "org.octos.actions": [
+                    { "id": "approve", "label": "Approve", "style": "primary" },
+                    { "id": "deny", "label": "Deny", "style": "danger" }
+                ]
+            })),
+        );
+        let current_user_id = UserId::parse("@alice:example.org").unwrap();
+        let state = compute_action_button_render_state(
+            &payload.actions,
+            payload.approval_request.as_ref(),
+            Some(current_user_id.as_ref()),
+        );
+
+        assert_eq!(
+            payload.approval_request.as_ref().map(|approval| approval.request_id.as_str()),
+            Some("req_original"),
+        );
+        assert!(state.buttons_enabled);
+        assert_eq!(
+            state.approval_card.as_ref().map(|card| card.title.as_str()),
+            Some("Original request"),
+        );
+    }
+
+    #[test]
+    fn test_build_action_response_request_targets_original_sender() {
+        let timeline_kind = TimelineKind::MainRoom {
+            room_id: "!room:127.0.0.1:8128".try_into().unwrap(),
+        };
+        let source_event_id: OwnedEventId = "$orig123".try_into().unwrap();
+        let original_sender: OwnedUserId = "@octosbot_weather:127.0.0.1:8128".try_into().unwrap();
+
+        let request = build_octos_action_response_request(
+            &timeline_kind,
+            "Regenerate PPT",
+            "retry_pptx",
+            source_event_id.as_ref(),
+            original_sender.as_ref(),
+        );
+
+        assert_eq!(request.timeline_kind, timeline_kind);
+        assert_eq!(request.target_user_id, original_sender);
+        assert!(!request.explicit_room);
+    }
+
+    #[test]
+    fn test_build_action_response_request_preserves_reply_relation() {
+        let timeline_kind = TimelineKind::MainRoom {
+            room_id: "!room:127.0.0.1:8128".try_into().unwrap(),
+        };
+        let source_event_id: OwnedEventId = "$orig123".try_into().unwrap();
+        let original_sender: OwnedUserId = "@octosbot_weather:127.0.0.1:8128".try_into().unwrap();
+
+        let request = build_octos_action_response_request(
+            &timeline_kind,
+            "Regenerate PPT",
+            "retry_pptx",
+            source_event_id.as_ref(),
+            original_sender.as_ref(),
+        );
+
+        let action_response = &request.content["org.octos.action_response"];
+        assert_eq!(request.content["body"], "[Action: Regenerate PPT]");
+        assert_eq!(action_response["action_id"], "retry_pptx");
+        assert_eq!(action_response["source_event_id"], "$orig123");
+        assert_eq!(request.content["m.relates_to"]["m.in_reply_to"]["event_id"], "$orig123");
+    }
+
+    #[test]
+    fn test_disable_action_buttons_marks_source_event_disabled() {
+        let source_event_id: OwnedEventId = "$orig123".try_into().unwrap();
+        let mut disabled = HashSet::new();
+
+        mark_action_buttons_disabled(&mut disabled, &source_event_id);
+
+        assert!(are_action_buttons_disabled(&disabled, source_event_id.as_ref()));
+    }
+
+    #[test]
+    fn test_reenable_action_buttons_clears_disabled_state() {
+        let source_event_id: OwnedEventId = "$orig123".try_into().unwrap();
+        let mut disabled = HashSet::new();
+        mark_action_buttons_disabled(&mut disabled, &source_event_id);
+
+        clear_action_buttons_disabled(&mut disabled, source_event_id.as_ref());
+
+        assert!(!are_action_buttons_disabled(&disabled, source_event_id.as_ref()));
+    }
+
+    #[test]
+    fn test_selected_action_state_marks_and_clears_by_source_event_id() {
+        let source_event_id: OwnedEventId = "$orig123".try_into().unwrap();
+        let mut selected_actions = HashMap::new();
+
+        mark_selected_octos_action(
+            &mut selected_actions,
+            &source_event_id,
+            "approve",
+            "Approve",
+            OctosActionStyle::Primary,
+        );
+        assert_eq!(
+            selected_actions.get(&source_event_id).map(|state| state.label.as_str()),
+            Some("Approve"),
+        );
+
+        clear_selected_octos_action(&mut selected_actions, source_event_id.as_ref());
+        assert!(!selected_actions.contains_key(&source_event_id));
     }
 
     #[test]
