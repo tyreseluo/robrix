@@ -25,7 +25,6 @@ use crate::{app::AppState, home::{editing_pane::{EditingPaneState, EditingPaneWi
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::shared::file_upload_modal::{FilePreviewerMetaData, ThumbnailData};
 
-const ROOM_INFO_CARD_MOBILE_BREAKPOINT: f32 = 700.0;
 #[cfg(test)]
 const TRANSLATION_LANG_POPUP_WIDTH: f64 = 220.0;
 #[cfg(test)]
@@ -36,6 +35,12 @@ const TRANSLATION_LANG_POPUP_HEIGHT: f64 = TRANSLATION_LANG_POPUP_SCROLL_HEIGHT 
 const TRANSLATION_LANG_POPUP_GAP: f64 = 6.0;
 #[cfg(test)]
 const TRANSLATION_LANG_POPUP_MARGIN: f64 = 8.0;
+const DESKTOP_EMOJI_POPUP_WIDTH: f64 = 420.0;
+const DESKTOP_EMOJI_POPUP_HEIGHT_ESTIMATE: f64 = 170.0;
+const DESKTOP_MORE_POPUP_WIDTH: f64 = 190.0;
+const DESKTOP_MORE_POPUP_HEIGHT_ESTIMATE: f64 = 170.0;
+const DESKTOP_POPUP_GAP: f64 = 6.0;
+const DESKTOP_POPUP_MARGIN: f64 = 8.0;
 
 #[cfg(test)]
 fn compute_translation_popup_abs_pos(
@@ -60,6 +65,34 @@ fn compute_translation_popup_abs_pos(
             .max(TRANSLATION_LANG_POPUP_MARGIN)
             .min(max_y);
         popup_y_screen - container_rect_screen.pos.y
+    };
+
+    dvec2(popup_x, popup_y)
+}
+
+fn compute_desktop_popup_abs_pos(
+    button_rect: Rect,
+    container_rect: Rect,
+    popup_width: f64,
+    popup_height: f64,
+) -> DVec2 {
+    let min_x = container_rect.pos.x + DESKTOP_POPUP_MARGIN;
+    let max_x = (container_rect.pos.x + container_rect.size.x - popup_width - DESKTOP_POPUP_MARGIN)
+        .max(min_x);
+    let popup_x = (button_rect.pos.x + button_rect.size.x - popup_width)
+        .max(min_x)
+        .min(max_x);
+
+    let min_y = container_rect.pos.y + DESKTOP_POPUP_MARGIN;
+    let max_y = (container_rect.pos.y + container_rect.size.y - popup_height - DESKTOP_POPUP_MARGIN)
+        .max(min_y);
+    let popup_y_above = button_rect.pos.y - popup_height - DESKTOP_POPUP_GAP;
+    let popup_y = if popup_y_above >= min_y {
+        popup_y_above
+    } else {
+        (button_rect.pos.y + button_rect.size.y + DESKTOP_POPUP_GAP)
+            .max(min_y)
+            .min(max_y)
     };
 
     dvec2(popup_x, popup_y)
@@ -511,9 +544,7 @@ script_mod! {
 
 
     mod.widgets.ICO_LOCATION_PERSON = crate_resource("self://resources/icons/location-person.svg")
-    mod.widgets.ICO_MENU = crate_resource("self://resources/icons/menu.svg")
     mod.widgets.ICO_THREADS = crate_resource("self://resources/icons/double_chat.svg")
-    mod.widgets.ICO_TRANSLATE = crate_resource("self://resources/icons/translate.svg")
 
     mod.widgets.TranslationLangItem = View {
         width: Fill, height: 36
@@ -591,6 +622,78 @@ script_mod! {
             border_size: 1.0
             border_color: (COLOR_SECONDARY)
         }
+    }
+
+    mod.widgets.RoomToolbarButton = mod.widgets.RobrixIconButton {
+        spacing: 0
+        text: ""
+        margin: Inset{left: 0, right: 0, top: 0, bottom: 0}
+        padding: Inset{left: 10, right: 10, top: 6, bottom: 6}
+        draw_bg +: {
+            color: #0000
+            color_hover: #xE9ECF3
+            color_down: #xDDE3EE
+            border_radius: 8.0
+        }
+        draw_icon +: {
+            color: #x60636B
+        }
+        icon_walk: Walk{width: 20, height: 20}
+    }
+
+    mod.widgets.RoomToolbarTextButton = mod.widgets.RoomToolbarButton {
+        icon_walk: Walk{width: 0, height: 0}
+        draw_text +: {
+            color: #x60636B
+            color_hover: #x60636B
+            color_down: #x60636B
+            text_style: MESSAGE_TEXT_STYLE { font_size: 15.0 }
+        }
+    }
+
+    mod.widgets.MoreActionTileIconButton = mod.widgets.RobrixIconButton {
+        width: 72, height: 72
+        spacing: 0
+        text: ""
+        margin: 0
+        padding: 0
+        align: Align{x: 0.5, y: 0.5}
+        draw_bg +: {
+            color: #xF2F4F8
+            color_hover: #xE7EBF3
+            color_down: #xDCE2EE
+            border_radius: 12.0
+            border_size: 1.0
+            border_color: #xE7EBF1
+        }
+        draw_icon +: {
+            color: (COLOR_ACTIVE_PRIMARY)
+        }
+        icon_walk: Walk{width: 26, height: 26}
+    }
+
+    mod.widgets.DesktopMoreActionButton = mod.widgets.RobrixIconButton {
+        width: Fill, height: 36
+        spacing: 10
+        margin: Inset{left: 4, right: 4}
+        padding: Inset{left: 10, right: 10, top: 6, bottom: 6}
+        draw_bg +: {
+            color: #0000
+            color_hover: #xEEF2F8
+            color_down: #xE4EAF4
+            border_radius: 6.0
+        }
+        draw_icon +: {
+            color: #x60636B
+        }
+        draw_text +: {
+            color: #x2F333A
+            color_hover: #x2F333A
+            color_down: #x2F333A
+            text_style: MESSAGE_TEXT_STYLE { font_size: 10.8 }
+        }
+        icon_walk: Walk{width: 15, height: 15}
+        text: "Action"
     }
 
     mod.widgets.TargetChipButton = Button {
@@ -762,203 +865,139 @@ script_mod! {
                 padding: 6,
                 spacing: 4
 
-                more_actions_popup := View {
+                desktop_popup_area := View {
                     visible: false
                     width: Fill
-                    height: Fit
-                    flow: Right{wrap: true}
-                    spacing: 6
-                    align: Align{x: 0.0, y: 0.5}
+                    height: 0
+                    flow: Overlay
+                    clip_x: false
+                    clip_y: false
+                    align: Align{x: 0.0, y: 0.0}
 
-                    room_info_card_button := RobrixIconButton {
-                        width: Fit
-                        align: Align{x: 0.0, y: 0.5}
-                        margin: Inset{top: 1, bottom: 1}
-                        padding: Inset{left: 10, right: 10, top: 8, bottom: 8}
+                    desktop_emoji_picker_popup := RoundedView {
+                        visible: false
+                        width: 420
+                        height: Fit
+                        flow: Down
+                        padding: Inset{left: 12, right: 12, top: 10, bottom: 10}
                         spacing: 8
-                        draw_icon +: {
-                            svg: (ICON_INFO)
-                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
-                        },
+                        show_bg: true
                         draw_bg +: {
-                            color: (COLOR_BG_PREVIEW)
-                            color_hover: #E0E8F0
-                            color_down: #D0D8E8
+                            color: #xF6F8FC
+                            border_radius: 8.0
                             border_size: 1.0
-                            border_color: (COLOR_SECONDARY)
+                            border_color: #xE1E6EF
+                            shadow_color: #0002
+                            shadow_radius: 6.0
+                            shadow_offset: vec2(0.0, 2.0)
                         }
-                        draw_text +: {
-                            color: (COLOR_TEXT)
-                            color_hover: (COLOR_TEXT)
-                            color_down: (COLOR_TEXT)
-                            text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+
+                        Label {
+                            text: "Frequently used"
+                            draw_text +: {
+                                color: #x686F79
+                                text_style: MESSAGE_TEXT_STYLE { font_size: 10.0 }
+                            }
                         }
-                        icon_walk: Walk{width: 20, height: 20}
-                        text: "info",
+
+                        desktop_emoji_frequent_row := View {
+                            width: Fill
+                            height: Fit
+                            flow: Right{wrap: true}
+                            spacing: 6
+                            desktop_emoji_smile_button := mod.widgets.RoomEmojiButton { text: "😀" }
+                            desktop_emoji_joy_button := mod.widgets.RoomEmojiButton { text: "😂" }
+                            desktop_emoji_thumbsup_button := mod.widgets.RoomEmojiButton { text: "👍" }
+                            desktop_emoji_heart_button := mod.widgets.RoomEmojiButton { text: "❤️" }
+                            desktop_emoji_fire_button := mod.widgets.RoomEmojiButton { text: "🔥" }
+                            desktop_emoji_party_button := mod.widgets.RoomEmojiButton { text: "🎉" }
+                            desktop_emoji_think_button := mod.widgets.RoomEmojiButton { text: "🤔" }
+                            desktop_emoji_clap_button := mod.widgets.RoomEmojiButton { text: "👏" }
+                        }
+
+                        Label {
+                            text: "Default emojis"
+                            draw_text +: {
+                                color: #x686F79
+                                text_style: MESSAGE_TEXT_STYLE { font_size: 10.0 }
+                            }
+                        }
+
+                        desktop_emoji_default_row := View {
+                            width: Fill
+                            height: Fit
+                            flow: Right{wrap: true}
+                            spacing: 6
+                            desktop_emoji_grin_button := mod.widgets.RoomEmojiButton { text: "😁" }
+                            desktop_emoji_sob_button := mod.widgets.RoomEmojiButton { text: "😭" }
+                            desktop_emoji_eyes_button := mod.widgets.RoomEmojiButton { text: "👀" }
+                            desktop_emoji_pray_button := mod.widgets.RoomEmojiButton { text: "🙏" }
+                            desktop_emoji_ok_button := mod.widgets.RoomEmojiButton { text: "👌" }
+                            desktop_emoji_rocket_button := mod.widgets.RoomEmojiButton { text: "🚀" }
+                            desktop_emoji_coffee_button := mod.widgets.RoomEmojiButton { text: "☕" }
+                            desktop_emoji_wave_button := mod.widgets.RoomEmojiButton { text: "👋" }
+                        }
                     }
 
-                    location_card_button := RobrixIconButton {
-                        width: Fit
-                        align: Align{x: 0.0, y: 0.5}
-                        margin: Inset{top: 1, bottom: 1}
-                        padding: Inset{left: 10, right: 10, top: 8, bottom: 8}
-                        spacing: 8
-                        draw_icon +: {
-                            svg: (mod.widgets.ICO_LOCATION_PERSON)
-                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
-                        },
+                    desktop_more_actions_popup := RoundedView {
+                        visible: false
+                        width: 190
+                        height: Fit
+                        flow: Down
+                        padding: Inset{left: 6, right: 6, top: 8, bottom: 8}
+                        spacing: 2
+                        show_bg: true
                         draw_bg +: {
-                            color: (COLOR_BG_PREVIEW)
-                            color_hover: #E0E8F0
-                            color_down: #D0D8E8
+                            color: #xF6F8FC
+                            border_radius: 8.0
                             border_size: 1.0
-                            border_color: (COLOR_SECONDARY)
+                            border_color: #xE1E6EF
+                            shadow_color: #0002
+                            shadow_radius: 6.0
+                            shadow_offset: vec2(0.0, 2.0)
                         }
-                        draw_text +: {
-                            color: (COLOR_TEXT)
-                            color_hover: (COLOR_TEXT)
-                            color_down: (COLOR_TEXT)
-                            text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+
+                        desktop_more_file_button := mod.widgets.DesktopMoreActionButton {
+                            draw_icon +: { svg: (ICON_FILE) }
+                            text: "Local File"
                         }
-                        icon_walk: Walk{width: 20, height: 20}
-                        text: "location",
+
+                        desktop_room_info_card_button := mod.widgets.DesktopMoreActionButton {
+                            draw_icon +: { svg: (ICON_INFO) }
+                            text: "Room Info"
+                        }
+
+                        desktop_location_card_button := mod.widgets.DesktopMoreActionButton {
+                            draw_icon +: { svg: (mod.widgets.ICO_LOCATION_PERSON) }
+                            text: "Location"
+                        }
+
+                        desktop_threads_card_button := mod.widgets.DesktopMoreActionButton {
+                            draw_icon +: { svg: (mod.widgets.ICO_THREADS) }
+                            text: "Threads"
+                        }
                     }
-
-                    threads_card_button := RobrixIconButton {
-                        width: Fit
-                        align: Align{x: 0.0, y: 0.5}
-                        margin: Inset{top: 1, bottom: 1}
-                        padding: Inset{left: 10, right: 10, top: 8, bottom: 8}
-                        spacing: 8
-                        draw_icon +: {
-                            svg: (mod.widgets.ICO_THREADS)
-                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
-                        },
-                        draw_bg +: {
-                            color: (COLOR_BG_PREVIEW)
-                            color_hover: #E0E8F0
-                            color_down: #D0D8E8
-                            border_size: 1.0
-                            border_color: (COLOR_SECONDARY)
-                        }
-                        draw_text +: {
-                            color: (COLOR_TEXT)
-                            color_hover: (COLOR_TEXT)
-                            color_down: (COLOR_TEXT)
-                            text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
-                        }
-                        icon_walk: Walk{width: 20, height: 20}
-                        text: "threads",
-                    }
-                }
-
-                emoji_picker_popup := View {
-                    visible: false
-                    width: Fit
-                    height: Fit
-                    flow: Right{wrap: true}
-                    align: Align{x: 0.0, y: 0.5}
-                    margin: Inset{left: 5, top: 1, bottom: 1}
-                    padding: Inset{left: 0, right: 0, top: 0, bottom: 0}
-                    spacing: 6
-
-                    emoji_smile_button := mod.widgets.RoomEmojiButton { text: "😀" }
-                    emoji_joy_button := mod.widgets.RoomEmojiButton { text: "😂" }
-                    emoji_thumbsup_button := mod.widgets.RoomEmojiButton { text: "👍" }
-                    emoji_heart_button := mod.widgets.RoomEmojiButton { text: "❤️" }
-                    emoji_fire_button := mod.widgets.RoomEmojiButton { text: "🔥" }
-                    emoji_party_button := mod.widgets.RoomEmojiButton { text: "🎉" }
-                    emoji_think_button := mod.widgets.RoomEmojiButton { text: "🤔" }
-                    emoji_clap_button := mod.widgets.RoomEmojiButton { text: "👏" }
                 }
 
                 input_row := View {
                     width: Fill,
                     height: Fit{max: FitBound.Rel{base: Base.Full, factor: 0.75}}
                     flow: Right
-                    // Bottom-align everything to ensure that buttons always stick to the bottom
-                    // even when the mentionable_text_input box is very tall.
-                    align: Align{y: 1.0},
+                    align: Align{y: 0.5},
 
                     // A checkbox that enables TSP signing for the outgoing message.
                     // If TSP is not enabled, this will be an empty invisible view.
                     tsp_sign_checkbox := TspSignAnycastCheckbox {
-                        margin: Inset{bottom: 9, left: 6, right: 0}
-                    }
-
-                    // Attachment button for uploading files/images
-                    send_attachment_button := RobrixIconButton {
-                        margin: Inset{left: 3, right: 1, top: 4, bottom: 4}
-                        spacing: 0,
-                        draw_icon +: {
-                            svg: (ICON_ADD_ATTACHMENT)
-                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
-                        },
-                        draw_bg +: {
-                            color: (COLOR_BG_PREVIEW)
-                            color_hover: #E0E8F0
-                            color_down: #D0D8E8
-                        }
-                        icon_walk: Walk{width: 21, height: 21}
-                        text: "",
-                    }
-
-                    emoji_picker_button := RobrixIconButton {
-                        margin: Inset{left: 3, right: 1, top: 4, bottom: 4}
-                        spacing: 0,
-                        draw_icon +: {
-                            svg: (ICON_ADD_REACTION)
-                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
-                        },
-                        draw_bg +: {
-                            color: (COLOR_BG_PREVIEW)
-                            color_hover: #E0E8F0
-                            color_down: #D0D8E8
-                        }
-                        icon_walk: Walk{width: 19, height: 19}
-                        text: "",
-                    }
-
-                    translate_button := RobrixIconButton {
-                        margin: Inset{left: 1, right: 1, top: 4, bottom: 4}
-                        spacing: 0,
-                        draw_icon +: {
-                            svg: (mod.widgets.ICO_TRANSLATE)
-                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
-                        },
-                        draw_bg +: {
-                            color: (COLOR_BG_PREVIEW)
-                            color_hover: #xE0E8F0
-                            color_down: #xD0D8E8
-                        }
-                        icon_walk: Walk{width: 19, height: 19}
-                        text: "",
-                    }
-
-                    bot_menu_button := RobrixIconButton {
-                        visible: false,
-                        margin: Inset{left: 1, right: 1, top: 4, bottom: 4}
-                        spacing: 0,
-                        draw_icon +: {
-                            svg: (ICON_LINK)
-                            color: (COLOR_ACTIVE_PRIMARY_DARKER)
-                        },
-                        draw_bg +: {
-                            color: (COLOR_BG_PREVIEW)
-                            color_hover: #xE0E8F0
-                            color_down: #xD0D8E8
-                        }
-                        icon_walk: Walk{width: 18, height: 18}
-                        text: "",
+                        margin: Inset{left: 6, right: 3, top: 6, bottom: 6}
                     }
 
                     mentionable_text_input := MentionableTextInput {
                         width: Fill,
                         height: Fit{max: FitBound.Rel{base: Base.Full, factor: 0.75}}
                         margin: Inset {
-                            top: 3, // add some space between the top border of the text input and the top border of this row
-                            bottom: 5.75, // to line up the middle of the text input with the middle of the buttons
-                            left: 3, right: 3 // to give a bit of breathing room between the text input and the buttons on the sides
+                            top: 3,
+                            bottom: 3,
+                            left: 3, right: 3
                         },
 
                         persistent +: {
@@ -968,6 +1007,45 @@ script_mod! {
                                     is_multiline: true,
                                 }
                             }
+                        }
+                    }
+
+                    desktop_action_row := View {
+                        visible: false
+                        width: Fit
+                        height: Fit
+                        flow: Right
+                        align: Align{y: 0.5}
+                        spacing: 2
+                        margin: Inset{left: 2, right: 2, top: 3, bottom: 3}
+
+                        desktop_translate_button := mod.widgets.RoomToolbarTextButton {
+                            text: "Aa"
+                        }
+
+                        desktop_emoji_picker_button := mod.widgets.RoomToolbarButton {
+                            draw_icon +: { svg: (ICON_ADD_REACTION) }
+                        }
+
+                        desktop_at_mention_button := mod.widgets.RoomToolbarTextButton {
+                            text: "@"
+                        }
+
+                        desktop_send_attachment_button := mod.widgets.RoomToolbarButton {
+                            draw_icon +: { svg: (ICON_ADD_ATTACHMENT) }
+                        }
+
+                        desktop_more_actions_button := mod.widgets.RoomToolbarButton {
+                            draw_icon +: { svg: (ICON_ADD) }
+                        }
+
+                        desktop_room_info_button := mod.widgets.RoomToolbarButton {
+                            draw_icon +: { svg: (ICON_EXTERNAL_LINK) }
+                        }
+
+                        desktop_bot_menu_button := mod.widgets.RoomToolbarButton {
+                            visible: false
+                            draw_icon +: { svg: (ICON_LINK) }
                         }
                     }
 
@@ -981,18 +1059,188 @@ script_mod! {
                         draw_icon +: { svg: (ICON_SEND) }
                         icon_walk: Walk{width: 21, height: 21},
                     }
+                }
 
-                    more_actions_button := RobrixIconButton {
-                        spacing: 0,
-                        text: "",
-                        margin: 4
-                        draw_icon +: { svg: (mod.widgets.ICO_MENU) }
-                        draw_bg +: {
-                            color: (COLOR_ACTIVE_PRIMARY)
-                            color_hover: (COLOR_ACTIVE_PRIMARY_DARKER)
-                            color_down: #0C5DAA
+                toolbar_row := View {
+                    width: Fill,
+                    height: Fit
+                    flow: Right
+                    align: Align{y: 0.5}
+                    spacing: 4
+                    margin: Inset{left: 4, right: 4, top: 0, bottom: 2}
+
+                    emoji_picker_button := mod.widgets.RoomToolbarButton {
+                        draw_icon +: { svg: (ICON_ADD_REACTION) }
+                    }
+
+                    at_mention_button := mod.widgets.RoomToolbarTextButton {
+                        text: "@"
+                    }
+
+                    // Attachment button for uploading files/images
+                    send_attachment_button := mod.widgets.RoomToolbarButton {
+                        draw_icon +: { svg: (ICON_FILE) }
+                    }
+
+                    translate_button := mod.widgets.RoomToolbarTextButton {
+                        text: "Aa"
+                    }
+
+                    bot_menu_button := mod.widgets.RoomToolbarButton {
+                        visible: false,
+                        draw_icon +: { svg: (ICON_LINK) }
+                    }
+
+                    spacer := View { width: Fill, height: Fit }
+
+                    more_actions_button := mod.widgets.RoomToolbarButton {
+                        draw_icon +: { svg: (ICON_ADD) }
+                    }
+                }
+
+                emoji_picker_popup := RoundedView {
+                    visible: false
+                    width: Fill
+                    height: Fit
+                    flow: Right{wrap: true}
+                    align: Align{x: 0.0, y: 0.5}
+                    margin: Inset{left: 4, right: 4, top: 1, bottom: 1}
+                    padding: Inset{left: 8, right: 8, top: 8, bottom: 8}
+                    spacing: 6
+                    show_bg: true
+                    draw_bg +: {
+                        color: #xF6F8FC
+                        border_radius: 8.0
+                        border_size: 1.0
+                        border_color: #xE1E6EF
+                    }
+
+                    emoji_smile_button := mod.widgets.RoomEmojiButton { text: "😀" }
+                    emoji_joy_button := mod.widgets.RoomEmojiButton { text: "😂" }
+                    emoji_thumbsup_button := mod.widgets.RoomEmojiButton { text: "👍" }
+                    emoji_heart_button := mod.widgets.RoomEmojiButton { text: "❤️" }
+                    emoji_fire_button := mod.widgets.RoomEmojiButton { text: "🔥" }
+                    emoji_party_button := mod.widgets.RoomEmojiButton { text: "🎉" }
+                    emoji_think_button := mod.widgets.RoomEmojiButton { text: "🤔" }
+                    emoji_clap_button := mod.widgets.RoomEmojiButton { text: "👏" }
+                    emoji_grin_button := mod.widgets.RoomEmojiButton { text: "😁" }
+                    emoji_sob_button := mod.widgets.RoomEmojiButton { text: "😭" }
+                    emoji_eyes_button := mod.widgets.RoomEmojiButton { text: "👀" }
+                    emoji_pray_button := mod.widgets.RoomEmojiButton { text: "🙏" }
+                    emoji_ok_button := mod.widgets.RoomEmojiButton { text: "👌" }
+                    emoji_rocket_button := mod.widgets.RoomEmojiButton { text: "🚀" }
+                    emoji_coffee_button := mod.widgets.RoomEmojiButton { text: "☕" }
+                    emoji_wave_button := mod.widgets.RoomEmojiButton { text: "👋" }
+                }
+
+                more_actions_popup := RoundedView {
+                    visible: false
+                    width: Fill
+                    height: Fit
+                    flow: Down
+                    spacing: 12
+                    margin: Inset{left: 4, right: 4, top: 1, bottom: 1}
+                    padding: Inset{left: 8, right: 8, top: 10, bottom: 8}
+                    show_bg: true
+                    draw_bg +: {
+                        color: #xF6F8FC
+                        border_radius: 8.0
+                        border_size: 1.0
+                        border_color: #xE1E6EF
+                    }
+
+                    top_row := View {
+                        width: Fill
+                        height: Fit
+                        flow: Right
+                        spacing: 8
+
+                        file_action_tile := View {
+                            width: Fill
+                            height: Fit
+                            flow: Down
+                            align: Align{x: 0.5, y: 0.5}
+                            spacing: 6
+                            more_file_card_button := mod.widgets.MoreActionTileIconButton {
+                                draw_icon +: {
+                                    svg: (ICON_FILE)
+                                }
+                            }
+                            Label {
+                                text: "File"
+                                draw_text +: {
+                                    color: #x5A616B
+                                    text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                                }
+                            }
                         }
-                        icon_walk: Walk{width: 19, height: 19},
+
+                        room_info_action_tile := View {
+                            width: Fill
+                            height: Fit
+                            flow: Down
+                            align: Align{x: 0.5, y: 0.5}
+                            spacing: 6
+                            room_info_card_button := mod.widgets.MoreActionTileIconButton {
+                                draw_icon +: {
+                                    svg: (ICON_INFO)
+                                }
+                            }
+                            Label {
+                                text: "Room Info"
+                                draw_text +: {
+                                    color: #x5A616B
+                                    text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                                }
+                            }
+                        }
+                    }
+
+                    bottom_row := View {
+                        width: Fill
+                        height: Fit
+                        flow: Right
+                        spacing: 8
+
+                        location_action_tile := View {
+                            width: Fill
+                            height: Fit
+                            flow: Down
+                            align: Align{x: 0.5, y: 0.5}
+                            spacing: 6
+                            location_card_button := mod.widgets.MoreActionTileIconButton {
+                                draw_icon +: {
+                                    svg: (mod.widgets.ICO_LOCATION_PERSON)
+                                }
+                            }
+                            Label {
+                                text: "Location"
+                                draw_text +: {
+                                    color: #x5A616B
+                                    text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                                }
+                            }
+                        }
+
+                        threads_action_tile := View {
+                            width: Fill
+                            height: Fit
+                            flow: Down
+                            align: Align{x: 0.5, y: 0.5}
+                            spacing: 6
+                            threads_card_button := mod.widgets.MoreActionTileIconButton {
+                                draw_icon +: {
+                                    svg: (mod.widgets.ICO_THREADS)
+                                }
+                            }
+                            Label {
+                                text: "Threads"
+                                draw_text +: {
+                                    color: #x5A616B
+                                    text_style: MESSAGE_TEXT_STYLE { font_size: 10.5 }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1150,7 +1398,12 @@ impl Widget for RoomInputBar {
         }
 
         if show_bot_menu_tooltip {
-            let bot_menu_button_area = self.button(cx, ids!(bot_menu_button)).area();
+            let is_desktop = cx.display_context.is_desktop();
+            let bot_menu_button_area = if is_desktop {
+                self.button(cx, ids!(desktop_bot_menu_button)).area()
+            } else {
+                self.button(cx, ids!(bot_menu_button)).area()
+            };
             match event.hits(cx, bot_menu_button_area) {
                 Hit::FingerHoverIn(_) | Hit::FingerLongPress(_) => {
                     cx.widget_action(
@@ -1314,11 +1567,32 @@ impl Widget for RoomInputBar {
             }
         }
 
-        let width = self.view.area().rect(cx).size.x as f32;
-        let show_room_info_card = !(width > 1.0 && width < ROOM_INFO_CARD_MOBILE_BREAKPOINT);
-        self.button(cx, ids!(room_info_card_button)).set_visible(cx, show_room_info_card);
-        self.button(cx, ids!(bot_menu_button))
-            .set_visible(cx, room_screen_props.is_some_and(is_management_bot_room));
+        let is_desktop = cx.display_context.is_desktop();
+        self.view.view(cx, ids!(desktop_popup_area)).set_visible(cx, is_desktop);
+        self.view.view(cx, ids!(desktop_action_row)).set_visible(cx, is_desktop);
+        self.view.view(cx, ids!(toolbar_row)).set_visible(cx, !is_desktop);
+        self.view
+            .view(cx, ids!(desktop_emoji_picker_popup))
+            .set_visible(cx, is_desktop && self.is_emoji_picker_expanded);
+        self.view
+            .view(cx, ids!(emoji_picker_popup))
+            .set_visible(cx, !is_desktop && self.is_emoji_picker_expanded);
+        self.view
+            .view(cx, ids!(desktop_more_actions_popup))
+            .set_visible(cx, is_desktop && self.is_location_card_expanded);
+        self.view
+            .view(cx, ids!(more_actions_popup))
+            .set_visible(cx, !is_desktop && self.is_location_card_expanded);
+        if is_desktop && self.is_emoji_picker_expanded {
+            self.position_desktop_emoji_popup(cx);
+        }
+        if is_desktop && self.is_location_card_expanded {
+            self.position_desktop_more_popup(cx);
+        }
+
+        let show_bot_menu = room_screen_props.is_some_and(is_management_bot_room);
+        self.button(cx, ids!(bot_menu_button)).set_visible(cx, show_bot_menu && !is_desktop);
+        self.button(cx, ids!(desktop_bot_menu_button)).set_visible(cx, show_bot_menu && is_desktop);
 
         self.view.draw_walk(cx, scope, walk)
     }
@@ -1386,6 +1660,66 @@ impl RoomInputBar {
             .map(|(event_tl_item, _embedded_event)| event_tl_item.sender())
     }
 
+    fn position_desktop_emoji_popup(&mut self, cx: &mut Cx) {
+        let button_area = self.button(cx, ids!(desktop_emoji_picker_button)).area();
+        let container_area = self.view.view(cx, ids!(input_bar)).area();
+        if !button_area.is_valid(cx) || !container_area.is_valid(cx) {
+            return;
+        }
+        let button_rect = button_area.clipped_rect(cx);
+        let container_rect = container_area.clipped_rect(cx);
+        if button_rect.size.x <= 0.0 || container_rect.size.x <= 0.0 {
+            return;
+        }
+        let popup_pos = compute_desktop_popup_abs_pos(
+            button_rect,
+            container_rect,
+            DESKTOP_EMOJI_POPUP_WIDTH,
+            DESKTOP_EMOJI_POPUP_HEIGHT_ESTIMATE,
+        );
+        if let Some(mut popup) = self
+            .view
+            .view(cx, ids!(desktop_emoji_picker_popup))
+            .borrow_mut()
+        {
+            popup.walk.abs_pos = Some(popup_pos);
+            popup.walk.margin.left = 0.0;
+            popup.walk.margin.top = 0.0;
+            popup.walk.margin.right = 0.0;
+            popup.walk.margin.bottom = 0.0;
+        }
+    }
+
+    fn position_desktop_more_popup(&mut self, cx: &mut Cx) {
+        let button_area = self.button(cx, ids!(desktop_more_actions_button)).area();
+        let container_area = self.view.view(cx, ids!(input_bar)).area();
+        if !button_area.is_valid(cx) || !container_area.is_valid(cx) {
+            return;
+        }
+        let button_rect = button_area.clipped_rect(cx);
+        let container_rect = container_area.clipped_rect(cx);
+        if button_rect.size.x <= 0.0 || container_rect.size.x <= 0.0 {
+            return;
+        }
+        let popup_pos = compute_desktop_popup_abs_pos(
+            button_rect,
+            container_rect,
+            DESKTOP_MORE_POPUP_WIDTH,
+            DESKTOP_MORE_POPUP_HEIGHT_ESTIMATE,
+        );
+        if let Some(mut popup) = self
+            .view
+            .view(cx, ids!(desktop_more_actions_popup))
+            .borrow_mut()
+        {
+            popup.walk.abs_pos = Some(popup_pos);
+            popup.walk.margin.left = 0.0;
+            popup.walk.margin.top = 0.0;
+            popup.walk.margin.right = 0.0;
+            popup.walk.margin.bottom = 0.0;
+        }
+    }
+
     fn handle_actions(
         &mut self,
         cx: &mut Cx,
@@ -1394,6 +1728,7 @@ impl RoomInputBar {
     ) {
         let mentionable_text_input = self.mentionable_text_input(cx, ids!(mentionable_text_input));
         let text_input = mentionable_text_input.text_input_ref();
+        let is_desktop = cx.display_context.is_desktop();
 
         // Clear the replying-to preview pane if the "cancel reply" button was clicked
         // or if the `Escape` key was pressed within the message input box.
@@ -1405,26 +1740,63 @@ impl RoomInputBar {
         }
 
         // Handle the more actions button being clicked.
-        if self.button(cx, ids!(more_actions_button)).clicked(actions) {
+        if self.button(cx, ids!(more_actions_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_more_actions_button)).clicked(actions)
+        {
             self.is_location_card_expanded = !self.is_location_card_expanded;
-            self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, self.is_location_card_expanded);
+            self.view
+                .view(cx, ids!(more_actions_popup))
+                .set_visible(cx, self.is_location_card_expanded && !is_desktop);
+            self.view
+                .view(cx, ids!(desktop_more_actions_popup))
+                .set_visible(cx, self.is_location_card_expanded && is_desktop);
+            if self.is_location_card_expanded {
+                self.is_emoji_picker_expanded = false;
+                self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
+                self.view.view(cx, ids!(desktop_emoji_picker_popup)).set_visible(cx, false);
+            }
             self.redraw(cx);
         }
 
         // Handle the emoji picker button being clicked.
-        if self.button(cx, ids!(emoji_picker_button)).clicked(actions) {
+        if self.button(cx, ids!(emoji_picker_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_picker_button)).clicked(actions)
+        {
             self.is_emoji_picker_expanded = !self.is_emoji_picker_expanded;
-            self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, self.is_emoji_picker_expanded);
+            self.view
+                .view(cx, ids!(emoji_picker_popup))
+                .set_visible(cx, self.is_emoji_picker_expanded && !is_desktop);
+            self.view
+                .view(cx, ids!(desktop_emoji_picker_popup))
+                .set_visible(cx, self.is_emoji_picker_expanded && is_desktop);
+            if self.is_emoji_picker_expanded {
+                self.is_location_card_expanded = false;
+                self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+                self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
+            }
             self.redraw(cx);
         }
 
         // Handle the add attachment button being clicked.
-        if self.button(cx, ids!(send_attachment_button)).clicked(actions) {
+        if self.button(cx, ids!(send_attachment_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_send_attachment_button)).clicked(actions)
+        {
             log!("Add attachment button clicked; opening file picker...");
+            self.is_emoji_picker_expanded = false;
+            self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_emoji_picker_popup)).set_visible(cx, false);
+            self.is_location_card_expanded = false;
+            self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
             self.open_file_picker(cx);
         }
 
-        if self.button(cx, ids!(bot_menu_button)).clicked(actions) {
+        if self.button(cx, ids!(bot_menu_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_bot_menu_button)).clicked(actions)
+        {
+            self.is_location_card_expanded = false;
+            self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
             let in_thread = scope
                 .props
                 .get::<RoomScreenProps>()
@@ -1441,26 +1813,90 @@ impl RoomInputBar {
             self.redraw(cx);
         }
 
+        if self.button(cx, ids!(at_mention_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_at_mention_button)).clicked(actions)
+        {
+            mentionable_text_input.open_mention_popup(cx, scope);
+            let text = mentionable_text_input.text();
+            self.enable_send_message_button(cx, !text.trim().is_empty());
+            if let Some(room_screen_props) = scope.props.get::<RoomScreenProps>() {
+                submit_async_request(MatrixRequest::SendTypingNotice {
+                    room_id: room_screen_props.timeline_kind.room_id().clone(),
+                    typing: !text.is_empty(),
+                });
+            }
+            self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input)).set_key_focus(cx);
+            self.redraw(cx);
+        }
+
         let Some(room_screen_props) = scope.props.get::<RoomScreenProps>() else {
             return;
         };
 
-        let picked_emoji = if self.button(cx, ids!(emoji_smile_button)).clicked(actions) {
+        let picked_emoji = if self.button(cx, ids!(emoji_smile_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_smile_button)).clicked(actions)
+        {
             Some("😀")
-        } else if self.button(cx, ids!(emoji_joy_button)).clicked(actions) {
+        } else if self.button(cx, ids!(emoji_joy_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_joy_button)).clicked(actions)
+        {
             Some("😂")
-        } else if self.button(cx, ids!(emoji_thumbsup_button)).clicked(actions) {
+        } else if self.button(cx, ids!(emoji_thumbsup_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_thumbsup_button)).clicked(actions)
+        {
             Some("👍")
-        } else if self.button(cx, ids!(emoji_heart_button)).clicked(actions) {
+        } else if self.button(cx, ids!(emoji_heart_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_heart_button)).clicked(actions)
+        {
             Some("❤️")
-        } else if self.button(cx, ids!(emoji_fire_button)).clicked(actions) {
+        } else if self.button(cx, ids!(emoji_fire_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_fire_button)).clicked(actions)
+        {
             Some("🔥")
-        } else if self.button(cx, ids!(emoji_party_button)).clicked(actions) {
+        } else if self.button(cx, ids!(emoji_party_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_party_button)).clicked(actions)
+        {
             Some("🎉")
-        } else if self.button(cx, ids!(emoji_think_button)).clicked(actions) {
+        } else if self.button(cx, ids!(emoji_think_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_think_button)).clicked(actions)
+        {
             Some("🤔")
-        } else if self.button(cx, ids!(emoji_clap_button)).clicked(actions) {
+        } else if self.button(cx, ids!(emoji_clap_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_clap_button)).clicked(actions)
+        {
             Some("👏")
+        } else if self.button(cx, ids!(emoji_grin_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_grin_button)).clicked(actions)
+        {
+            Some("😁")
+        } else if self.button(cx, ids!(emoji_sob_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_sob_button)).clicked(actions)
+        {
+            Some("😭")
+        } else if self.button(cx, ids!(emoji_eyes_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_eyes_button)).clicked(actions)
+        {
+            Some("👀")
+        } else if self.button(cx, ids!(emoji_pray_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_pray_button)).clicked(actions)
+        {
+            Some("🙏")
+        } else if self.button(cx, ids!(emoji_ok_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_ok_button)).clicked(actions)
+        {
+            Some("👌")
+        } else if self.button(cx, ids!(emoji_rocket_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_rocket_button)).clicked(actions)
+        {
+            Some("🚀")
+        } else if self.button(cx, ids!(emoji_coffee_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_coffee_button)).clicked(actions)
+        {
+            Some("☕")
+        } else if self.button(cx, ids!(emoji_wave_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_emoji_wave_button)).clicked(actions)
+        {
+            Some("👋")
         } else {
             None
         };
@@ -1476,12 +1912,21 @@ impl RoomInputBar {
             });
             self.is_emoji_picker_expanded = false;
             self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_emoji_picker_popup)).set_visible(cx, false);
             self.text_input(cx, ids!(input_bar.input_row.mentionable_text_input.text_input)).set_key_focus(cx);
             self.redraw(cx);
         }
 
         // Handle the translate button being clicked — toggle language selector popup.
-        if self.button(cx, ids!(translate_button)).clicked(actions) {
+        if self.button(cx, ids!(translate_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_translate_button)).clicked(actions)
+        {
+            self.is_emoji_picker_expanded = false;
+            self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_emoji_picker_popup)).set_visible(cx, false);
+            self.is_location_card_expanded = false;
+            self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
             if self.translation_active {
                 // Turn off translation
                 self.translation_active = false;
@@ -1495,7 +1940,15 @@ impl RoomInputBar {
             } else {
                 self.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
                 self.is_lang_popup_visible = false;
-                let button_rect = self.button(cx, ids!(translate_button)).area().clipped_rect(cx);
+                let button_area = if is_desktop {
+                    self.button(cx, ids!(desktop_translate_button)).area()
+                } else {
+                    self.button(cx, ids!(translate_button)).area()
+                };
+                if !button_area.is_valid(cx) {
+                    return;
+                }
+                let button_rect = button_area.clipped_rect(cx);
                 if button_rect.size.x > 0.0 {
                     cx.widget_action(
                         room_screen_props.room_screen_widget_uid,
@@ -1533,10 +1986,23 @@ impl RoomInputBar {
         }
 
         // Handle the location card being clicked.
-        if self.button(cx, ids!(location_card_button)).clicked(actions) {
+        if self.button(cx, ids!(more_file_card_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_more_file_button)).clicked(actions)
+        {
+            self.is_location_card_expanded = false;
+            self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
+            self.open_file_picker(cx);
+            self.redraw(cx);
+        }
+
+        if self.button(cx, ids!(location_card_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_location_card_button)).clicked(actions)
+        {
             log!("Location card clicked; requesting current location...");
             self.is_location_card_expanded = false;
             self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
             if let Err(_e) = init_location_subscriber(cx) {
                 error!("Failed to initialize location subscriber");
                 enqueue_popup_notification(
@@ -1549,7 +2015,12 @@ impl RoomInputBar {
             self.redraw(cx);
         }
 
-        if self.button(cx, ids!(threads_card_button)).clicked(actions) {
+        if self.button(cx, ids!(threads_card_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_threads_card_button)).clicked(actions)
+        {
+            self.is_location_card_expanded = false;
+            self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
             cx.widget_action(
                 room_screen_props.room_screen_widget_uid,
                 MessageAction::ShowThreadsPane,
@@ -1557,7 +2028,13 @@ impl RoomInputBar {
             self.redraw(cx);
         }
 
-        if self.button(cx, ids!(room_info_card_button)).clicked(actions) {
+        if self.button(cx, ids!(room_info_card_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_room_info_card_button)).clicked(actions)
+            || self.button(cx, ids!(desktop_room_info_button)).clicked(actions)
+        {
+            self.is_location_card_expanded = false;
+            self.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+            self.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
             cx.widget_action(
                 room_screen_props.room_screen_widget_uid,
                 MessageAction::ShowRoomInfoPane,
@@ -2197,8 +2674,10 @@ impl RoomInputBarRef {
         inner.enable_send_message_button(cx, !is_text_input_empty);
         inner.is_location_card_expanded = false;
         inner.view.view(cx, ids!(more_actions_popup)).set_visible(cx, false);
+        inner.view.view(cx, ids!(desktop_more_actions_popup)).set_visible(cx, false);
         inner.is_emoji_picker_expanded = false;
         inner.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, false);
+        inner.view.view(cx, ids!(desktop_emoji_picker_popup)).set_visible(cx, false);
         inner.is_lang_popup_visible = false;
         inner.view.view(cx, ids!(translation_lang_wrapper)).set_visible(cx, false);
 

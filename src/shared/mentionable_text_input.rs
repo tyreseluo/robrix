@@ -1800,6 +1800,29 @@ impl MentionableTextInput {
         self.pending_draw_focus_restore = true;
     }
 
+    fn open_mention_popup(&mut self, cx: &mut Cx, scope: &mut Scope) {
+        let text_input_ref = self.cmd_text_input.text_input_ref();
+        let mut text = text_input_ref.text();
+        if text.chars().next_back().is_some_and(|c| !c.is_whitespace()) {
+            text.push(' ');
+        }
+        text.push('@');
+        self.set_input_text_preserving_mentions(cx, &text);
+        text_input_ref.set_cursor(
+            cx,
+            Cursor {
+                index: text.len(),
+                prefer_next_row: false,
+            },
+            false,
+        );
+        self.last_search_text = None;
+        self.update_user_list(cx, "", scope);
+        self.check_search_channel(cx, scope);
+        text_input_ref.set_key_focus(cx);
+        self.pending_draw_focus_restore = true;
+    }
+
     /// Update popup visibility and layout based on current state
     fn update_popup_visibility(&mut self, cx: &mut Cx, scope: &mut Scope, has_items: bool) {
         let popup = self.cmd_text_input.view(cx, ids!(popup));
@@ -2773,6 +2796,12 @@ impl MentionableTextInputRef {
     pub fn open_slash_command_popup(&self, cx: &mut Cx, scope: &mut Scope) {
         if let Some(mut inner) = self.borrow_mut() {
             inner.open_slash_command_popup(cx, scope);
+        }
+    }
+
+    pub fn open_mention_popup(&self, cx: &mut Cx, scope: &mut Scope) {
+        if let Some(mut inner) = self.borrow_mut() {
+            inner.open_mention_popup(cx, scope);
         }
     }
 
